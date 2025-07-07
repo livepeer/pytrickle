@@ -1,0 +1,18 @@
+# Core dependencies
+aiohttp>=3.8.0
+asyncio-mqtt>=0.11.0
+numpy>=1.21.0
+torch>=1.12.0
+Pillow>=9.0.0
+pydantic>=1.10.0
+
+# Video processing
+av>=10.0.0
+
+# Development and testing
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+pytest-mock>=3.10.0
+
+# Optional performance enhancements
+uvloop>=0.17.0; sys_platform != "win32" 
