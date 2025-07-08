@@ -10,8 +10,8 @@ import logging
 import queue
 from typing import Optional, Callable, AsyncGenerator, Dict, Any
 
-from .protocol import TrickleProtocol
-from .frames import VideoFrame, VideoOutput, InputFrame, OutputFrame
+from protocol import TrickleProtocol
+from frames import VideoFrame, VideoOutput, InputFrame, OutputFrame
 
 logger = logging.getLogger(__name__)
 

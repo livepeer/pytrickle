@@ -12,10 +12,10 @@ import json
 import threading
 from typing import AsyncGenerator, Optional, Callable
 
-from .frames import InputFrame, OutputFrame, AudioFrame, AudioOutput, DEFAULT_WIDTH, DEFAULT_HEIGHT
-from .media import run_subscribe, run_publish
-from .subscriber import TrickleSubscriber
-from .publisher import TricklePublisher
+from frames import InputFrame, OutputFrame, AudioFrame, AudioOutput, DEFAULT_WIDTH, DEFAULT_HEIGHT
+from media import run_subscribe, run_publish
+from subscriber import TrickleSubscriber
+from publisher import TricklePublisher
 
 logger = logging.getLogger(__name__)
 
