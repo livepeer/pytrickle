@@ -1,5 +1,5 @@
 """
-Setup script for trickle-app package.
+Setup script for pytrickle package.
 """
 
 from setuptools import setup, find_packages
@@ -14,7 +14,7 @@ with open("requirements.txt", "r", encoding="utf-8") as fh:
     requirements = [line.strip() for line in fh if line.strip() and not line.startswith("#")]
 
 setup(
-    name="trickle-app",
+    name="pytrickle",
     version="0.1.0",
     author="Trickle App Team",
     author_email="team@trickle-app.com",
@@ -51,11 +51,11 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "trickle-app-server=examples.http_server_example:main",
+            "pytrickle-server=examples.http_server_example:main",
         ],
     },
     include_package_data=True,
     package_data={
-        "trickle_app": ["*.py"],
+        "pytrickle": ["*.py"],
     },
 ) 

@@ -2,15 +2,15 @@
 """
 Simple Stream Processing Example
 
-This example demonstrates how to use trickle-app to process video streams
+This example demonstrates how to use pytrickle to process video streams
 with a simple frame transformation (adding a color tint).
 """
 
 import asyncio
 import logging
 import torch
-from trickle_app import SimpleTrickleClient
-from trickle_app.frames import VideoFrame, VideoOutput
+from pytrickle import SimpleTrickleClient
+from pytrickle.frames import VideoFrame, VideoOutput
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

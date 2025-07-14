@@ -47,11 +47,11 @@ run-workflow:
 
 # Development tools
 lint:
-	flake8 trickle_app/ examples/ tests/ --max-line-length=120
-	mypy trickle_app/ --ignore-missing-imports
+	flake8 pytrickle/ examples/ tests/ --max-line-length=120
+mypy pytrickle/ --ignore-missing-imports
 
 format:
-	black trickle_app/ examples/ tests/ scripts/ --line-length=120
+	black pytrickle/ examples/ tests/ scripts/ --line-length=120
 
 # Cleanup
 clean:

@@ -2,7 +2,7 @@
 """
 HTTP Server Example
 
-This example demonstrates how to run the trickle-app HTTP server with
+This example demonstrates how to run the pytrickle HTTP server with
 custom frame processing logic.
 """
 
@@ -10,8 +10,8 @@ import asyncio
 import logging
 import torch
 import json
-from trickle_app import create_app
-from trickle_app.frames import VideoFrame, VideoOutput
+from pytrickle import create_app
+from pytrickle.frames import VideoFrame, VideoOutput
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -90,7 +90,7 @@ async def main():
     # Create trickle app with custom frame processor
     app = create_app(frame_processor=custom_frame_processor)
     
-    logger.info("Starting trickle-app HTTP server on port 8080")
+    logger.info("Starting pytrickle HTTP server on port 8080")
     logger.info("Available effects: red_tint, blue_tint, green_tint, grayscale, invert, brightness, color_shift")
     logger.info("")
     logger.info("API Endpoints:")

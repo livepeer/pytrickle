@@ -53,8 +53,8 @@ make build
 ```python
 import asyncio
 import torch
-from trickle_app import SimpleTrickleClient
-from trickle_app.frames import VideoFrame, VideoOutput
+from pytrickle import SimpleTrickleClient
+from pytrickle.frames import VideoFrame, VideoOutput
 
 def red_tint_processor(frame: VideoFrame) -> VideoOutput:
     """Add a red tint to video frames."""
@@ -82,7 +82,7 @@ asyncio.run(main())
 ### HTTP Server
 
 ```python
-from trickle_app import create_app
+from pytrickle import create_app
 
 # Create app with custom frame processor
 app = create_app(frame_processor=your_processor_function)
@@ -173,7 +173,7 @@ GET /health
 #### TrickleClient
 
 ```python
-from trickle_app import TrickleClient
+from pytrickle import TrickleClient
 
 # Minimal setup
 client = TrickleClient(
@@ -201,7 +201,7 @@ await client.start("request_id")
 #### SimpleTrickleClient
 
 ```python
-from trickle_app import SimpleTrickleClient
+from pytrickle import SimpleTrickleClient
 
 client = SimpleTrickleClient(
     subscribe_url="http://localhost:3389/input",
@@ -219,7 +219,7 @@ client = SimpleTrickleClient(
 #### TrickleApp
 
 ```python
-from trickle_app import TrickleApp
+from pytrickle import TrickleApp
 
 app = TrickleApp(frame_processor=your_processor, port=8080)
 await app.run_forever()
@@ -244,7 +244,7 @@ pytest tests/test_integration.py -v -m integration
 cd ~/repos/http-trickle && make trickle-server addr=0.0.0.0:3389
 ```
 
-2. **Start the trickle-app server**:
+2. **Start the pytrickle server**:
 ```bash
 python examples/http_server_example.py
 ```
@@ -286,7 +286,7 @@ python scripts/test_workflow.py
 
 This script will automatically:
 - Start the trickle server
-- Start the trickle-app server  
+- Start the pytrickle server  
 - Start a video stream
 - Process the stream with various effects
 - Monitor the stream status
