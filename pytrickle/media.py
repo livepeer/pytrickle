@@ -266,9 +266,30 @@ def _encode_in(task_pipes, task_lock, frame_generator, sync_callback, get_metada
     # encode_av has a tendency to crash, so restart as necessary
     retry_count = 0
     last_retry_time = time.time()
+    
+    # Cache metadata from first successful run to preserve it across retries
+    cached_metadata = None
+    
+    def get_metadata_with_cache():
+        nonlocal cached_metadata
+        # If we have cached metadata, return it
+        if cached_metadata is not None:
+            logger.debug("Using cached metadata for encoder retry")
+            return cached_metadata
+        
+        # Otherwise, get metadata from original source
+        metadata = get_metadata()
+        
+        # Cache it if it's valid (not None and has expected structure)
+        if metadata is not None and isinstance(metadata, dict) and ('video' in metadata or 'audio' in metadata):
+            cached_metadata = metadata
+            logger.debug("Cached metadata for potential encoder retries")
+        
+        return metadata
+    
     while retry_count < MAX_ENCODER_RETRIES:
         try:
-            encode_av(frame_generator, sync_callback, get_metadata, **kwargs)
+            encode_av(frame_generator, sync_callback, get_metadata_with_cache, **kwargs)
             break  # clean exit
         except Exception as exc:
             current_time = time.time()

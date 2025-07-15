@@ -190,7 +190,10 @@ class TricklePublisher:
             
         try:
             logger.debug(f"Sending DELETE request to {self.url}")
-            await self.session.delete(self.url)
+            # Add timeout to prevent slow shutdown
+            await asyncio.wait_for(self.session.delete(self.url), timeout=2.0)
+        except asyncio.TimeoutError:
+            logger.debug(f"DELETE request to {self.url} timed out during shutdown")
         except Exception as e:
             logger.debug(f"Error sending trickle delete request: {e}")
 
@@ -249,7 +252,11 @@ class TricklePublisher:
                 self.next_writer = None
             if self.session:
                 try:
-                    await self._run_delete()
+                    # Run DELETE with timeout to prevent slow shutdown
+                    await asyncio.wait_for(self._run_delete(), timeout=3.0)
+                    await self.session.close()
+                except asyncio.TimeoutError:
+                    logger.debug(f"Publisher cleanup timed out for {self.url}, forcing close")
                     await self.session.close()
                 except Exception as e:
                     logger.debug(f"Error closing trickle publisher session: {e}")
