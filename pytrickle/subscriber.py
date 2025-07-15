@@ -8,21 +8,23 @@ with automatic reconnection and error handling.
 import asyncio
 import aiohttp
 import logging
-from typing import Optional
+from typing import Optional, Callable, Any, Union, Coroutine
 
 logger = logging.getLogger(__name__)
 
 class TrickleSubscriber:
     """Subscriber for receiving streaming data from trickle endpoints."""
     
-    def __init__(self, url: str, start_seq: int = -2, max_retries: int = 5):
+    def __init__(self, url: str, start_seq: int = -2, max_retries: int = 5, error_callback: Optional[Union[Callable[[str, Optional[Exception]], None], Callable[[str, Optional[Exception]], Coroutine[Any, Any, None]]]] = None):
         self.base_url = url
         self.idx = start_seq
         self.pending_get: Optional[aiohttp.ClientResponse] = None  # Pre-initialized GET request
         self.lock = asyncio.Lock()  # Lock to manage concurrent access
         self.session: Optional[aiohttp.ClientSession] = None
-        self.errored = False
+        self.error_event = asyncio.Event()  # Use Event instead of boolean
+        self.shutdown_event = asyncio.Event()  # Event to signal shutdown
         self.max_retries = max_retries
+        self.error_callback = error_callback
 
     async def __aenter__(self):
         """Enter context manager."""
@@ -51,6 +53,10 @@ class TrickleSubscriber:
         for attempt in range(self.max_retries):
             logger.info(f"Trickle sub preconnecting attempt: {attempt} URL: {url}")
             try:
+                if not self.session:
+                    logger.error("Session is not initialized")
+                    await self._notify_error("session_not_initialized", Exception("Session is not initialized"))
+                    return None
                 resp = await self.session.get(url, headers={'Connection': 'close'})
 
                 if resp.status == 200:
@@ -60,7 +66,7 @@ class TrickleSubscriber:
                 if resp.status == 404:
                     logger.info(f"Trickle sub got 404, terminating {url}")
                     resp.release()
-                    self.errored = True
+                    await self._notify_error("stream_not_found", Exception(f"404 error for {url}"))
                     return None
 
                 if resp.status == 470:
@@ -84,13 +90,13 @@ class TrickleSubscriber:
 
         # Max retries hit, so bail out
         logger.error(f"Trickle sub hit max retries, exiting {url}")
-        self.errored = True
+        await self._notify_error("max_retries_exceeded", Exception(f"Max retries exceeded for {url}"))
         return None
 
     async def next(self) -> Optional['Segment']:
         """Retrieve data from the current segment and set up the next segment concurrently."""
         async with self.lock:
-            if self.errored:
+            if self.error_event.is_set() or self.shutdown_event.is_set():
                 logger.info(f"Trickle subscription closed or errored for {self.base_url}")
                 return None
 
@@ -124,16 +130,28 @@ class TrickleSubscriber:
 
     async def _preconnect_next_segment(self):
         """Preconnect to the next segment in the background."""
+        # Check if we should stop before doing expensive operations
+        if self.error_event.is_set() or self.shutdown_event.is_set():
+            return
+            
         async with self.lock:
             if self.pending_get is not None:
+                return
+            if self.error_event.is_set() or self.shutdown_event.is_set():
                 return
             next_conn = await self.preconnect()
             if next_conn:
                 self.pending_get = next_conn
 
+    async def shutdown(self):
+        """Signal shutdown to stop background tasks."""
+        self.shutdown_event.set()
+        
     async def close(self):
         """Close the session when done."""
         logger.info(f"Closing {self.base_url}")
+        self.shutdown_event.set()  # Signal shutdown first
+        
         async with self.lock:
             if self.pending_get:
                 self.pending_get.close()
@@ -146,6 +164,18 @@ class TrickleSubscriber:
                 finally:
                     self.session = None
 
+    async def _notify_error(self, error_type: str, exception: Optional[Exception] = None):
+        """Notify parent component of critical errors."""
+        self.error_event.set()  # Set error event
+        if self.error_callback:
+            try:
+                if asyncio.iscoroutinefunction(self.error_callback):
+                    await self.error_callback(error_type, exception)
+                else:
+                    self.error_callback(error_type, exception)
+            except Exception as e:
+                logger.error(f"Error in error callback: {e}")
+
 class Segment:
     """Represents a single trickle segment."""
     
@@ -155,6 +185,8 @@ class Segment:
     def seq(self) -> int:
         """Extract the sequence number from the response headers."""
         seq_str = self.response.headers.get('Lp-Trickle-Seq')
+        if seq_str is None:
+            return -1
         try:
             seq = int(seq_str)
         except (TypeError, ValueError):
