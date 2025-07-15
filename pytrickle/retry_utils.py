@@ -217,24 +217,24 @@ def retry_sync(
 # Pre-configured retry configs for common scenarios
 NETWORK_RETRY_CONFIG = RetryConfig(
     max_retries=3,
-    initial_delay=0.5,
-    max_delay=30.0,
-    backoff_factor=2.0,
+    initial_delay=0.1,
+    max_delay=0.5,
+    backoff_factor=1.5,
     jitter=True
 )
 
 OPTIONAL_CHANNEL_RETRY_CONFIG = RetryConfig(
     max_retries=2,
-    initial_delay=1.0,
-    max_delay=5.0,
-    backoff_factor=1.5,
+    initial_delay=0.1,
+    max_delay=0.3,
+    backoff_factor=1.2,
     jitter=True
 )
 
 REQUIRED_CHANNEL_RETRY_CONFIG = RetryConfig(
-    max_retries=5,
-    initial_delay=0.5,
-    max_delay=60.0,
-    backoff_factor=2.0,
+    max_retries=3,
+    initial_delay=0.1,
+    max_delay=0.5,
+    backoff_factor=1.5,
     jitter=True
 ) 
