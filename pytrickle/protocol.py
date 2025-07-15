@@ -44,7 +44,9 @@ class TrickleProtocol:
         subscribe_url: str, 
         publish_url: str, 
         control_url: Optional[str] = None, 
-        events_url: Optional[str] = None, 
+        events_url: Optional[str] = None,
+        secondary_publish_url: Optional[str] = None,
+        secondary_publish_type: str = "text",
         width: Optional[int] = DEFAULT_WIDTH, 
         height: Optional[int] = DEFAULT_HEIGHT,
         error_callback: Optional[Union[Callable[[str, Optional[Exception]], None], Callable[[str, Optional[Exception]], Coroutine[Any, Any, None]]]] = None
@@ -53,6 +55,8 @@ class TrickleProtocol:
         self.publish_url = publish_url
         self.control_url = control_url
         self.events_url = events_url
+        self.secondary_publish_url = secondary_publish_url
+        self.secondary_publish_type = secondary_publish_type
         self.width = width
         self.height = height
         self.error_callback = error_callback
@@ -60,14 +64,17 @@ class TrickleProtocol:
         # Internal queues for frame processing
         self.subscribe_queue = queue.Queue()
         self.publish_queue = queue.Queue()
+        self.secondary_publish_queue = queue.Queue()
         
         # Control and events components
         self.control_subscriber: Optional[TrickleSubscriber] = None
         self.events_publisher: Optional[TricklePublisher] = None
+        self.secondary_publisher: Optional[TricklePublisher] = None
         
         # Background tasks
         self.subscribe_task: Optional[asyncio.Task] = None
         self.publish_task: Optional[asyncio.Task] = None
+        self.secondary_publish_task: Optional[asyncio.Task] = None
         
         # Error state tracking with Events
         self.error_event = asyncio.Event()
@@ -97,6 +104,7 @@ class TrickleProtocol:
         # Initialize queues
         self.subscribe_queue = queue.Queue()
         self.publish_queue = queue.Queue()
+        self.secondary_publish_queue = queue.Queue()
         
         # Metadata cache to pass video metadata from decoder to encoder
         metadata_cache = LastValueCache()
@@ -130,6 +138,31 @@ class TrickleProtocol:
         if self.events_url and self.events_url.strip():
             self.events_publisher = TricklePublisher(self.events_url, "application/json", error_callback=self._on_component_error)
             await self.events_publisher.start()
+            
+        # Initialize secondary publisher if URL provided
+        if self.secondary_publish_url and self.secondary_publish_url.strip():
+            # Determine mime type based on secondary publish type
+            if self.secondary_publish_type == "text":
+                mime_type = "application/json"
+            elif self.secondary_publish_type in ["video", "audio"]:
+                mime_type = "video/mp2t"  # Use same encoding as main publish channel
+            else:
+                logger.warning(f"Unknown secondary publish type: {self.secondary_publish_type}, defaulting to text")
+                mime_type = "application/json"
+            
+            self.secondary_publisher = TricklePublisher(self.secondary_publish_url, mime_type, error_callback=self._on_component_error)
+            await self.secondary_publisher.start()
+            
+            # For video/audio types, start a publish task similar to main channel
+            if self.secondary_publish_type in ["video", "audio"]:
+                self.secondary_publish_task = asyncio.create_task(
+                    run_publish(
+                        self.secondary_publish_url,
+                        self.secondary_publish_queue.get,
+                        metadata_cache.get,
+                        self.emit_monitoring_event
+                    )
+                )
 
     async def stop(self):
         """Stop the trickle protocol."""
@@ -141,6 +174,8 @@ class TrickleProtocol:
         # Send sentinel None values to stop the trickle tasks gracefully
         self.subscribe_queue.put(None)
         self.publish_queue.put(None)
+        if self.secondary_publish_task:
+            self.secondary_publish_queue.put(None)
 
         # Close control and events components
         if self.control_subscriber:
@@ -150,9 +185,16 @@ class TrickleProtocol:
         if self.events_publisher:
             await self.events_publisher.close()
             self.events_publisher = None
+            
+        if self.secondary_publisher:
+            await self.secondary_publisher.close()
+            self.secondary_publisher = None
 
         # Wait for tasks to complete with timeout
         tasks = [self.subscribe_task, self.publish_task]
+        if self.secondary_publish_task:
+            tasks.append(self.secondary_publish_task)
+            
         try:
             await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=10.0)
         except asyncio.TimeoutError:
@@ -162,6 +204,7 @@ class TrickleProtocol:
 
         self.subscribe_task = None
         self.publish_task = None
+        self.secondary_publish_task = None
 
     async def ingress_loop(self, done: asyncio.Event) -> AsyncGenerator[InputFrame, None]:
         """Generate frames from the ingress stream."""
@@ -204,6 +247,28 @@ class TrickleProtocol:
                 await segment.write(event_json.encode())
         except Exception as e:
             logger.error(f"Error reporting status: {e}")
+
+    async def send_secondary_text(self, data: dict):
+        """Send JSON text data to the secondary publish channel (text type only)."""
+        if not self.secondary_publisher or self.secondary_publish_type != "text":
+            return
+        try:
+            data_json = json.dumps(data)
+            async with await self.secondary_publisher.next() as segment:
+                await segment.write(data_json.encode())
+            logger.debug(f"Sent secondary text data: {data}")
+        except Exception as e:
+            logger.error(f"Error sending secondary text data: {e}")
+
+    async def send_secondary_frame(self, frame: OutputFrame):
+        """Send video/audio frame to the secondary publish channel (video/audio type only)."""
+        if not self.secondary_publish_queue or self.secondary_publish_type not in ["video", "audio"]:
+            return
+        try:
+            self.secondary_publish_queue.put(frame)
+            logger.debug(f"Queued secondary frame: {type(frame)}")
+        except Exception as e:
+            logger.error(f"Error sending secondary frame: {e}")
 
     async def control_loop(self, done: asyncio.Event) -> AsyncGenerator[dict, None]:
         """Generate control messages from the control stream."""

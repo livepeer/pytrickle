@@ -24,6 +24,8 @@ class TrickleClient:
         publish_url: str,
         control_url: Optional[str] = None,
         events_url: Optional[str] = None,
+        secondary_publish_url: Optional[str] = None,
+        secondary_publish_type: str = "text",
         width: int = 512,
         height: int = 512,
         frame_processor: Optional[Callable[[VideoFrame], VideoOutput]] = None,
@@ -34,6 +36,8 @@ class TrickleClient:
             publish_url=publish_url, 
             control_url=control_url,
             events_url=events_url,
+            secondary_publish_url=secondary_publish_url,
+            secondary_publish_type=secondary_publish_type,
             width=width,
             height=height,
             error_callback=self._on_protocol_error
@@ -205,6 +209,14 @@ class TrickleClient:
     async def emit_event(self, event: Dict[str, Any], event_type: str = "client_event"):
         """Emit a monitoring event."""
         await self.protocol.emit_monitoring_event(event, event_type)
+
+    async def send_secondary_text(self, data: Dict[str, Any]):
+        """Send JSON text data to the secondary publish channel."""
+        await self.protocol.send_secondary_text(data)
+
+    async def send_secondary_frame(self, frame: OutputFrame):
+        """Send video/audio frame to the secondary publish channel."""
+        await self.protocol.send_secondary_frame(frame)
 
     async def _on_protocol_error(self, error_type: str, exception: Optional[Exception] = None):
         """Handle errors from the protocol layer."""

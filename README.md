@@ -137,8 +137,40 @@ Example request (with optional control and events URLs):
 - `publish_url` (required): Destination URL for processed video stream  
 - `control_url` (optional): URL for receiving control messages
 - `events_url` (optional): URL for publishing monitoring events
+- `secondary_publish_url` (optional): URL for secondary publish channel
+- `secondary_publish_type` (optional): Type of secondary channel - "text" (default) or "video"
 - `gateway_request_id` (optional): Identifier for the request
 - `params` (optional): Processing parameters
+
+#### Secondary Publish Channel
+
+The secondary publish channel allows you to send additional data alongside the main video stream:
+
+**Text Type (JSON Messages):**
+```json
+{
+    "subscribe_url": "http://localhost:3389/sample",
+    "publish_url": "http://localhost:3389/sample-output",
+    "secondary_publish_url": "http://localhost:3389/sample-metadata",
+    "secondary_publish_type": "text",
+    "gateway_request_id": "example"
+}
+```
+
+**Video Type (Encoded Segments):**
+```json
+{
+    "subscribe_url": "http://localhost:3389/sample",
+    "publish_url": "http://localhost:3389/sample-output", 
+    "secondary_publish_url": "http://localhost:3389/sample-secondary-video",
+    "secondary_publish_type": "video",
+    "gateway_request_id": "example"
+}
+```
+
+Use cases for secondary channels:
+- **Text**: JSON metadata, processing statistics, frame analysis results
+- **Video**: Additional camera angles, processed overlays, thumbnail streams
 
 #### Update Parameters
 ```bash
@@ -194,6 +226,20 @@ client_with_control = TrickleClient(
     height=384,
     frame_processor=your_processor
 )
+
+# With secondary publish channel
+client_with_secondary = TrickleClient(
+    subscribe_url="http://localhost:3389/input",
+    publish_url="http://localhost:3389/output",
+    secondary_publish_url="http://localhost:3389/metadata",  # Secondary channel
+    secondary_publish_type="text",  # "text" for JSON, "video" for segments
+    width=704,
+    height=384,
+    frame_processor=your_processor
+)
+
+# Send data to secondary channel
+await client_with_secondary.send_secondary_text({"frame_count": 42, "status": "processed"})
 
 await client.start("request_id")
 ```

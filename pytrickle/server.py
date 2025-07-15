@@ -26,6 +26,8 @@ class StreamParams(BaseModel):
     publish_url: str = Field(..., description="Destination URL of the outgoing stream to publish")
     control_url: Optional[str] = Field(default=None, description="Optional URL for control messages via Trickle protocol")
     events_url: Optional[str] = Field(default=None, description="Optional URL for events via Trickle protocol")
+    secondary_publish_url: Optional[str] = Field(default=None, description="Optional URL for secondary publish channel")
+    secondary_publish_type: str = Field(default="text", description="Type of secondary publish channel: 'text' for JSON messages, 'video' for encoded segments")
     gateway_request_id: str = Field(default="", description="Gateway request identifier")
     params: Dict[str, Any] = Field(default_factory=dict, description="Processing parameters")
 
@@ -89,6 +91,8 @@ class TrickleApp:
                 publish_url=params.publish_url,
                 control_url=params.control_url,
                 events_url=params.events_url,
+                secondary_publish_url=params.secondary_publish_url,
+                secondary_publish_type=params.secondary_publish_type,
                 width=width,
                 height=height,
                 frame_processor=self.frame_processor
