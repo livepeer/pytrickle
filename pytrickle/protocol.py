@@ -10,12 +10,13 @@ import logging
 import queue
 import json
 import threading
-from typing import AsyncGenerator, Optional, Callable, Union, Coroutine, Any
+from typing import AsyncGenerator, Optional, Callable
 
 from .frames import InputFrame, OutputFrame, AudioFrame, AudioOutput, DEFAULT_WIDTH, DEFAULT_HEIGHT
 from .media import run_subscribe, run_publish
 from .subscriber import TrickleSubscriber
 from .publisher import TricklePublisher
+from . import ErrorCallback
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,7 @@ class TrickleProtocol:
         events_url: Optional[str] = None, 
         width: Optional[int] = DEFAULT_WIDTH, 
         height: Optional[int] = DEFAULT_HEIGHT,
-        error_callback: Optional[Union[Callable[[str, Optional[Exception]], None], Callable[[str, Optional[Exception]], Coroutine[Any, Any, None]]]] = None
+        error_callback: Optional[ErrorCallback] = None
     ):
         self.subscribe_url = subscribe_url
         self.publish_url = publish_url

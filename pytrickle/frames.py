@@ -95,7 +95,11 @@ class AudioFrame(InputFrame):
 
 class OutputFrame(ABC):
     """Base class for output frames."""
-    pass
+    
+    @property
+    def timestamp(self):
+        """Get the timestamp of this output frame."""
+        raise NotImplementedError("Subclasses must implement timestamp property")
 
 class VideoOutput(OutputFrame):
     """Represents processed video output."""
@@ -135,4 +139,11 @@ class AudioOutput(OutputFrame):
     
     def __init__(self, frames: List[AudioFrame], request_id: str = ''):
         self.frames = frames
-        self.request_id = request_id 
+        self.request_id = request_id
+    
+    @property
+    def timestamp(self):
+        """Get the timestamp of the first audio frame, or 0 if no frames."""
+        if self.frames:
+            return self.frames[0].timestamp
+        return 0 

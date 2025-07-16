@@ -9,23 +9,24 @@ import asyncio
 import aiohttp
 import logging
 from contextlib import asynccontextmanager
-from typing import Optional, Callable, Union, Coroutine, Any
+from typing import Optional, Callable
+
+from . import ErrorCallback
+from .base import TrickleComponent
 
 logger = logging.getLogger(__name__)
 
-class TricklePublisher:
+class TricklePublisher(TrickleComponent):
     """Publisher for streaming data to trickle endpoints."""
     
-    def __init__(self, url: str, mime_type: str, error_callback: Optional[Union[Callable[[str, Optional[Exception]], None], Callable[[str, Optional[Exception]], Coroutine[Any, Any, None]]]] = None):
+    def __init__(self, url: str, mime_type: str, error_callback: Optional[ErrorCallback] = None):
+        super().__init__(error_callback)
         self.url = url
         self.mime_type = mime_type
         self.idx = 0  # Start index for POSTs
         self.next_writer: Optional[asyncio.Queue] = None
         self.lock = asyncio.Lock()  # Lock to manage concurrent access
         self.session: Optional[aiohttp.ClientSession] = None
-        self.error_event = asyncio.Event()  # Use Event instead of boolean
-        self.shutdown_event = asyncio.Event()  # Event to signal shutdown
-        self.error_callback = error_callback
 
     async def __aenter__(self):
         """Enter context manager."""
@@ -102,7 +103,7 @@ class TricklePublisher:
     async def next(self):
         """Start or retrieve a pending POST request and preconnect for the next segment."""
         async with self.lock:
-            if self.error_event.is_set() or self.shutdown_event.is_set():
+            if self._should_stop():
                 logger.info(f"Publisher is in error or shutdown state, cannot get next segment")
                 return SegmentWriter(None)
                 
@@ -121,24 +122,20 @@ class TricklePublisher:
     async def _preconnect_next_segment(self):
         """Preconnect to the next POST in the background."""
         # Check if we should stop before doing expensive operations
-        if self.error_event.is_set() or self.shutdown_event.is_set():
+        if self._should_stop():
             return
             
         logger.info(f"Setting up next connection for {self.stream_idx()}")
         async with self.lock:
             if self.next_writer is not None:
                 return
-            if self.error_event.is_set() or self.shutdown_event.is_set():
+            if self._should_stop():
                 return
             self.idx += 1  # Increment the index for the next POST
             next_writer = await self.preconnect()
             if next_writer:
                 self.next_writer = next_writer
 
-    async def shutdown(self):
-        """Signal shutdown to stop background tasks."""
-        self.shutdown_event.set()
-        
     async def close(self):
         """Close the session when done."""
         logger.info(f"Closing {self.url}")
@@ -157,18 +154,6 @@ class TricklePublisher:
                     logger.error(f"Error closing trickle publisher", exc_info=True)
                 finally:
                     self.session = None
-
-    async def _notify_error(self, error_type: str, exception: Optional[Exception] = None):
-        """Notify parent component of critical errors."""
-        self.error_event.set()  # Set error event
-        if self.error_callback:
-            try:
-                if asyncio.iscoroutinefunction(self.error_callback):
-                    await self.error_callback(error_type, exception)
-                else:
-                    self.error_callback(error_type, exception)
-            except Exception as e:
-                logger.error(f"Error in error callback: {e}")
 
 class SegmentWriter:
     """Writer for individual trickle segments."""

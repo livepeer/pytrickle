@@ -8,10 +8,11 @@ processing video frames, and handling stream lifecycle.
 import asyncio
 import logging
 import queue
-from typing import Optional, Callable, AsyncGenerator, Dict, Any, Union, Coroutine
+from typing import Optional, Callable, AsyncGenerator, Dict, Any
 
 from .protocol import TrickleProtocol
 from .frames import VideoFrame, VideoOutput, InputFrame, OutputFrame
+from . import ErrorCallback
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ class TrickleClient:
         width: int = 512,
         height: int = 512,
         frame_processor: Optional[Callable[[VideoFrame], VideoOutput]] = None,
-        error_callback: Optional[Union[Callable[[str, Optional[Exception]], None], Callable[[str, Optional[Exception]], Coroutine[Any, Any, None]]]] = None
+        error_callback: Optional[ErrorCallback] = None
     ):
         self.protocol = TrickleProtocol(
             subscribe_url=subscribe_url,
@@ -191,7 +192,7 @@ class TrickleClient:
         """Send output frame to the egress queue."""
         try:
             self.output_queue.put_nowait(output)
-            logger.debug(f"Queued output frame: {type(output)} timestamp={getattr(output, 'timestamp', 'unknown')}")
+            logger.debug(f"Queued output frame: {type(output)} timestamp={output.timestamp}")
         except queue.Full:
             logger.warning("Output queue is full, dropping frame")
         except Exception as e:
