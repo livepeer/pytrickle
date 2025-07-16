@@ -15,7 +15,7 @@ with open("requirements.txt", "r", encoding="utf-8") as fh:
 
 setup(
     name="pytrickle",
-    version="0.1.0",
+    version="0.1.1",
     author="Trickle App Team",
     author_email="team@trickle-app.com",
     description="High-performance Python package for real-time video streaming over trickle protocol",
