@@ -8,20 +8,23 @@ with automatic reconnection and error handling.
 import asyncio
 import aiohttp
 import logging
-from typing import Optional
+from typing import Optional, Callable, Any
+
+from . import ErrorCallback
+from .base import TrickleComponent
 
 logger = logging.getLogger(__name__)
 
-class TrickleSubscriber:
+class TrickleSubscriber(TrickleComponent):
     """Subscriber for receiving streaming data from trickle endpoints."""
     
-    def __init__(self, url: str, start_seq: int = -2, max_retries: int = 5):
+    def __init__(self, url: str, start_seq: int = -2, max_retries: int = 5, error_callback: Optional[ErrorCallback] = None):
+        super().__init__(error_callback)
         self.base_url = url
         self.idx = start_seq
         self.pending_get: Optional[aiohttp.ClientResponse] = None  # Pre-initialized GET request
         self.lock = asyncio.Lock()  # Lock to manage concurrent access
         self.session: Optional[aiohttp.ClientSession] = None
-        self.errored = False
         self.max_retries = max_retries
 
     async def __aenter__(self):
@@ -51,6 +54,10 @@ class TrickleSubscriber:
         for attempt in range(self.max_retries):
             logger.info(f"Trickle sub preconnecting attempt: {attempt} URL: {url}")
             try:
+                if not self.session:
+                    logger.error("Session is not initialized")
+                    await self._notify_error("session_not_initialized", Exception("Session is not initialized"))
+                    return None
                 resp = await self.session.get(url, headers={'Connection': 'close'})
 
                 if resp.status == 200:
@@ -60,7 +67,7 @@ class TrickleSubscriber:
                 if resp.status == 404:
                     logger.info(f"Trickle sub got 404, terminating {url}")
                     resp.release()
-                    self.errored = True
+                    await self._notify_error("stream_not_found", Exception(f"404 error for {url}"))
                     return None
 
                 if resp.status == 470:
@@ -84,13 +91,13 @@ class TrickleSubscriber:
 
         # Max retries hit, so bail out
         logger.error(f"Trickle sub hit max retries, exiting {url}")
-        self.errored = True
+        await self._notify_error("max_retries_exceeded", Exception(f"Max retries exceeded for {url}"))
         return None
 
     async def next(self) -> Optional['Segment']:
         """Retrieve data from the current segment and set up the next segment concurrently."""
         async with self.lock:
-            if self.errored:
+            if self._should_stop():
                 logger.info(f"Trickle subscription closed or errored for {self.base_url}")
                 return None
 
@@ -124,8 +131,14 @@ class TrickleSubscriber:
 
     async def _preconnect_next_segment(self):
         """Preconnect to the next segment in the background."""
+        # Check if we should stop before doing expensive operations
+        if self._should_stop():
+            return
+            
         async with self.lock:
             if self.pending_get is not None:
+                return
+            if self._should_stop():
                 return
             next_conn = await self.preconnect()
             if next_conn:
@@ -134,6 +147,8 @@ class TrickleSubscriber:
     async def close(self):
         """Close the session when done."""
         logger.info(f"Closing {self.base_url}")
+        self.shutdown_event.set()  # Signal shutdown first
+        
         async with self.lock:
             if self.pending_get:
                 self.pending_get.close()
@@ -155,6 +170,8 @@ class Segment:
     def seq(self) -> int:
         """Extract the sequence number from the response headers."""
         seq_str = self.response.headers.get('Lp-Trickle-Seq')
+        if seq_str is None:
+            return -1
         try:
             seq = int(seq_str)
         except (TypeError, ValueError):

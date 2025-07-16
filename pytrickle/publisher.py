@@ -9,14 +9,18 @@ import asyncio
 import aiohttp
 import logging
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Optional, Callable
+
+from . import ErrorCallback
+from .base import TrickleComponent
 
 logger = logging.getLogger(__name__)
 
-class TricklePublisher:
+class TricklePublisher(TrickleComponent):
     """Publisher for streaming data to trickle endpoints."""
     
-    def __init__(self, url: str, mime_type: str):
+    def __init__(self, url: str, mime_type: str, error_callback: Optional[ErrorCallback] = None):
+        super().__init__(error_callback)
         self.url = url
         self.mime_type = mime_type
         self.idx = 0  # Start index for POSTs
@@ -57,6 +61,7 @@ class TricklePublisher:
             return queue
         except aiohttp.ClientError as e:
             logger.error(f"Failed to complete POST for {url}: {e}")
+            await self._notify_error("connection_failed", e)
             return None
 
     async def _run_post(self, url: str, queue: asyncio.Queue):
@@ -74,8 +79,10 @@ class TricklePublisher:
             if resp.status != 200:
                 body = await resp.text()
                 logger.error(f"Trickle POST failed {url}, status code: {resp.status}, msg: {body}")
+                await self._notify_error("post_failed", Exception(f"POST failed with status {resp.status}: {body}"))
         except Exception as e:
             logger.error(f"Trickle POST exception {url} - {e}")
+            await self._notify_error("post_exception", e)
 
     async def _run_delete(self):
         """Send DELETE request to cleanup the stream."""
@@ -96,6 +103,10 @@ class TricklePublisher:
     async def next(self):
         """Start or retrieve a pending POST request and preconnect for the next segment."""
         async with self.lock:
+            if self._should_stop():
+                logger.info(f"Publisher is in error or shutdown state, cannot get next segment")
+                return SegmentWriter(None)
+                
             if self.next_writer is None:
                 logger.info(f"No pending connection, preconnecting {self.stream_idx()}...")
                 self.next_writer = await self.preconnect()
@@ -110,9 +121,15 @@ class TricklePublisher:
 
     async def _preconnect_next_segment(self):
         """Preconnect to the next POST in the background."""
+        # Check if we should stop before doing expensive operations
+        if self._should_stop():
+            return
+            
         logger.info(f"Setting up next connection for {self.stream_idx()}")
         async with self.lock:
             if self.next_writer is not None:
+                return
+            if self._should_stop():
                 return
             self.idx += 1  # Increment the index for the next POST
             next_writer = await self.preconnect()
@@ -122,6 +139,8 @@ class TricklePublisher:
     async def close(self):
         """Close the session when done."""
         logger.info(f"Closing {self.url}")
+        self.shutdown_event.set()  # Signal shutdown first
+        
         async with self.lock:
             if self.next_writer:
                 segment = SegmentWriter(self.next_writer)

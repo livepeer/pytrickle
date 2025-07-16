@@ -16,6 +16,7 @@ from .frames import InputFrame, OutputFrame, AudioFrame, AudioOutput, DEFAULT_WI
 from .media import run_subscribe, run_publish
 from .subscriber import TrickleSubscriber
 from .publisher import TricklePublisher
+from . import ErrorCallback
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,8 @@ class TrickleProtocol:
         control_url: Optional[str] = None, 
         events_url: Optional[str] = None, 
         width: Optional[int] = DEFAULT_WIDTH, 
-        height: Optional[int] = DEFAULT_HEIGHT
+        height: Optional[int] = DEFAULT_HEIGHT,
+        error_callback: Optional[ErrorCallback] = None
     ):
         self.subscribe_url = subscribe_url
         self.publish_url = publish_url
@@ -54,6 +56,7 @@ class TrickleProtocol:
         self.events_url = events_url
         self.width = width
         self.height = height
+        self.error_callback = error_callback
         
         # Internal queues for frame processing
         self.subscribe_queue = queue.Queue()
@@ -66,6 +69,27 @@ class TrickleProtocol:
         # Background tasks
         self.subscribe_task: Optional[asyncio.Task] = None
         self.publish_task: Optional[asyncio.Task] = None
+        
+        # Error state tracking with Events
+        self.error_event = asyncio.Event()
+        self.shutdown_event = asyncio.Event()
+
+    async def _notify_error(self, error_type: str, exception: Optional[Exception] = None):
+        """Notify parent component of critical errors."""
+        self.error_event.set()  # Set error event
+        if self.error_callback:
+            try:
+                if asyncio.iscoroutinefunction(self.error_callback):
+                    await self.error_callback(error_type, exception)
+                else:
+                    self.error_callback(error_type, exception)
+            except Exception as e:
+                logger.error(f"Error in error callback: {e}")
+
+    async def _on_component_error(self, error_type: str, exception: Optional[Exception] = None):
+        """Handle errors from subscriber/publisher components."""
+        logger.error(f"Component error: {error_type} - {exception}")
+        await self._notify_error(error_type, exception)
 
     async def start(self):
         """Start the trickle protocol."""
@@ -85,8 +109,8 @@ class TrickleProtocol:
                 self.subscribe_queue.put, 
                 metadata_cache.put, 
                 self.emit_monitoring_event, 
-                self.width, 
-                self.height
+                self.width or DEFAULT_WIDTH, 
+                self.height or DEFAULT_HEIGHT
             )
         )
         
@@ -101,11 +125,11 @@ class TrickleProtocol:
         
         # Initialize control subscriber if URL provided
         if self.control_url and self.control_url.strip():
-            self.control_subscriber = TrickleSubscriber(self.control_url)
+            self.control_subscriber = TrickleSubscriber(self.control_url, error_callback=self._on_component_error)
             
         # Initialize events publisher if URL provided
         if self.events_url and self.events_url.strip():
-            self.events_publisher = TricklePublisher(self.events_url, "application/json")
+            self.events_publisher = TricklePublisher(self.events_url, "application/json", error_callback=self._on_component_error)
             await self.events_publisher.start()
 
     async def stop(self):
@@ -198,6 +222,8 @@ class TrickleProtocol:
                     return
 
                 params = await segment.read()
+                if not params:
+                    continue
                 data = json.loads(params)
                 if data == keepalive_message:
                     # Ignore periodic keepalive messages
