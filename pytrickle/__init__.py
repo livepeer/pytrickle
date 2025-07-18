@@ -36,5 +36,4 @@ __all__ = [
     "TrickleSubscriber",
     "tensor_to_av_frame",
     "ErrorCallback",
-    "tensor_to_av_audio_frame",
 ] 
