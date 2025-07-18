@@ -93,6 +93,19 @@ class AudioFrame(InputFrame):
         """Create AudioFrame from av audio frame."""
         return cls(av_frame)
     
+    @classmethod
+    def from_tensor(cls, tensor: torch.Tensor, sample_rate: int = 48000, layout: str = 'mono', timestamp: int = 0) -> 'AudioFrame':
+        """Create AudioFrame from tensor with audio parameters."""
+        from .tensors import tensor_to_av_audio_frame
+        av_frame = tensor_to_av_audio_frame(tensor, sample_rate, layout)
+        av_frame.pts = timestamp
+        av_frame.time_base = Fraction(1, sample_rate)
+        return cls(av_frame)
+    
+    def to_tensor(self) -> torch.Tensor:
+        """Convert audio samples to torch tensor."""
+        return torch.from_numpy(self.samples.copy())
+    
     def replace_samples(self, new_samples: np.ndarray) -> 'AudioFrame':
         """Create a new AudioFrame with different sample data."""
         # Create a mock av frame structure for the constructor
