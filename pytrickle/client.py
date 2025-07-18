@@ -8,10 +8,10 @@ processing video frames, and handling stream lifecycle.
 import asyncio
 import logging
 import queue
-from typing import Optional, Callable, AsyncGenerator, Dict, Any
+from typing import Optional, Callable, AsyncGenerator, Dict, Any, Union
 
 from .protocol import TrickleProtocol
-from .frames import VideoFrame, VideoOutput, InputFrame, OutputFrame
+from .frames import VideoFrame, VideoOutput, AudioFrame, AudioOutput, InputFrame, OutputFrame
 from . import ErrorCallback
 
 logger = logging.getLogger(__name__)
@@ -28,7 +28,7 @@ class TrickleClient:
         text_url: Optional[str] = None,
         width: int = 512,
         height: int = 512,
-        frame_processor: Optional[Callable[[VideoFrame], VideoOutput]] = None,
+        frame_processor: Optional[Callable[[Union[VideoFrame, AudioFrame]], Union[VideoOutput, AudioOutput]]] = None,
         error_callback: Optional[ErrorCallback] = None
     ):
         self.protocol = TrickleProtocol(
@@ -50,9 +50,12 @@ class TrickleClient:
         self.error_event = asyncio.Event()  # Use Event instead of boolean
         self.shutdown_event = asyncio.Event()  # Event to signal shutdown
         
-    def _default_frame_processor(self, frame: VideoFrame) -> VideoOutput:
+    def _default_frame_processor(self, frame: Union[VideoFrame, AudioFrame]) -> Union[VideoOutput, AudioOutput]:
         """Default frame processor that passes frames through unchanged."""
-        return VideoOutput(frame, self.request_id)
+        if isinstance(frame, VideoFrame):
+            return VideoOutput(frame, self.request_id)
+        elif isinstance(frame, AudioFrame):
+            return AudioOutput([frame], self.request_id)
     
     async def start(self, request_id: str = "default"):
         """Start the trickle client."""
@@ -117,8 +120,19 @@ class TrickleClient:
                         logger.debug(f"Sent processed frame {frame_count} to egress")
                     else:
                         logger.warning(f"Frame processor returned None for frame {frame_count}")
+                elif isinstance(frame, AudioFrame):
+                    logger.debug(f"Processing audio frame: {frame.samples.shape}")
+                    
+                    # Process the audio frame
+                    output = self.frame_processor(frame)
+                    if output:
+                        # Send to egress
+                        await self._send_output(output)
+                        logger.debug(f"Sent processed audio frame to egress")
+                    else:
+                        logger.warning(f"Frame processor returned None for audio frame")
                 else:
-                    logger.debug(f"Received non-video frame: {type(frame)}")
+                    logger.debug(f"Received unknown frame type: {type(frame)}")
         except Exception as e:
             logger.error(f"Error in ingress loop: {e}")
             # Set error state and stop event to trigger other loops to stop
@@ -239,7 +253,7 @@ class SimpleTrickleClient:
     
     async def process_stream(
         self, 
-        frame_processor: Callable[[VideoFrame], VideoOutput],
+        frame_processor: Callable[[Union[VideoFrame, AudioFrame]], Union[VideoOutput, AudioOutput]],
         request_id: str = "simple_client",
         width: int = 512,
         height: int = 512
