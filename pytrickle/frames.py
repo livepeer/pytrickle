@@ -96,6 +96,7 @@ class AudioFrame(InputFrame):
     @classmethod
     def to_av_audio(cls, frame) -> av.AudioFrame:
         """Convert AudioFrame to av.AudioFrame."""
+        
         return av.AudioFrame.from_ndarray(
             frame.samples,
             format=frame.format,
