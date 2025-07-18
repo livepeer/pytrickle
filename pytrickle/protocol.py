@@ -195,7 +195,7 @@ class TrickleProtocol:
             # Handle audio frames (pass through for now)
             if isinstance(frame, AudioFrame):
                 self.publish_queue.put(AudioOutput([frame], ""))
-                continue
+                #continue
             
             yield frame
 
