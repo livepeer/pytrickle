@@ -94,15 +94,15 @@ class AudioFrame(InputFrame):
         return cls(av_frame)
 
     @classmethod
-    def to_av_audio(cls) -> av.AudioFrame:
+    def to_av_audio(cls, frame) -> av.AudioFrame:
         """Convert AudioFrame to av.AudioFrame."""
         return av.AudioFrame.from_ndarray(
-            cls.samples,
-            format=cls.format,
-            layout=cls.layout,
-            sample_rate=cls.rate,
-            pts=cls.timestamp,
-            time_base=cls.time_base
+            frame.samples,
+            format=frame.format,
+            layout=frame.layout,
+            sample_rate=frame.rate,
+            pts=frame.timestamp,
+            time_base=frame.time_base
         )
         
     def replace_samples(self, new_samples: np.ndarray) -> 'AudioFrame':
