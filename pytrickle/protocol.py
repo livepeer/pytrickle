@@ -2,7 +2,10 @@
 Trickle Protocol implementation for video streaming.
 
 Provides a high-level interface for trickle-based video streaming,
-integrating subscription, publishing, and media processing.
+integrating subscription, publish            # Handle audio frames (now yield them for processing)
+            if isinstance(frame, AudioFrame):
+                yield frame
+                continue and media processing.
 """
 
 import asyncio
@@ -193,8 +196,8 @@ class TrickleProtocol:
                 break
             
             # Handle audio frames (pass through for now)
-            if isinstance(frame, AudioFrame):
-                self.publish_queue.put(AudioOutput([frame], ""))
+            #if isinstance(frame, AudioFrame):
+                #self.publish_queue.put(AudioOutput([frame], ""))
                 #continue
             
             yield frame

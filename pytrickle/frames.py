@@ -92,6 +92,32 @@ class AudioFrame(InputFrame):
     def from_av_audio(cls, av_frame) -> 'AudioFrame':
         """Create AudioFrame from av audio frame."""
         return cls(av_frame)
+    
+    def replace_samples(self, new_samples: np.ndarray) -> 'AudioFrame':
+        """Create a new AudioFrame with different sample data."""
+        # Create a mock av frame structure for the constructor
+        class MockAVFrame:
+            def __init__(self, samples, format_name, rate, layout_name, pts, time_base, nb_samples):
+                self.pts = pts
+                self.time_base = time_base
+                self.samples = nb_samples
+                self.sample_rate = rate
+                self.format = type('MockFormat', (), {'name': format_name})()
+                self.layout = type('MockLayout', (), {'name': layout_name})()
+                self._samples = samples
+            
+            def to_ndarray(self):
+                return self._samples
+        
+        mock_frame = MockAVFrame(
+            new_samples, self.format, self.rate, self.layout, 
+            self.timestamp, self.time_base, self.nb_samples
+        )
+        
+        new_audio_frame = AudioFrame(mock_frame)
+        new_audio_frame.log_timestamps = self.log_timestamps.copy()
+        new_audio_frame.side_data = self.side_data
+        return new_audio_frame
 
 class OutputFrame(ABC):
     """Base class for output frames."""
@@ -143,7 +169,10 @@ class AudioOutput(OutputFrame):
     
     @property
     def timestamp(self):
-        """Get the timestamp of the first audio frame, or 0 if no frames."""
-        if self.frames:
-            return self.frames[0].timestamp
-        return 0 
+        """Get timestamp from first frame if available."""
+        return self.frames[0].timestamp if self.frames else 0
+    
+    @property
+    def time_base(self):
+        """Get time base from first frame if available."""
+        return self.frames[0].time_base if self.frames else Fraction(1, 1) 

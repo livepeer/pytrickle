@@ -11,7 +11,7 @@ import queue
 from typing import Optional, Callable, AsyncGenerator, Dict, Any
 
 from .protocol import TrickleProtocol
-from .frames import VideoFrame, VideoOutput, InputFrame, OutputFrame
+from .frames import VideoFrame, VideoOutput, AudioFrame, AudioOutput, InputFrame, OutputFrame
 from . import ErrorCallback
 
 logger = logging.getLogger(__name__)
@@ -29,7 +29,8 @@ class TrickleClient:
         width: int = 512,
         height: int = 512,
         frame_processor: Optional[Callable[[VideoFrame], VideoOutput]] = None,
-        error_callback: Optional[ErrorCallback] = None
+        error_callback: Optional[ErrorCallback] = None,
+        audio_processor: Optional[Callable[[AudioFrame], AudioOutput]] = None
     ):
         self.protocol = TrickleProtocol(
             subscribe_url=subscribe_url,
@@ -42,6 +43,7 @@ class TrickleClient:
             error_callback=self._on_protocol_error
         )
         self.frame_processor = frame_processor or self._default_frame_processor
+        self.audio_processor = audio_processor or self._default_audio_processor
         self.stop_event = asyncio.Event()
         self.running = False
         self.request_id = "default"
@@ -53,6 +55,10 @@ class TrickleClient:
     def _default_frame_processor(self, frame: VideoFrame) -> VideoOutput:
         """Default frame processor that passes frames through unchanged."""
         return VideoOutput(frame, self.request_id)
+    
+    def _default_audio_processor(self, frame: AudioFrame) -> AudioOutput:
+        """Default audio processor that passes frames through unchanged."""
+        return AudioOutput([frame], self.request_id)
     
     async def start(self, request_id: str = "default"):
         """Start the trickle client."""
@@ -99,6 +105,7 @@ class TrickleClient:
         """Process incoming frames."""
         try:
             frame_count = 0
+            audio_count = 0
             async for frame in self.protocol.ingress_loop(self.stop_event):
                 # Check for error state
                 if self.error_event.is_set() or self.stop_event.is_set():
@@ -117,8 +124,22 @@ class TrickleClient:
                         logger.debug(f"Sent processed frame {frame_count} to egress")
                     else:
                         logger.warning(f"Frame processor returned None for frame {frame_count}")
+                
+                elif isinstance(frame, AudioFrame):
+                    audio_count += 1
+                    logger.debug(f"Processing audio frame {audio_count}: {frame.nb_samples} samples")
+                    
+                    # Process the audio frame
+                    output = self.audio_processor(frame)
+                    if output:
+                        # Send to egress
+                        await self._send_output(output)
+                        logger.debug(f"Sent processed audio frame {audio_count} to egress")
+                    else:
+                        logger.warning(f"Audio processor returned None for frame {audio_count}")
+                
                 else:
-                    logger.debug(f"Received non-video frame: {type(frame)}")
+                    logger.debug(f"Received unknown frame type: {type(frame)}")
         except Exception as e:
             logger.error(f"Error in ingress loop: {e}")
             # Set error state and stop event to trigger other loops to stop
@@ -240,17 +261,19 @@ class SimpleTrickleClient:
     async def process_stream(
         self, 
         frame_processor: Callable[[VideoFrame], VideoOutput],
+        audio_processor: Optional[Callable[[AudioFrame], AudioOutput]] = None,
         request_id: str = "simple_client",
         width: int = 512,
         height: int = 512
     ):
-        """Process a stream with the given frame processor."""
+        """Process a stream with the given frame and audio processors."""
         self.client = TrickleClient(
             subscribe_url=self.subscribe_url,
             publish_url=self.publish_url,
             width=width,
             height=height,
-            frame_processor=frame_processor
+            frame_processor=frame_processor,
+            audio_processor=audio_processor
         )
         
         try:
