@@ -95,8 +95,9 @@ def decode_av(pipe_input, frame_callback: Callable, put_metadata: Callable, targ
                     aframe = cast(av.AudioFrame, aframe)
                     if aframe.pts is None:
                         continue
-
+                    
                     avframe = AudioFrame.from_av_audio(aframe)
+                    #print(f"Audio frame pts: {avframe.timestamp}, sample_rate: {avframe.rate}")
                     avframe.log_timestamps["frame_init"] = time.time()
                     frame_callback(avframe)
                     continue

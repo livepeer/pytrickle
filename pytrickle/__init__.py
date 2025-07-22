@@ -16,7 +16,7 @@ from .client import TrickleClient, SimpleTrickleClient
 from .server import TrickleApp, create_app
 from .protocol import TrickleProtocol
 from .frames import VideoFrame, AudioFrame, VideoOutput, AudioOutput
-from .tensors import tensor_to_av_frame, tensor_to_av_audio_frame
+from .tensors import tensor_to_av_frame
 from .publisher import TricklePublisher
 from .subscriber import TrickleSubscriber
 
