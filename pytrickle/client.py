@@ -1,57 +1,52 @@
 """
-Trickle Client for easy interaction with trickle streams.
+Trickle Client for processing video streams.
 
-Provides a high-level client interface for connecting to trickle streams,
-processing video frames, and handling stream lifecycle.
+Coordinates ingress, egress, and control loops with proper shutdown handling
+to ensure all components stop when subscription ends.
 """
 
 import asyncio
-import logging
 import queue
-from typing import Optional, Callable, AsyncGenerator, Dict, Any
+import logging
+from typing import Callable, Optional
 
 from .protocol import TrickleProtocol
-from .frames import VideoFrame, VideoOutput, InputFrame, OutputFrame
+from .frames import VideoFrame, OutputFrame
 from . import ErrorCallback
 
 logger = logging.getLogger(__name__)
 
+
 class TrickleClient:
-    """High-level client for trickle streaming."""
+    """High-level client for trickle stream processing."""
     
     def __init__(
         self,
-        subscribe_url: str,
-        publish_url: str,
-        control_url: Optional[str] = None,
-        events_url: Optional[str] = None,
-        data_url: Optional[str] = None,
-        width: int = 512,
-        height: int = 512,
-        frame_processor: Optional[Callable[[VideoFrame], VideoOutput]] = None,
+        protocol: TrickleProtocol,
+        frame_processor: Callable,
+        control_handler: Optional[Callable] = None,
         error_callback: Optional[ErrorCallback] = None
     ):
-        self.protocol = TrickleProtocol(
-            subscribe_url=subscribe_url,
-            publish_url=publish_url, 
-            control_url=control_url,
-            events_url=events_url,
-            data_url=data_url,
-            width=width,
-            height=height,
-            error_callback=self._on_protocol_error
-        )
-        self.frame_processor = frame_processor or self._default_frame_processor
-        self.stop_event = asyncio.Event()
+        self.protocol = protocol
+        self.frame_processor = frame_processor
+        self.control_handler = control_handler
+        self.error_callback = error_callback
+        
+        # Client state
         self.running = False
         self.request_id = "default"
-        self.output_queue = queue.Queue()
-        self.error_callback = error_callback
-        self.error_event = asyncio.Event()  # Use Event instead of boolean
-        self.shutdown_event = asyncio.Event()  # Event to signal shutdown
         
-    def _default_frame_processor(self, frame: VideoFrame) -> VideoOutput:
-        """Default frame processor that passes frames through unchanged."""
+        # Coordination events
+        self.stop_event = asyncio.Event()
+        self.error_event = asyncio.Event()
+        
+        # Output queue for processed frames
+        self.output_queue = queue.Queue()
+        
+    def process_frame(self, frame) -> Optional[OutputFrame]:
+        """Process a single frame and return the output."""
+        if not frame:
+            return None
         return VideoOutput(frame, self.request_id)
     
     async def start(self, request_id: str = "default"):
@@ -61,6 +56,7 @@ class TrickleClient:
             
         self.request_id = request_id
         self.stop_event.clear()
+        self.error_event.clear()
         
         logger.info(f"Starting trickle client with request_id={request_id}")
         
@@ -71,14 +67,25 @@ class TrickleClient:
         self.running = True
         
         try:
-            await asyncio.gather(
+            # Run all loops concurrently
+            results = await asyncio.gather(
                 self._ingress_loop(),
                 self._egress_loop(),
                 self._control_loop(),
                 return_exceptions=True
             )
+            
+            # Check if any loop had an exception
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    loop_names = ["ingress", "egress", "control"]
+                    logger.error(f"{loop_names[i]} loop failed: {result}")
+                    
+        except Exception as e:
+            logger.error(f"Error in client loops: {e}")
         finally:
             self.running = False
+            logger.info("Stopping protocol due to client loops ending")
             await self.protocol.stop()
     
     async def stop(self):
@@ -95,12 +102,16 @@ class TrickleClient:
         except queue.Full:
             pass
     
+    async def publish_data(self, data: str):
+        """Publish data via the protocol's data publisher."""
+        return await self.protocol.publish_data(data)
+    
     async def _ingress_loop(self):
         """Process incoming frames."""
         try:
             frame_count = 0
             async for frame in self.protocol.ingress_loop(self.stop_event):
-                # Check for error state
+                # Check for error state or stop signal
                 if self.error_event.is_set() or self.stop_event.is_set():
                     logger.info("Stopping ingress loop due to error or stop signal")
                     break
@@ -119,6 +130,11 @@ class TrickleClient:
                         logger.warning(f"Frame processor returned None for frame {frame_count}")
                 else:
                     logger.debug(f"Received non-video frame: {type(frame)}")
+            
+            # Send sentinel to signal egress loop to complete
+            logger.info("Ingress loop completed, sending sentinel to egress loop")
+            await self._send_output(None)
+            
         except Exception as e:
             logger.error(f"Error in ingress loop: {e}")
             # Set error state and stop event to trigger other loops to stop
@@ -137,13 +153,17 @@ class TrickleClient:
     async def _egress_loop(self):
         """Handle outgoing frames."""
         try:
-            async def output_generator() -> AsyncGenerator[OutputFrame, None]:
+            async def output_generator():
+                """Generate output frames from the queue."""
                 while not self.stop_event.is_set() and not self.error_event.is_set():
                     try:
                         # Try to get a frame from the queue with timeout
                         frame = await asyncio.to_thread(self.output_queue.get, timeout=0.1)
                         if frame is not None:
                             yield frame
+                        else:
+                            # None frame indicates shutdown
+                            break
                     except queue.Empty:
                         continue  # No frame available, continue loop
                     except Exception as e:
@@ -151,6 +171,7 @@ class TrickleClient:
                         continue
                     
             await self.protocol.egress_loop(output_generator())
+            logger.info("Egress loop completed")
         except Exception as e:
             logger.error(f"Error in egress loop: {e}")
             # Set error state and stop event to trigger other loops to stop
@@ -170,7 +191,7 @@ class TrickleClient:
         """Handle control messages."""
         try:
             async for control_data in self.protocol.control_loop(self.stop_event):
-                # Check for error state
+                # Check for error state or stop signal
                 if self.error_event.is_set() or self.stop_event.is_set():
                     logger.info("Stopping control loop due to error or stop signal")
                     break
@@ -190,76 +211,30 @@ class TrickleClient:
                 except Exception as cb_error:
                     logger.error(f"Error in error callback: {cb_error}")
     
-    async def _send_output(self, output: OutputFrame):
-        """Send output frame to the egress queue."""
+    async def _handle_control_message(self, control_data: dict):
+        """Handle a control message."""
+        if self.control_handler:
+            try:
+                if asyncio.iscoroutinefunction(self.control_handler):
+                    await self.control_handler(control_data)
+                else:
+                    self.control_handler(control_data)
+            except Exception as e:
+                logger.error(f"Error in control handler: {e}")
+    
+    async def _send_output(self, output):
+        """Send output to the egress queue."""
         try:
-            self.output_queue.put_nowait(output)
-            logger.debug(f"Queued output frame: {type(output)} timestamp={output.timestamp}")
+            await asyncio.to_thread(self.output_queue.put, output, timeout=1.0)
         except queue.Full:
             logger.warning("Output queue is full, dropping frame")
         except Exception as e:
-            logger.error(f"Error sending output frame: {e}")
-    
-    async def _handle_control_message(self, control_data: Dict[str, Any]):
-        """Handle incoming control messages."""
-        logger.info(f"Received control message: {control_data}")
-        # Override this method to handle control messages
-    
-    async def emit_event(self, event: Dict[str, Any], event_type: str = "client_event"):
-        """Emit a monitoring event."""
-        await self.protocol.emit_monitoring_event(event, event_type)
+            logger.error(f"Error sending output: {e}")
 
-    async def _on_protocol_error(self, error_type: str, exception: Optional[Exception] = None):
-        """Handle errors from the protocol layer."""
-        logger.error(f"Protocol error: {error_type} - {exception}")
-        self.error_event.set()  # Set error event
-        self.stop_event.set()  # Signal all loops to stop
-        
-        # Notify parent component
-        if self.error_callback:
-            try:
-                if asyncio.iscoroutinefunction(self.error_callback):
-                    await self.error_callback(error_type, exception)
-                else:
-                    self.error_callback(error_type, exception)
-            except Exception as e:
-                logger.error(f"Error in error callback: {e}")
 
-    async def publish_data(self, data: str):
-        """Publish data via the data publisher."""
-        await self.protocol.publish_data(data)
-
-class SimpleTrickleClient:
-    """Simplified trickle client for basic use cases."""
+class VideoOutput:
+    """Video output frame wrapper."""
     
-    def __init__(self, subscribe_url: str, publish_url: str):
-        self.subscribe_url = subscribe_url
-        self.publish_url = publish_url
-        self.client: Optional[TrickleClient] = None
-    
-    async def process_stream(
-        self, 
-        frame_processor: Callable[[VideoFrame], VideoOutput],
-        request_id: str = "simple_client",
-        width: int = 512,
-        height: int = 512
-    ):
-        """Process a stream with the given frame processor."""
-        self.client = TrickleClient(
-            subscribe_url=self.subscribe_url,
-            publish_url=self.publish_url,
-            width=width,
-            height=height,
-            frame_processor=frame_processor
-        )
-        
-        try:
-            await self.client.start(request_id)
-        finally:
-            if self.client:
-                await self.client.stop()
-    
-    async def stop(self):
-        """Stop the client."""
-        if self.client:
-            await self.client.stop() 
+    def __init__(self, frame, request_id: str):
+        self.frame = frame
+        self.request_id = request_id 
