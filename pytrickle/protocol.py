@@ -46,6 +46,7 @@ class TrickleProtocol:
         publish_url: str, 
         control_url: Optional[str] = None, 
         events_url: Optional[str] = None, 
+        data_url: Optional[str] = None,
         width: Optional[int] = DEFAULT_WIDTH, 
         height: Optional[int] = DEFAULT_HEIGHT,
         error_callback: Optional[ErrorCallback] = None
@@ -54,6 +55,7 @@ class TrickleProtocol:
         self.publish_url = publish_url
         self.control_url = control_url
         self.events_url = events_url
+        self.data_url = data_url
         self.width = width
         self.height = height
         self.error_callback = error_callback
@@ -65,7 +67,8 @@ class TrickleProtocol:
         # Control and events components
         self.control_subscriber: Optional[TrickleSubscriber] = None
         self.events_publisher: Optional[TricklePublisher] = None
-        
+        self.data_publisher: Optional[TricklePublisher] = None
+
         # Background tasks
         self.subscribe_task: Optional[asyncio.Task] = None
         self.publish_task: Optional[asyncio.Task] = None
@@ -131,6 +134,11 @@ class TrickleProtocol:
         if self.events_url and self.events_url.strip():
             self.events_publisher = TricklePublisher(self.events_url, "application/json", error_callback=self._on_component_error)
             await self.events_publisher.start()
+            
+        # Initialize data publisher if URL provided
+        if self.data_url and self.data_url.strip():
+            self.data_publisher = TricklePublisher(self.data_url, "application/octet-stream", error_callback=self._on_component_error)
+            await self.data_publisher.start()
 
     async def stop(self):
         """Stop the trickle protocol."""
@@ -151,6 +159,10 @@ class TrickleProtocol:
         if self.events_publisher:
             await self.events_publisher.close()
             self.events_publisher = None
+
+        if self.data_publisher:
+            await self.data_publisher.close()
+            self.data_publisher = None
 
         # Wait for tasks to complete with timeout
         tasks = [self.subscribe_task, self.publish_task]
@@ -234,4 +246,14 @@ class TrickleProtocol:
 
             except Exception:
                 logger.error(f"Error in control loop", exc_info=True)
-                continue 
+                continue
+
+    async def publish_data(self, data: str):
+        """Publish data via the data publisher."""
+        if not self.data_publisher:
+            return
+        try:
+            async with await self.data_publisher.next() as segment:
+                await segment.write(data.encode('utf-8'))
+        except Exception as e:
+            logger.error(f"Error publishing data: {e}")

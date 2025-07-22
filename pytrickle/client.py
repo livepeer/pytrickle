@@ -25,6 +25,7 @@ class TrickleClient:
         publish_url: str,
         control_url: Optional[str] = None,
         events_url: Optional[str] = None,
+        data_url: Optional[str] = None,
         width: int = 512,
         height: int = 512,
         frame_processor: Optional[Callable[[VideoFrame], VideoOutput]] = None,
@@ -35,6 +36,7 @@ class TrickleClient:
             publish_url=publish_url, 
             control_url=control_url,
             events_url=events_url,
+            data_url=data_url,
             width=width,
             height=height,
             error_callback=self._on_protocol_error
@@ -222,6 +224,10 @@ class TrickleClient:
                     self.error_callback(error_type, exception)
             except Exception as e:
                 logger.error(f"Error in error callback: {e}")
+
+    async def publish_data(self, data: str):
+        """Publish data via the data publisher."""
+        await self.protocol.publish_data(data)
 
 class SimpleTrickleClient:
     """Simplified trickle client for basic use cases."""
