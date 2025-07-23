@@ -8,10 +8,10 @@ to ensure all components stop when subscription ends.
 import asyncio
 import queue
 import logging
-from typing import Callable, Optional
+from typing import Callable, Optional, Union
 
 from .protocol import TrickleProtocol
-from .frames import VideoFrame, OutputFrame
+from .frames import VideoFrame, AudioFrame, VideoOutput, AudioOutput, OutputFrame
 from . import ErrorCallback
 
 logger = logging.getLogger(__name__)
@@ -23,7 +23,7 @@ class TrickleClient:
     def __init__(
         self,
         protocol: TrickleProtocol,
-        frame_processor: Callable,
+        frame_processor: Callable[[Union[VideoFrame, AudioFrame]], Union[VideoOutput, AudioOutput]],
         control_handler: Optional[Callable] = None,
         error_callback: Optional[ErrorCallback] = None
     ):
@@ -43,11 +43,14 @@ class TrickleClient:
         # Output queue for processed frames
         self.output_queue = queue.Queue()
         
-    def process_frame(self, frame) -> Optional[OutputFrame]:
+    def process_frame(self, frame: Union[VideoFrame, AudioFrame]) -> Optional[Union[VideoOutput, AudioOutput]]:
         """Process a single frame and return the output."""
         if not frame:
             return None
-        return VideoOutput(frame, self.request_id)
+        if isinstance(frame, VideoFrame):
+            return VideoOutput(frame, self.request_id)
+        elif isinstance(frame, AudioFrame):
+            return AudioOutput([frame], self.request_id)
     
     async def start(self, request_id: str = "default"):
         """Start the trickle client."""
@@ -75,12 +78,14 @@ class TrickleClient:
                 return_exceptions=True
             )
             
-            # Check if any loop had an exception
+            # Check if any loop had an exception that is not a cancelled error
             for i, result in enumerate(results):
-                if isinstance(result, Exception):
+                if isinstance(result, Exception) and not isinstance(result, asyncio.CancelledError):
                     loop_names = ["ingress", "egress", "control"]
                     logger.error(f"{loop_names[i]} loop failed: {result}")
                     
+        except asyncio.CancelledError:
+            pass
         except Exception as e:
             logger.error(f"Error in client loops: {e}")
         finally:
@@ -128,8 +133,19 @@ class TrickleClient:
                         logger.debug(f"Sent processed frame {frame_count} to egress")
                     else:
                         logger.warning(f"Frame processor returned None for frame {frame_count}")
+                elif isinstance(frame, AudioFrame):
+                    logger.debug(f"Processing audio frame: {frame.samples.shape}")
+                    
+                    # Process the audio frame
+                    output = self.frame_processor(frame)
+                    if output:
+                        # Send to egress
+                        await self._send_output(output)
+                        logger.debug(f"Sent processed audio frame to egress")
+                    else:
+                        logger.warning(f"Frame processor returned None for audio frame")
                 else:
-                    logger.debug(f"Received non-video frame: {type(frame)}")
+                    logger.debug(f"Received unknown frame type: {type(frame)}")
             
             # Send sentinel to signal egress loop to complete
             logger.info("Ingress loop completed, sending sentinel to egress loop")
@@ -231,10 +247,4 @@ class TrickleClient:
         except Exception as e:
             logger.error(f"Error sending output: {e}")
 
-
-class VideoOutput:
-    """Video output frame wrapper."""
-    
-    def __init__(self, frame, request_id: str):
-        self.frame = frame
-        self.request_id = request_id 
+ 
