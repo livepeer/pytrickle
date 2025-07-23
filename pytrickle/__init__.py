@@ -12,7 +12,7 @@ ErrorCallback = Union[
     Callable[[str, Optional[Exception]], Coroutine[Any, Any, None]]
 ]
 
-from .client import TrickleClient, SimpleTrickleClient
+from .client import TrickleClient
 from .server import TrickleApp, create_app
 from .protocol import TrickleProtocol
 from .frames import VideoFrame, AudioFrame, VideoOutput, AudioOutput
@@ -24,7 +24,6 @@ __version__ = "0.1.1"
 
 __all__ = [
     "TrickleClient",
-    "SimpleTrickleClient",
     "TrickleApp",
     "create_app",
     "TrickleProtocol",

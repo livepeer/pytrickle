@@ -8,7 +8,7 @@ with automatic reconnection and error handling.
 import asyncio
 import aiohttp
 import logging
-from typing import Optional, Callable, Any
+from typing import Optional, Callable, Any, List
 
 from . import ErrorCallback
 from .base import TrickleComponent
@@ -16,16 +16,17 @@ from .base import TrickleComponent
 logger = logging.getLogger(__name__)
 
 class TrickleSubscriber(TrickleComponent):
-    """Subscriber for receiving streaming data from trickle endpoints."""
+    """Trickle subscriber for receiving data from a URL."""
     
     def __init__(self, url: str, start_seq: int = -2, max_retries: int = 5, error_callback: Optional[ErrorCallback] = None):
         super().__init__(error_callback)
         self.base_url = url
         self.idx = start_seq
-        self.pending_get: Optional[aiohttp.ClientResponse] = None  # Pre-initialized GET request
-        self.lock = asyncio.Lock()  # Lock to manage concurrent access
-        self.session: Optional[aiohttp.ClientSession] = None
         self.max_retries = max_retries
+        self.pending_get: Optional[aiohttp.ClientResponse] = None
+        self.lock = asyncio.Lock()
+        self._background_tasks: List[asyncio.Task] = []  # Track background tasks
+        self.session: Optional[aiohttp.ClientSession] = None
 
     async def __aenter__(self):
         """Enter context manager."""
@@ -125,7 +126,11 @@ class TrickleSubscriber(TrickleComponent):
                 self.idx = idx + 1
 
             # Set up the next connection in the background
-            asyncio.create_task(self._preconnect_next_segment())
+            preconnect_task = asyncio.create_task(self._preconnect_next_segment())
+            self._background_tasks.append(preconnect_task)
+            logger.debug(f"Created background preconnect task for {self.base_url}, total tasks: {len(self._background_tasks)}")
+            # Add callback to remove completed tasks from the list
+            preconnect_task.add_done_callback(lambda t: self._background_tasks.remove(t) if t in self._background_tasks else None)
 
         return segment
 
@@ -133,21 +138,47 @@ class TrickleSubscriber(TrickleComponent):
         """Preconnect to the next segment in the background."""
         # Check if we should stop before doing expensive operations
         if self._should_stop():
+            logger.debug(f"Skipping preconnect for {self.base_url} - shutdown/error state")
             return
             
+        logger.debug(f"Starting background preconnect for {self.base_url}")
         async with self.lock:
             if self.pending_get is not None:
+                logger.debug(f"Pending connection already exists for {self.base_url}")
                 return
             if self._should_stop():
+                logger.debug(f"Shutdown detected during preconnect for {self.base_url}")
                 return
             next_conn = await self.preconnect()
             if next_conn:
                 self.pending_get = next_conn
+                logger.debug(f"Preconnected successfully for {self.base_url}")
+            else:
+                logger.debug(f"Preconnect failed for {self.base_url}")
 
     async def close(self):
         """Close the session when done."""
         logger.info(f"Closing {self.base_url}")
         self.shutdown_event.set()  # Signal shutdown first
+        
+        # Cancel all background preconnect tasks
+        if self._background_tasks:
+            logger.info(f"Cancelling {len(self._background_tasks)} background preconnect tasks for {self.base_url}")
+            for task in self._background_tasks:
+                if not task.done():
+                    task.cancel()
+                    logger.debug(f"Cancelled preconnect task for {self.base_url}: {task}")
+            # Wait briefly for tasks to cancel
+            try:
+                await asyncio.wait_for(asyncio.gather(*self._background_tasks, return_exceptions=True), timeout=2.0)
+                logger.info(f"All background tasks cancelled for {self.base_url}")
+            except asyncio.TimeoutError:
+                logger.warning(f"Some background tasks did not cancel within timeout for {self.base_url}")
+            except Exception as e:
+                logger.debug(f"Expected errors during task cancellation for {self.base_url}: {e}")
+            self._background_tasks.clear()
+        else:
+            logger.info(f"No background tasks to cancel for {self.base_url}")
         
         async with self.lock:
             if self.pending_get:
@@ -156,8 +187,9 @@ class TrickleSubscriber(TrickleComponent):
             if self.session:
                 try:
                     await self.session.close()
+                    logger.info(f"Session closed for {self.base_url}")
                 except Exception:
-                    logger.error(f"Error closing trickle subscriber", exc_info=True)
+                    logger.error(f"Error closing trickle subscriber session for {self.base_url}", exc_info=True)
                 finally:
                     self.session = None
 
