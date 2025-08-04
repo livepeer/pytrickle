@@ -92,6 +92,22 @@ class AudioFrame(InputFrame):
     def from_av_audio(cls, av_frame) -> 'AudioFrame':
         """Create AudioFrame from av audio frame."""
         return cls(av_frame)
+    
+    @classmethod
+    def _from_existing_with_timestamp(cls, existing_frame: 'AudioFrame', new_timestamp: int) -> 'AudioFrame':
+        """Create a new AudioFrame with the same properties but a different timestamp."""
+        # Create a new frame object with corrected timestamp
+        new_frame = cls.__new__(cls)
+        new_frame.samples = existing_frame.samples
+        new_frame.nb_samples = existing_frame.nb_samples
+        new_frame.format = existing_frame.format
+        new_frame.rate = existing_frame.rate
+        new_frame.layout = existing_frame.layout
+        new_frame.timestamp = new_timestamp  # Use the corrected timestamp
+        new_frame.time_base = existing_frame.time_base
+        new_frame.log_timestamps = existing_frame.log_timestamps.copy()
+        new_frame.side_data = existing_frame.side_data
+        return new_frame
 
 class OutputFrame(ABC):
     """Base class for output frames."""
@@ -146,4 +162,21 @@ class AudioOutput(OutputFrame):
         """Get the timestamp of the first audio frame, or 0 if no frames."""
         if self.frames:
             return self.frames[0].timestamp
-        return 0 
+        return 0
+    
+    @classmethod
+    def with_monotonic_timestamps(cls, frames: List[AudioFrame], request_id: str, start_timestamp: int, frame_duration: int) -> 'AudioOutput':
+        """
+        Create AudioOutput with corrected monotonic timestamps in individual frames.
+        
+        The encoder uses individual AudioFrame.timestamp values, so we need to fix
+        the actual frame timestamps, not just add a wrapper property.
+        """
+        corrected_frames = []
+        for i, frame in enumerate(frames):
+            # Create new frame with corrected timestamp
+            corrected_timestamp = start_timestamp + (i * frame_duration)
+            corrected_frame = AudioFrame._from_existing_with_timestamp(frame, corrected_timestamp)
+            corrected_frames.append(corrected_frame)
+        
+        return cls(corrected_frames, request_id) 

@@ -218,11 +218,7 @@ class TrickleProtocol(TrickleComponent):
             if frame is None:  # Sentinel value
                 break
             
-            # Handle audio frames (pass through for now)
-            if isinstance(frame, AudioFrame):
-                self.publish_queue.put(AudioOutput([frame], ""))
-                continue
-            
+            # Send all frames to frame processor
             yield frame
 
     async def egress_loop(self, output_frames: AsyncGenerator[OutputFrame, None]):
