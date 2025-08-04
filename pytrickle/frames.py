@@ -1,17 +1,82 @@
 """
-Frame data structures for trickle streaming.
+Frame data structures and processing utilities for trickle streaming.
 
-Defines VideoFrame, AudioFrame, and their output counterparts for handling
-media data in the trickle streaming pipeline.
+Defines VideoFrame, AudioFrame, their output counterparts, frame processing
+utilities, and streaming utilities for handling media data in the trickle 
+streaming pipeline.
 """
 
+import asyncio
+import logging
 import time
 import torch
 import numpy as np
 import av
-from typing import Optional, Dict, Any, Union, List
+from typing import Optional, Dict, Any, Union, List, Deque
 from fractions import Fraction
+from collections import deque
 from abc import ABC
+
+logger = logging.getLogger(__name__)
+
+# Tensor Conversion Utilities
+# ============================
+
+def tensor_to_av_frame(tensor: torch.Tensor) -> av.VideoFrame:
+    """
+    Convert a tensor to av.VideoFrame for use in video pipelines.
+    Handles [B, H, W, C] or [H, W, C] formats, float or uint8, and grayscale/RGB.
+    """
+    try:
+        # Handle tensor format conversion - trickle uses [B, H, W, C] or [H, W, C]
+        if tensor.dim() == 4:
+            # Expected format: [B, H, W, C] where B=1
+            if tensor.shape[0] != 1:
+                raise ValueError(f"Expected batch size 1, got {tensor.shape[0]}")
+            tensor = tensor.squeeze(0)  # Remove batch dimension: [H, W, C]
+        elif tensor.dim() == 3:
+            # Already in [H, W, C] format
+            pass
+        else:
+            raise ValueError(f"Expected 3D or 4D tensor, got {tensor.dim()}D tensor with shape {tensor.shape}")
+
+        # Validate tensor format
+        if tensor.dim() != 3:
+            raise ValueError(f"Expected 3D tensor after conversion, got {tensor.dim()}D")
+        if tensor.shape[2] not in [1, 3, 4]:
+            raise ValueError(f"Expected 1, 3, or 4 channels, got {tensor.shape[2]}")
+
+        # Convert tensor to numpy array for av.VideoFrame
+        # Handle different tensor value ranges
+        if tensor.dtype in [torch.float32, torch.float64]:
+            if tensor.max() <= 1.0:
+                # Tensor is in [0, 1] range, convert to [0, 255]
+                tensor_np = (tensor * 255.0).clamp(0, 255).to(torch.uint8).cpu().numpy()
+            else:
+                # Tensor is already in [0, 255] range
+                tensor_np = tensor.clamp(0, 255).to(torch.uint8).cpu().numpy()
+        elif tensor.dtype == torch.uint8:
+            tensor_np = tensor.cpu().numpy()
+        else:
+            # Convert other types to uint8
+            tensor_np = tensor.clamp(0, 255).to(torch.uint8).cpu().numpy()
+
+        # Ensure numpy array is contiguous
+        if not tensor_np.flags.c_contiguous:
+            tensor_np = np.ascontiguousarray(tensor_np)
+
+        # Handle grayscale to RGB conversion if needed
+        if tensor_np.shape[2] == 1:
+            tensor_np = np.repeat(tensor_np, 3, axis=2)
+
+        # Create av.VideoFrame from numpy array
+        av_frame = av.VideoFrame.from_ndarray(tensor_np, format="rgb24")
+
+        return av_frame
+
+    except Exception as e:
+        # Optionally, you could log here if logger is available
+        raise
 
 # Default dimensions for video frames  
 DEFAULT_WIDTH = 704
@@ -179,4 +244,235 @@ class AudioOutput(OutputFrame):
             corrected_frame = AudioFrame._from_existing_with_timestamp(frame, corrected_timestamp)
             corrected_frames.append(corrected_frame)
         
-        return cls(corrected_frames, request_id) 
+        return cls(corrected_frames, request_id)
+
+
+# Frame Processing Utilities
+# ===========================
+
+class FrameProcessor:
+    """Reusable frame conversion and processing utilities."""
+    
+    @staticmethod
+    def convert_trickle_to_av(frame: VideoFrame) -> av.VideoFrame:
+        """Convert pytrickle VideoFrame to av.VideoFrame."""
+        return tensor_to_av_frame(frame.tensor)
+    
+    @staticmethod
+    def convert_av_to_trickle(av_frame: av.VideoFrame, original_frame: VideoFrame) -> VideoFrame:
+        """Convert av.VideoFrame back to pytrickle VideoFrame with original timing."""
+        # Convert av frame tensor back to normalized float tensor
+        frame_np = av_frame.to_ndarray(format="rgb24").astype(np.float32) / 255.0
+        tensor = torch.from_numpy(frame_np)
+        
+        return VideoFrame(
+            tensor=tensor,
+            timestamp=original_frame.timestamp,
+            time_base=original_frame.time_base
+        )
+
+    @staticmethod
+    def create_processed_frame(processed_tensor: torch.Tensor, original_frame: VideoFrame) -> VideoFrame:
+        """Create a processed VideoFrame preserving timing from original."""
+        return VideoFrame(
+            tensor=processed_tensor,
+            timestamp=original_frame.timestamp,
+            time_base=original_frame.time_base
+        )
+
+    @staticmethod
+    def convert_trickle_audio_to_av(frame: AudioFrame) -> av.AudioFrame:
+        """Convert pytrickle AudioFrame to av.AudioFrame."""
+        try:
+            samples = frame.samples
+            
+            # Handle different audio format requirements
+            if frame.format.endswith('p'):
+                # Planar format - channels are separated (channels, samples)
+                if samples.ndim == 1:
+                    samples = samples.reshape(1, -1)
+            else:
+                # Packed format - channels are interleaved
+                if samples.ndim == 2 and samples.shape[0] > 1:
+                    # Convert (channels, samples) to (samples, channels) for packed format
+                    samples = samples.T
+                elif samples.ndim == 1:
+                    # Keep 1D for mono packed format or reshape for multi-channel
+                    if frame.layout != 'mono':
+                        # For non-mono, interpret as interleaved samples
+                        pass  # Keep as-is for now
+            
+            av_frame = av.AudioFrame.from_ndarray(samples, format=frame.format, layout=frame.layout)
+            av_frame.sample_rate = frame.rate
+            av_frame.pts = frame.timestamp
+            av_frame.time_base = frame.time_base
+            return av_frame
+            
+        except Exception as e:
+            # If conversion fails, create a simple dummy frame for now
+            logger.warning(f"Audio conversion failed ({e}), creating dummy frame")
+            dummy_samples = np.zeros((1, 1024), dtype=np.int16)
+            av_frame = av.AudioFrame.from_ndarray(dummy_samples, format='s16', layout='mono')
+            av_frame.sample_rate = frame.rate
+            av_frame.pts = frame.timestamp
+            av_frame.time_base = frame.time_base
+            return av_frame
+
+    @staticmethod
+    def convert_av_audio_to_trickle(av_frame: av.AudioFrame, original_frame: AudioFrame) -> AudioFrame:
+        """Convert av.AudioFrame back to pytrickle AudioFrame with original timing."""
+        return AudioFrame.from_av_audio(av_frame)
+
+
+class FrameConversionMixin:
+    """Mixin class that provides frame conversion methods for stream processors."""
+    
+    def convert_trickle_to_av(self, frame: VideoFrame) -> av.VideoFrame:
+        """Convert pytrickle VideoFrame to av.VideoFrame."""
+        return FrameProcessor.convert_trickle_to_av(frame)
+    
+    def convert_av_to_trickle(self, av_frame: av.VideoFrame, original_frame: VideoFrame) -> VideoFrame:
+        """Convert av.VideoFrame back to pytrickle VideoFrame with original timing."""
+        return FrameProcessor.convert_av_to_trickle(av_frame, original_frame)
+    
+    def create_processed_frame(self, processed_tensor: torch.Tensor, original_frame: VideoFrame) -> VideoFrame:
+        """Create a processed VideoFrame preserving timing from original."""
+        return FrameProcessor.create_processed_frame(processed_tensor, original_frame)
+    
+    def convert_trickle_audio_to_av(self, frame: AudioFrame) -> av.AudioFrame:
+        """Convert pytrickle AudioFrame to av.AudioFrame."""
+        return FrameProcessor.convert_trickle_audio_to_av(frame)
+    
+    def convert_av_audio_to_trickle(self, av_frame: av.AudioFrame, original_frame: AudioFrame) -> AudioFrame:
+        """Convert av.AudioFrame back to pytrickle AudioFrame with original timing."""
+        return FrameProcessor.convert_av_audio_to_trickle(av_frame, original_frame)
+
+
+# Streaming Utilities
+# ====================
+
+class FrameBuffer:
+    """Rolling frame buffer that keeps a fixed number of frames."""
+    
+    def __init__(self, max_frames: int = 300):
+        self.max_frames = max_frames
+        self.frames: Deque[Union[VideoFrame, AudioFrame]] = deque(maxlen=max_frames)
+        self.total_frames_received = 0
+        self.total_frames_discarded = 0
+        
+    def add_frame(self, frame: Union[VideoFrame, AudioFrame]):
+        if len(self.frames) >= self.max_frames:
+            self.total_frames_discarded += 1
+        self.frames.append(frame)
+        self.total_frames_received += 1
+        
+    def get_frame(self) -> Optional[Union[VideoFrame, AudioFrame]]:
+        return self.frames.popleft() if self.frames else None
+        
+    def get_all_frames(self) -> List[Union[VideoFrame, AudioFrame]]:
+        frames = list(self.frames)
+        self.frames.clear()
+        return frames
+        
+    def clear(self):
+        self.frames.clear()
+        
+    def size(self) -> int:
+        return len(self.frames)
+        
+    def get_stats(self) -> Dict[str, int]:
+        return {
+            "current_frames": len(self.frames),
+            "max_frames": self.max_frames,
+            "total_received": self.total_frames_received,
+            "total_discarded": self.total_frames_discarded
+        }
+
+
+class StreamState:
+    """Unified state management for stream lifecycle."""
+    
+    def __init__(self):
+        self.running = False
+        self.pipeline_ready = False
+        self.shutting_down = False
+        self.error_occurred = False
+        self.cleanup_in_progress = False
+        
+        self.running_event = asyncio.Event()
+        self.shutdown_event = asyncio.Event()
+        self.error_event = asyncio.Event()
+        self.pipeline_ready_event = asyncio.Event()
+    
+    @property
+    def is_active(self) -> bool:
+        return self.running and not self.shutting_down and not self.error_occurred
+    
+    @property
+    def shutdown_flags(self) -> Dict[str, bool]:
+        return {
+            'shutdown_event': self.shutdown_event.is_set(),
+            'cleanup_in_progress': self.cleanup_in_progress
+        }
+    
+    def start(self):
+        self.running = True
+        self.running_event.set()
+    
+    def mark_pipeline_ready(self):
+        self.pipeline_ready = True
+        self.pipeline_ready_event.set()
+    
+    def initiate_shutdown(self, due_to_error: bool = False):
+        self.shutting_down = True
+        self.shutdown_event.set()
+        if due_to_error:
+            self.error_occurred = True
+            self.error_event.set()
+    
+    def mark_cleanup_in_progress(self):
+        self.cleanup_in_progress = True
+    
+    def finalize(self):
+        self.running = False
+        self.running_event.clear()
+
+
+class StreamErrorHandler:
+    """Centralized error handling for streaming applications."""
+    
+    @staticmethod
+    def log_error(error_type: str, exception: Optional[Exception], request_id: str, critical: bool = False):
+        level = logger.error if critical else logger.warning
+        msg = f"{error_type} for stream {request_id}"
+        if exception:
+            msg += f": {exception}"
+        level(msg)
+
+    @staticmethod
+    def is_shutdown_error(shutdown_flags: Dict) -> bool:
+        return shutdown_flags.get('shutdown_event', False) or shutdown_flags.get('cleanup_in_progress', False)
+
+
+class StreamingUtils:
+    """Generic utilities for streaming applications."""
+    
+    @staticmethod
+    async def cancel_task_with_timeout(task: Optional[asyncio.Task], task_name: str, timeout: float = 3.0) -> bool:
+        """Cancel an asyncio task with a timeout."""
+        if not task or task.done():
+            return True
+        task.cancel()
+        try:
+            await asyncio.wait_for(task, timeout=timeout)
+            return True
+        except (asyncio.CancelledError, asyncio.TimeoutError):
+            return True
+        except Exception:
+            return False
+
+
+# Legacy alias for backward compatibility
+def tensor_to_av_frame_legacy(tensor: torch.Tensor) -> av.VideoFrame:
+    """Legacy alias for tensor_to_av_frame for backward compatibility."""
+    return tensor_to_av_frame(tensor)

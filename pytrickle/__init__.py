@@ -15,10 +15,15 @@ ErrorCallback = Union[
 from .client import TrickleClient
 from .server import TrickleApp, create_app
 from .protocol import TrickleProtocol
-from .frames import VideoFrame, AudioFrame, VideoOutput, AudioOutput
-from .tensors import tensor_to_av_frame
+from .frames import (
+    VideoFrame, AudioFrame, VideoOutput, AudioOutput, FrameProcessor, FrameConversionMixin, 
+    tensor_to_av_frame, FrameBuffer, StreamState, StreamErrorHandler, StreamingUtils
+)
 from .publisher import TricklePublisher
 from .subscriber import TrickleSubscriber
+from .health import StreamHealthManager
+from .manager import BaseStreamManager, TrickleStreamManager
+from . import api_spec
 
 __version__ = "0.1.1"
 
@@ -34,5 +39,15 @@ __all__ = [
     "TricklePublisher",
     "TrickleSubscriber",
     "tensor_to_av_frame",
+    "StreamHealthManager",
+    "BaseStreamManager", 
+    "TrickleStreamManager",
+    "FrameProcessor",
+    "FrameConversionMixin",
+    "FrameBuffer",
+    "StreamState", 
+    "StreamErrorHandler",
+    "StreamingUtils",
+    "api_spec",
     "ErrorCallback",
 ] 
