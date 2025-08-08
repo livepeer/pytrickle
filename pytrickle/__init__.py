@@ -17,8 +17,9 @@ from .server import TrickleApp, create_app
 from .protocol import TrickleProtocol
 from .frames import (
     VideoFrame, AudioFrame, VideoOutput, AudioOutput,
-    FrameBuffer, StreamState, StreamErrorHandler, StreamingUtils
+    FrameBuffer,
 )
+from .state import StreamState, StreamErrorHandler
 from .publisher import TricklePublisher
 from .subscriber import TrickleSubscriber
 from .health import StreamHealthManager
@@ -44,7 +45,6 @@ __all__ = [
     "FrameBuffer",
     "StreamState", 
     "StreamErrorHandler",
-    "StreamingUtils",
     "api_spec",
     "ErrorCallback",
 ] 

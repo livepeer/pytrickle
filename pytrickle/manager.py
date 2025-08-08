@@ -52,7 +52,7 @@ class BaseStreamManager(ABC):
             
             try:
                 # Clear error state if this is the first stream after error
-                if self.health_manager and self.health_manager.state == "ERROR":
+                if self.health_manager and self.health_manager.is_error():
                     if len(self.handlers) == 0:
                         self.health_manager.clear_error()
                 
@@ -103,15 +103,15 @@ class BaseStreamManager(ABC):
         if self.health_manager:
             stream_count = len(self.handlers)
             self.health_manager.update_active_streams(stream_count)
-            if stream_count == 0 and self.health_manager.state == "ERROR":
+            if stream_count == 0 and self.health_manager.is_error():
                 self.health_manager.clear_error()
     
-    def _get_stream_status_unlocked(self, request_id: str) -> Optional[Dict[str, Any]]:
-        """Get stream status without acquiring the lock (for internal use when lock is already held)."""
-        if request_id not in self.handlers:
-            return None
-        
-        handler = self.handlers[request_id]
+    def build_stream_status(self, request_id: str, handler: StreamHandler) -> Dict[str, Any]:
+        """Compose a status dictionary for a given handler.
+
+        Subclasses may override this to add more fields without altering
+        locking semantics. This method must be non-blocking.
+        """
         return {
             'request_id': request_id,
             'running': handler.running,
@@ -119,18 +119,32 @@ class BaseStreamManager(ABC):
 
     async def get_stream_status(self, request_id: str) -> Optional[Dict[str, Any]]:
         """Get status of a specific stream."""
+        # Snapshot handler reference under lock, build status outside lock
         async with self.lock:
-            return self._get_stream_status_unlocked(request_id)
+            handler = self.handlers.get(request_id)
+        if not handler:
+            return None
+        try:
+            return self.build_stream_status(request_id, handler)
+        except Exception:
+            # If handler is in an inconsistent state concurrently, surface as missing
+            return None
     
     async def list_streams(self) -> Dict[str, Dict[str, Any]]:
         """List all active streams."""
+        # Snapshot mapping under lock, build statuses outside to avoid blocking
         async with self.lock:
-            result = {}
-            for request_id in self.handlers:
-                status = self._get_stream_status_unlocked(request_id)
+            items = list(self.handlers.items())
+        result: Dict[str, Dict[str, Any]] = {}
+        for request_id, handler in items:
+            try:
+                status = self.build_stream_status(request_id, handler)
                 if status:
                     result[request_id] = status
-            return result
+            except Exception:
+                # Skip handlers that may be concurrently stopping
+                continue
+        return result
     
     async def cleanup_all(self):
         """Stop and cleanup all streams."""
