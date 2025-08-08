@@ -323,6 +323,23 @@ def custom_processor(frame: VideoFrame) -> VideoOutput:
     return VideoOutput(new_frame, "custom_processor")
 ```
 
+### Frame Conversion Helpers
+
+The frame conversion utilities are now available directly on the frame classes:
+
+```python
+from pytrickle.frames import VideoFrame, AudioFrame
+
+# Convert a VideoFrame to av.VideoFrame
+av_vf = video_frame.to_av_frame()
+
+# Convert back from av.VideoFrame while preserving original timing
+vf_with_timing = VideoFrame.from_av_frame_with_timing(av_vf, video_frame)
+
+# Convert an AudioFrame to av.AudioFrame
+av_af = audio_frame.to_av_frame()
+```
+
 ### GPU Processing
 
 The package supports CUDA tensors for GPU acceleration:
