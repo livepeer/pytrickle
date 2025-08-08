@@ -57,6 +57,9 @@ class TrickleApp:
         self.app.router.add_post("/api/stream/params", self._handle_update_params)
         self.app.router.add_get("/api/stream/status", self._handle_get_status)
         self.app.router.add_get("/health", self._handle_health)
+        
+        # Alias for live-video-to-video endpoint (same as stream/start)
+        self.app.router.add_post("/live-video-to-video", self._handle_start_stream)
     
     async def _parse_request_data(self, request: web.Request) -> Dict[str, Any]:
         """Parse JSON request data."""
@@ -194,7 +197,18 @@ class TrickleApp:
     
     async def _handle_health(self, request: web.Request) -> web.Response:
         """Handle health check requests."""
-        return web.json_response({"status": "healthy"})
+        return web.json_response({
+            "status": "healthy",
+            "service": "Pytrickle Streaming Server",
+            "endpoints": {
+                "start": "POST /api/stream/start - Start streaming",
+                "stop": "POST /api/stream/stop - Stop streaming", 
+                "params": "POST /api/stream/params - Update parameters",
+                "status": "GET /api/stream/status - Get status",
+                "health": "GET /health - Health check",
+                "live_video": "POST /live-video-to-video - Start live video processing (alias for /api/stream/start)"
+            }
+        })
     
     async def _run_client(self, request_id: str):
         """Run the trickle client."""

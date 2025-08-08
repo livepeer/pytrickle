@@ -148,8 +148,12 @@ POST /api/stream/params
 Example request:
 ```json
 {
-    "effect": "blue_tint",
-    "intensity": 0.5
+    "params": {
+        "effect": "blue_tint",
+        "intensity": 0.5,
+        "width": 1024,
+        "height": 768
+    }
 }
 ```
 
@@ -162,6 +166,13 @@ GET /api/stream/status
 ```bash
 POST /api/stream/stop
 ```
+
+#### Live Video Processing (Alias)
+```bash
+POST /live-video-to-video
+```
+
+This endpoint is an alias for `/api/stream/start` and accepts the same parameters. It provides compatibility with live video processing workflows.
 
 #### Health Check
 ```bash
