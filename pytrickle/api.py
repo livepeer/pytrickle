@@ -29,9 +29,7 @@ class StreamStartRequest(BaseModel):
     @field_validator('params')
     @classmethod
     def validate_optional_params_dict(cls, value):
-        if value is None:
-            return value
-        return StreamParamsUpdateRequest.validate_params_dict(value)
+        return StreamParamsUpdateRequest.validate_params_dict(value) if value is not None else value
     
 
 class StreamParamsUpdateRequest(BaseModel):
@@ -45,51 +43,49 @@ class StreamParamsUpdateRequest(BaseModel):
     model_config = {"extra": "allow"}  # Allow arbitrary fields
     
     @classmethod
-    def validate_params_dict(cls, v):
-        """Validation method with automatic type conversion for width/height."""
-        if not isinstance(v, dict):
-            raise ValueError("Params must be a dictionary")
-        
-        # Ensure all keys are strings (values can be any type now)
-        for key in v.keys():
+    def _validate_string_keys(cls, params_dict: dict) -> None:
+        """Ensure all dictionary keys are strings."""
+        for key in params_dict.keys():
             if not isinstance(key, str):
                 raise ValueError(f"All field names must be strings, got {type(key)} for key: {key}")
+    
+    @classmethod
+    def _convert_dimensions(cls, params_dict: dict) -> dict:
+        """Convert and validate width/height parameters."""
+        result = params_dict.copy()
+        dimensions = {"width", "height"}
+        provided_dims = dimensions.intersection(result.keys())
         
-        # Convert width/height to integers if present
-        result = v.copy()  # Don't modify original dict
-        
-        # Validate width/height requirements and convert to int
-        has_width = "width" in result
-        has_height = "height" in result
-        
-        if has_width or has_height:
-            if not (has_width and has_height):
+        if provided_dims:
+            if provided_dims != dimensions:
                 raise ValueError("Both 'width' and 'height' must be provided together")
             
-            # Convert width and height to integers
             try:
-                width_val = int(result["width"])
-                height_val = int(result["height"])
-                if width_val <= 0 or height_val <= 0:
-                    raise ValueError("Width and height must be positive integers")
-                
-                # Update the result with converted values
-                result["width"] = width_val
-                result["height"] = height_val
-                
-            except ValueError as e:
-                if "invalid literal" in str(e):
-                    raise ValueError("Width and height must be valid integers or integer strings")
-                raise
+                for dim in dimensions:
+                    value = int(result[dim])
+                    if value <= 0:
+                        raise ValueError("Width and height must be positive integers")
+                    result[dim] = value
+            except (ValueError, TypeError):
+                raise ValueError("Width and height must be valid integers or integer strings")
         
         return result
     
     @classmethod
-    def model_validate(cls, obj):
-        """Custom validation to ensure all fields are string key-value pairs."""
-        if isinstance(obj, dict):
-            cls.validate_params_dict(obj)
-        return super().model_validate(obj)
+    def validate_params_dict(cls, v):
+        """Validation method with automatic type conversion for width/height."""
+        # Handle string input that might be JSON
+        if isinstance(v, str):
+            try:
+                v = json.loads(v)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON format: {e}")
+        
+        if not isinstance(v, dict):
+            raise ValueError("Params must be a dictionary")
+        
+        cls._validate_string_keys(v)
+        return cls._convert_dimensions(v)
     
 class StreamResponse(BaseModel):
     """Standard response model for stream operations."""
