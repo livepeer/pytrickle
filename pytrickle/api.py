@@ -43,9 +43,13 @@ class StreamParamsUpdateRequest(BaseModel):
     model_config = {"extra": "allow"}  # Allow arbitrary fields
     
     @classmethod
-    def _validate_string_keys(cls, params_dict: dict) -> None:
-        """Ensure all dictionary keys are strings."""
-        for key in params_dict.keys():
+    def validate_params(cls, v):
+        """Validation method with automatic type conversion for width/height."""
+        if not isinstance(v, dict):
+            raise ValueError("Params must be a dictionary")
+        
+        # Ensure all keys are strings (values can be any type now)
+        for key in v.keys():
             if not isinstance(key, str):
                 raise ValueError(f"All field names must be strings, got {type(key)} for key: {key}")
     
@@ -72,20 +76,11 @@ class StreamParamsUpdateRequest(BaseModel):
         return result
     
     @classmethod
-    def validate_params_dict(cls, v):
-        """Validation method with automatic type conversion for width/height."""
-        # Handle string input that might be JSON
-        if isinstance(v, str):
-            try:
-                v = json.loads(v)
-            except json.JSONDecodeError as e:
-                raise ValueError(f"Invalid JSON format: {e}")
-        
-        if not isinstance(v, dict):
-            raise ValueError("Params must be a dictionary")
-        
-        cls._validate_string_keys(v)
-        return cls._convert_dimensions(v)
+    def model_validate(cls, obj):
+        """Custom validation to ensure all fields are string key-value pairs."""
+        if isinstance(obj, dict):
+            cls.validate_params(obj)
+        return super().model_validate(obj)
     
 class StreamResponse(BaseModel):
     """Standard response model for stream operations."""
