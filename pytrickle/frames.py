@@ -131,6 +131,22 @@ class VideoFrame(InputFrame):
         new_frame.side_data = self.side_data
         return new_frame
 
+    # Consolidated utilities (previously in FrameProcessor/FrameConversionMixin)
+    def to_av_frame(self) -> 'av.VideoFrame':
+        """Convert this VideoFrame to av.VideoFrame."""
+        return tensor_to_av_frame(self.tensor)
+
+    @classmethod
+    def from_av_frame_with_timing(cls, av_frame: 'av.VideoFrame', original_frame: 'VideoFrame') -> 'VideoFrame':
+        """Create a VideoFrame from an av.VideoFrame while preserving original timing."""
+        frame_np = av_frame.to_ndarray(format="rgb24").astype(np.float32) / 255.0
+        tensor = torch.from_numpy(frame_np)
+        return cls(
+            tensor=tensor,
+            timestamp=original_frame.timestamp,
+            time_base=original_frame.time_base
+        )
+
 class AudioFrame(InputFrame):
     """Represents an audio frame with sample data and timing information."""
     
@@ -173,6 +189,38 @@ class AudioFrame(InputFrame):
         new_frame.log_timestamps = existing_frame.log_timestamps.copy()
         new_frame.side_data = existing_frame.side_data
         return new_frame
+
+    # Consolidated utilities (previously in FrameProcessor/FrameConversionMixin)
+    def to_av_frame(self) -> 'av.AudioFrame':
+        """Convert this AudioFrame to av.AudioFrame."""
+        try:
+            samples = self.samples
+            if self.format.endswith('p'):
+                # Planar format - channels are separated (channels, samples)
+                if samples.ndim == 1:
+                    samples = samples.reshape(1, -1)
+            else:
+                # Packed format - channels are interleaved
+                if samples.ndim == 2 and samples.shape[0] > 1:
+                    # Convert (channels, samples) to (samples, channels) for packed format
+                    samples = samples.T
+                elif samples.ndim == 1:
+                    # Keep 1D for mono packed format or reshape for multi-channel
+                    if self.layout != 'mono':
+                        pass
+            av_frame = av.AudioFrame.from_ndarray(samples, format=self.format, layout=self.layout)
+            av_frame.sample_rate = self.rate
+            av_frame.pts = self.timestamp
+            av_frame.time_base = self.time_base
+            return av_frame
+        except Exception as e:
+            logger.warning(f"Audio conversion failed ({e}), creating dummy frame")
+            dummy_samples = np.zeros((1, 1024), dtype=np.int16)
+            av_frame = av.AudioFrame.from_ndarray(dummy_samples, format='s16', layout='mono')
+            av_frame.sample_rate = self.rate
+            av_frame.pts = self.timestamp
+            av_frame.time_base = self.time_base
+            return av_frame
 
 class OutputFrame(ABC):
     """Base class for output frames."""
@@ -250,102 +298,6 @@ class AudioOutput(OutputFrame):
 # Frame Processing Utilities
 # ===========================
 
-class FrameProcessor:
-    """Reusable frame conversion and processing utilities."""
-    
-    @staticmethod
-    def convert_trickle_to_av(frame: VideoFrame) -> av.VideoFrame:
-        """Convert pytrickle VideoFrame to av.VideoFrame."""
-        return tensor_to_av_frame(frame.tensor)
-    
-    @staticmethod
-    def convert_av_to_trickle(av_frame: av.VideoFrame, original_frame: VideoFrame) -> VideoFrame:
-        """Convert av.VideoFrame back to pytrickle VideoFrame with original timing."""
-        # Convert av frame tensor back to normalized float tensor
-        frame_np = av_frame.to_ndarray(format="rgb24").astype(np.float32) / 255.0
-        tensor = torch.from_numpy(frame_np)
-        
-        return VideoFrame(
-            tensor=tensor,
-            timestamp=original_frame.timestamp,
-            time_base=original_frame.time_base
-        )
-
-    @staticmethod
-    def create_processed_frame(processed_tensor: torch.Tensor, original_frame: VideoFrame) -> VideoFrame:
-        """Create a processed VideoFrame preserving timing from original."""
-        return VideoFrame(
-            tensor=processed_tensor,
-            timestamp=original_frame.timestamp,
-            time_base=original_frame.time_base
-        )
-
-    @staticmethod
-    def convert_trickle_audio_to_av(frame: AudioFrame) -> av.AudioFrame:
-        """Convert pytrickle AudioFrame to av.AudioFrame."""
-        try:
-            samples = frame.samples
-            
-            # Handle different audio format requirements
-            if frame.format.endswith('p'):
-                # Planar format - channels are separated (channels, samples)
-                if samples.ndim == 1:
-                    samples = samples.reshape(1, -1)
-            else:
-                # Packed format - channels are interleaved
-                if samples.ndim == 2 and samples.shape[0] > 1:
-                    # Convert (channels, samples) to (samples, channels) for packed format
-                    samples = samples.T
-                elif samples.ndim == 1:
-                    # Keep 1D for mono packed format or reshape for multi-channel
-                    if frame.layout != 'mono':
-                        # For non-mono, interpret as interleaved samples
-                        pass  # Keep as-is for now
-            
-            av_frame = av.AudioFrame.from_ndarray(samples, format=frame.format, layout=frame.layout)
-            av_frame.sample_rate = frame.rate
-            av_frame.pts = frame.timestamp
-            av_frame.time_base = frame.time_base
-            return av_frame
-            
-        except Exception as e:
-            # If conversion fails, create a simple dummy frame for now
-            logger.warning(f"Audio conversion failed ({e}), creating dummy frame")
-            dummy_samples = np.zeros((1, 1024), dtype=np.int16)
-            av_frame = av.AudioFrame.from_ndarray(dummy_samples, format='s16', layout='mono')
-            av_frame.sample_rate = frame.rate
-            av_frame.pts = frame.timestamp
-            av_frame.time_base = frame.time_base
-            return av_frame
-
-    @staticmethod
-    def convert_av_audio_to_trickle(av_frame: av.AudioFrame, original_frame: AudioFrame) -> AudioFrame:
-        """Convert av.AudioFrame back to pytrickle AudioFrame with original timing."""
-        return AudioFrame.from_av_audio(av_frame)
-
-
-class FrameConversionMixin:
-    """Mixin class that provides frame conversion methods for stream processors."""
-    
-    def convert_trickle_to_av(self, frame: VideoFrame) -> av.VideoFrame:
-        """Convert pytrickle VideoFrame to av.VideoFrame."""
-        return FrameProcessor.convert_trickle_to_av(frame)
-    
-    def convert_av_to_trickle(self, av_frame: av.VideoFrame, original_frame: VideoFrame) -> VideoFrame:
-        """Convert av.VideoFrame back to pytrickle VideoFrame with original timing."""
-        return FrameProcessor.convert_av_to_trickle(av_frame, original_frame)
-    
-    def create_processed_frame(self, processed_tensor: torch.Tensor, original_frame: VideoFrame) -> VideoFrame:
-        """Create a processed VideoFrame preserving timing from original."""
-        return FrameProcessor.create_processed_frame(processed_tensor, original_frame)
-    
-    def convert_trickle_audio_to_av(self, frame: AudioFrame) -> av.AudioFrame:
-        """Convert pytrickle AudioFrame to av.AudioFrame."""
-        return FrameProcessor.convert_trickle_audio_to_av(frame)
-    
-    def convert_av_audio_to_trickle(self, av_frame: av.AudioFrame, original_frame: AudioFrame) -> AudioFrame:
-        """Convert av.AudioFrame back to pytrickle AudioFrame with original timing."""
-        return FrameProcessor.convert_av_audio_to_trickle(av_frame, original_frame)
 
 
 # Streaming Utilities
