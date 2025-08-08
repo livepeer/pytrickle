@@ -16,6 +16,7 @@ from aiohttp import web
 from pydantic import BaseModel, Field
 
 from .client import TrickleClient
+from .protocol import TrickleProtocol
 from .frames import VideoFrame, VideoOutput
 from .api import StreamParamsUpdateRequest, StreamStartRequest
 
@@ -81,23 +82,28 @@ class TrickleApp:
             width = params_dict.get("width", 512)
             height = params_dict.get("height", 512)
             
-            # Create and start client
-            self.current_client = TrickleClient(
+            # Create protocol and client (align with current Client/Protocol API)
+            protocol = TrickleProtocol(
                 subscribe_url=params.subscribe_url,
                 publish_url=params.publish_url,
-                control_url=params.control_url,
-                events_url=params.events_url,
+                control_url=params.control_url or "",
+                events_url=params.events_url or "",
+                data_url=params.data_url,
                 width=width,
                 height=height,
-                frame_processor=self.frame_processor
+            )
+
+            self.current_client = TrickleClient(
+                protocol=protocol,
+                frame_processor=self.frame_processor,
             )
             
             # Start the client in background
             asyncio.create_task(self._run_client(params.gateway_request_id))
             
-            # Emit start event
-            if self.current_client:
-                await self.current_client.emit_event({
+            # Emit start event via protocol events publisher if available
+            if self.current_client and self.current_client.protocol:
+                await self.current_client.protocol.emit_monitoring_event({
                     "type": "stream_started",
                     "timestamp": int(time.time() * 1000),
                     "params": params.params or {}
@@ -152,12 +158,13 @@ class TrickleApp:
             validated_params = await self._parse_and_validate_request(request, StreamParamsUpdateRequest)
             data = validated_params.model_dump()
             
-            # Emit parameter update event
-            await self.current_client.emit_event({
-                "type": "params_updated",
-                "timestamp": int(time.time() * 1000),
-                "params": data
-            })
+            # Emit parameter update event via protocol events publisher if available
+            if self.current_client.protocol:
+                await self.current_client.protocol.emit_monitoring_event({
+                    "type": "params_updated",
+                    "timestamp": int(time.time() * 1000),
+                    "params": data
+                })
             
             logger.info(f"Parameters updated: {data}")
             
