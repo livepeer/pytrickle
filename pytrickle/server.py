@@ -17,17 +17,11 @@ from pydantic import BaseModel, Field
 
 from .client import TrickleClient
 from .frames import VideoFrame, VideoOutput
+from .api import StreamParamsUpdateRequest, StreamStartRequest
 
 logger = logging.getLogger(__name__)
 
-class StreamParams(BaseModel):
-    """Parameters for starting a trickle stream."""
-    subscribe_url: str = Field(..., description="Source URL of the incoming stream to subscribe to")
-    publish_url: str = Field(..., description="Destination URL of the outgoing stream to publish")
-    control_url: Optional[str] = Field(default=None, description="Optional URL for control messages via Trickle protocol")
-    events_url: Optional[str] = Field(default=None, description="Optional URL for events via Trickle protocol")
-    gateway_request_id: str = Field(default="", description="Gateway request identifier")
-    params: Dict[str, Any] = Field(default_factory=dict, description="Processing parameters")
+
 
 class TrickleApp:
     """HTTP server application for trickle streaming."""
@@ -41,7 +35,7 @@ class TrickleApp:
         self.port = port
         self.app = web.Application()
         self.current_client: Optional[TrickleClient] = None
-        self.current_params: Optional[StreamParams] = None
+        self.current_params: Optional[StreamStartRequest] = None
         
         # Setup routes
         self._setup_routes()
@@ -61,12 +55,13 @@ class TrickleApp:
         # Alias for live-video-to-video endpoint (same as stream/start)
         self.app.router.add_post("/live-video-to-video", self._handle_start_stream)
     
-    async def _parse_request_data(self, request: web.Request) -> Dict[str, Any]:
-        """Parse JSON request data."""
+    async def _parse_and_validate_request(self, request: web.Request, model_class):
+        """Parse and validate request data using a Pydantic model."""
         if request.content_type.startswith("application/json"):
-            return await request.json()
+            data = await request.json()
         else:
             raise ValueError(f"Unknown content type: {request.content_type}")
+        return model_class.model_validate(data)
     
     async def _handle_start_stream(self, request: web.Request) -> web.Response:
         """Handle stream start requests."""
@@ -75,16 +70,16 @@ class TrickleApp:
             if self.current_client:
                 await self._stop_current_stream()
             
-            # Parse request
-            data = await self._parse_request_data(request)
-            params = StreamParams(**data)
+            # Parse and validate request
+            params = await self._parse_and_validate_request(request, StreamStartRequest)
             self.current_params = params
             
             logger.info(f"Starting stream: {params.subscribe_url} -> {params.publish_url}")
             
-            # Extract dimensions from params
-            width = params.params.get("width", 512)
-            height = params.params.get("height", 512)
+            # Extract dimensions from params (already converted to int by validation)
+            params_dict = params.params or {}
+            width = params_dict.get("width", 512)
+            height = params_dict.get("height", 512)
             
             # Create and start client
             self.current_client = TrickleClient(
@@ -105,7 +100,7 @@ class TrickleApp:
                 await self.current_client.emit_event({
                     "type": "stream_started",
                     "timestamp": int(time.time() * 1000),
-                    "params": params.params
+                    "params": params.params or {}
                 })
             
             return web.json_response({
@@ -153,7 +148,9 @@ class TrickleApp:
                     "message": "No active stream to update"
                 }, status=400)
             
-            data = await self._parse_request_data(request)
+            # Parse and validate request
+            validated_params = await self._parse_and_validate_request(request, StreamParamsUpdateRequest)
+            data = validated_params.model_dump()
             
             # Emit parameter update event
             await self.current_client.emit_event({
@@ -183,7 +180,7 @@ class TrickleApp:
                 "status": "online" if self.current_client else "offline",
                 "timestamp": int(time.time() * 1000),
                 "has_active_stream": self.current_client is not None,
-                "current_params": self.current_params.dict() if self.current_params else None
+                "current_params": self.current_params.model_dump() if self.current_params else None
             }
             
             return web.json_response(status)

@@ -23,7 +23,7 @@ from .state import StreamState
 from .publisher import TricklePublisher
 from .subscriber import TrickleSubscriber
 from .health import StreamHealthManager
-from .manager import BaseStreamManager, TrickleStreamManager
+from .manager import BaseStreamManager, TrickleStreamManager, StreamHandler
 from . import api
 
 __version__ = "0.1.1"
@@ -42,6 +42,7 @@ __all__ = [
     "StreamHealthManager",
     "BaseStreamManager", 
     "TrickleStreamManager",
+    "StreamHandler",
     "FrameBuffer",
     "StreamState",
     "api",

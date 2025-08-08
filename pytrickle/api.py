@@ -20,27 +20,76 @@ class StreamStartRequest(BaseModel):
     events_url: Optional[str] = Field(default=None, description="URL for events channel communication")
     data_url: Optional[str] = Field(default=None, description="URL for publishing text/data output via data channel")
     gateway_request_id: str = Field(..., description="Unique identifier for the stream request")
-    
-    # Optional fields that may be present in the request
-    manifest_id: Optional[str] = Field(default=None, description="Manifest identifier")
-    model_id: Optional[str] = Field(default=None, description="Model identifier")
-    stream_id: Optional[str] = Field(default=None, description="Stream identifier")
+    # Keep params identical in shape to update request, but optional for start
+    params: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Dynamic parameters object with string field names and any values"
+    )
 
-class StreamParamsUpdateRequest(BaseModel):
-    """Base request model for updating stream parameters."""
-    params: Dict[str, Any] = Field(..., description="Dynamic parameters object (up to 1MB)")
-    
     @field_validator('params')
     @classmethod
-    def validate_params_size(cls, v):
-        """Validate that params object doesn't exceed reasonable size limit."""
-        import json
-        serialized = json.dumps(v)
-        size_bytes = len(serialized.encode('utf-8'))
-        max_size = 1024 * 1024
-        if size_bytes > max_size:
-            raise ValueError(f"Params object too large: {size_bytes} bytes (max: {max_size} bytes)")
-        return v
+    def validate_optional_params_dict(cls, value):
+        if value is None:
+            return value
+        return StreamParamsUpdateRequest.validate_params_dict(value)
+    
+
+class StreamParamsUpdateRequest(BaseModel):
+    """Base request model for updating stream parameters.
+    
+    This model accepts arbitrary string field names with any value types,
+    allowing flexible parameter updates without nested structure.
+    Width and height values are automatically converted to integers if provided.
+    """
+    
+    model_config = {"extra": "allow"}  # Allow arbitrary fields
+    
+    @classmethod
+    def validate_params_dict(cls, v):
+        """Validation method with automatic type conversion for width/height."""
+        if not isinstance(v, dict):
+            raise ValueError("Params must be a dictionary")
+        
+        # Ensure all keys are strings (values can be any type now)
+        for key in v.keys():
+            if not isinstance(key, str):
+                raise ValueError(f"All field names must be strings, got {type(key)} for key: {key}")
+        
+        # Convert width/height to integers if present
+        result = v.copy()  # Don't modify original dict
+        
+        # Validate width/height requirements and convert to int
+        has_width = "width" in result
+        has_height = "height" in result
+        
+        if has_width or has_height:
+            if not (has_width and has_height):
+                raise ValueError("Both 'width' and 'height' must be provided together")
+            
+            # Convert width and height to integers
+            try:
+                width_val = int(result["width"])
+                height_val = int(result["height"])
+                if width_val <= 0 or height_val <= 0:
+                    raise ValueError("Width and height must be positive integers")
+                
+                # Update the result with converted values
+                result["width"] = width_val
+                result["height"] = height_val
+                
+            except ValueError as e:
+                if "invalid literal" in str(e):
+                    raise ValueError("Width and height must be valid integers or integer strings")
+                raise
+        
+        return result
+    
+    @classmethod
+    def model_validate(cls, obj):
+        """Custom validation to ensure all fields are string key-value pairs."""
+        if isinstance(obj, dict):
+            cls.validate_params_dict(obj)
+        return super().model_validate(obj)
     
 class StreamResponse(BaseModel):
     """Standard response model for stream operations."""

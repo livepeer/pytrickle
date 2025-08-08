@@ -14,21 +14,48 @@ from .health import StreamHealthManager
 
 logger = logging.getLogger(__name__)
 
-class StreamHandler(Protocol):
-    """Protocol defining the interface that stream handlers must implement."""
+class StreamHandler:
+    """Base stream handler with common functionality for all trickle streams."""
+    
+    def __init__(self, width: int = 512, height: int = 512, **kwargs):
+        """Initialize stream handler with resolution tracking."""
+        super().__init__(**kwargs)  # Support multiple inheritance
+        self.width = width
+        self.height = height
     
     @property
     def running(self) -> bool:
-        """Whether the stream handler is currently running."""
-        ...
+        """Whether the stream handler is currently running. Must be implemented by subclasses."""
+        raise NotImplementedError("Subclasses must implement the 'running' property")
     
     async def start(self) -> bool:
-        """Start the stream handler. Returns True if successful."""
-        ...
+        """Start the stream handler. Must be implemented by subclasses."""
+        raise NotImplementedError("Subclasses must implement start()")
     
     async def stop(self, *, called_by_manager: bool = False) -> bool:
-        """Stop the stream handler. Returns True if successful."""
-        ...
+        """Stop the stream handler. Must be implemented by subclasses."""
+        raise NotImplementedError("Subclasses must implement stop()")
+    
+    def update_resolution(self, width: int, height: int) -> bool:
+        """
+        Update the resolution and return True if it changed.
+        
+        Args:
+            width: New width value
+            height: New height value
+            
+        Returns:
+            True if resolution changed, False otherwise
+        """
+        changed = (self.width != width) or (self.height != height)
+        
+        if changed:
+            old_width, old_height = self.width, self.height
+            self.width = width
+            self.height = height
+            logger.info(f"Resolution updated from {old_width}x{old_height} to {width}x{height}")
+        
+        return changed
 
 class BaseStreamManager(ABC):
     """Base stream manager that provides core stream management functionality."""
@@ -115,6 +142,8 @@ class BaseStreamManager(ABC):
         return {
             'request_id': request_id,
             'running': handler.running,
+            'width': handler.width,
+            'height': handler.height,
         }
 
     async def get_stream_status(self, request_id: str) -> Optional[Dict[str, Any]]:
