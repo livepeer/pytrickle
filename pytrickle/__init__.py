@@ -19,7 +19,7 @@ from .frames import (
     VideoFrame, AudioFrame, VideoOutput, AudioOutput,
     FrameBuffer,
 )
-from .state import StreamState, StreamErrorHandler
+from .state import StreamState
 from .publisher import TricklePublisher
 from .subscriber import TrickleSubscriber
 from .health import StreamHealthManager
@@ -43,8 +43,7 @@ __all__ = [
     "BaseStreamManager", 
     "TrickleStreamManager",
     "FrameBuffer",
-    "StreamState", 
-    "StreamErrorHandler",
+    "StreamState",
     "api_spec",
     "ErrorCallback",
 ] 
