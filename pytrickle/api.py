@@ -10,7 +10,10 @@ from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, Field, field_validator
 
 class StreamStartRequest(BaseModel):
-    """Base request model for starting a trickle stream."""
+    """Base request model for starting a trickle stream.
+    
+    This model is used for both /api/stream/start and /live-video-to-video endpoints.
+    """
     subscribe_url: str = Field(..., description="URL for subscribing to input video stream")
     publish_url: str = Field(..., description="URL for publishing output video stream")
     control_url: Optional[str] = Field(default=None, description="URL for control channel communication")
@@ -25,9 +28,20 @@ class StreamStartRequest(BaseModel):
 
 class StreamParamsUpdateRequest(BaseModel):
     """Base request model for updating stream parameters."""
-    width: Optional[int] = Field(default=None, description="Width of the generated video")
-    height: Optional[int] = Field(default=None, description="Height of the generated video")
-
+    params: Dict[str, Any] = Field(..., description="Dynamic parameters object (up to 1MB)")
+    
+    @field_validator('params')
+    @classmethod
+    def validate_params_size(cls, v):
+        """Validate that params object doesn't exceed reasonable size limit."""
+        import json
+        serialized = json.dumps(v)
+        size_bytes = len(serialized.encode('utf-8'))
+        max_size = 1024 * 1024
+        if size_bytes > max_size:
+            raise ValueError(f"Params object too large: {size_bytes} bytes (max: {max_size} bytes)")
+        return v
+    
 class StreamResponse(BaseModel):
     """Standard response model for stream operations."""
     status: str = Field(..., description="Operation status (success/error)")
