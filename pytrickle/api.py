@@ -29,7 +29,7 @@ class StreamStartRequest(BaseModel):
     @field_validator('params')
     @classmethod
     def validate_optional_params_dict(cls, value):
-        return StreamParamsUpdateRequest.validate_params_dict(value) if value is not None else value
+        return StreamParamsUpdateRequest.validate_params(value) if value is not None else value
     
 
 class StreamParamsUpdateRequest(BaseModel):
