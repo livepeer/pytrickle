@@ -13,7 +13,7 @@ ErrorCallback = Union[
 ]
 
 from .client import TrickleClient
-from .server import TrickleApp, create_app
+from .server import TrickleApp
 from .protocol import TrickleProtocol
 from .frames import (
     VideoFrame, AudioFrame, VideoOutput, AudioOutput,
@@ -25,6 +25,12 @@ from .subscriber import TrickleSubscriber
 from .health import StreamHealthManager
 from .manager import BaseStreamManager, TrickleStreamManager, StreamHandler
 from .stream_handler import TrickleStreamHandler
+from .register import RegisterCapability
+
+# Async processing utilities
+from .async_processor import AsyncFrameProcessor
+from .simple_async_processor import SimpleAsyncProcessor
+
 from . import api
 
 __version__ = "0.1.1"
@@ -32,7 +38,6 @@ __version__ = "0.1.1"
 __all__ = [
     "TrickleClient",
     "TrickleApp",
-    "create_app",
     "TrickleProtocol",
     "VideoFrame",
     "AudioFrame", 
@@ -47,6 +52,11 @@ __all__ = [
     "TrickleStreamHandler",
     "FrameBuffer",
     "StreamState",
+    "RegisterCapability",
     "api",
     "ErrorCallback",
+    
+    # Async processing utilities
+    "AsyncFrameProcessor",
+    "SimpleAsyncProcessor",
 ] 

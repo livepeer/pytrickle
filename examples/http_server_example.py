@@ -10,7 +10,7 @@ import asyncio
 import logging
 import torch
 import json
-from pytrickle import create_app
+from pytrickle import RegisterCapability, TrickleApp
 from pytrickle.frames import VideoFrame, VideoOutput
 
 # Configure logging
@@ -87,8 +87,15 @@ def custom_frame_processor(frame: VideoFrame) -> VideoOutput:
 
 async def main():
     """Main function to run the HTTP server."""
+    # Optionally register as a worker with orchestrator
+    RegisterCapability.register(
+        logger,
+        capability_name="pytrickle-example-server",
+        capability_desc="PyTrickle HTTP server example with video effects"
+    )
+    
     # Create trickle app with custom frame processor
-    app = create_app(frame_processor=custom_frame_processor)
+    app = TrickleApp(frame_processor=custom_frame_processor)
     
     logger.info("Starting pytrickle HTTP server on port 8080")
     logger.info("Available effects: red_tint, blue_tint, green_tint, grayscale, invert, brightness, color_shift")
