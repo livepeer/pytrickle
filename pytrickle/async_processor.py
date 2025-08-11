@@ -55,6 +55,10 @@ class AsyncFrameProcessor(ABC):
         self.shutdown_event = asyncio.Event()
         
         logger = logging.getLogger(self.__class__.__name__)
+        
+        # Timestamp tracking for monotonic DTS across warmups/encoder restarts
+        self._last_video_ts: Optional[int] = None
+        self._last_audio_ts: Optional[int] = None
     
     async def start(self):
         """Start the async processor."""
@@ -125,6 +129,13 @@ class AsyncFrameProcessor(ABC):
     
     def _process_video_frame_sync(self, frame: VideoFrame) -> VideoOutput:
         """Process video frame in sync interface."""
+        # Enforce monotonic input timestamp
+        if self._last_video_ts is not None and frame.timestamp <= self._last_video_ts:
+            # Create a copy with bumped timestamp to ensure monotonicity
+            try:
+                frame = VideoFrame(frame.tensor, self._last_video_ts + 1, frame.time_base, frame.log_timestamps.copy())
+            except Exception:
+                pass
         # Store for fallback
         self.last_video_frame = frame
         
@@ -138,8 +149,20 @@ class AsyncFrameProcessor(ABC):
         # Try to get processed frame
         try:
             processed_frame = self.video_output_queue.get_nowait()
-            # Update last processed frame for better fallback
+            # Enforce monotonic timestamp on processed frame
+            if self._last_video_ts is not None and processed_frame.timestamp <= self._last_video_ts:
+                try:
+                    processed_frame = VideoFrame(
+                        processed_frame.tensor,
+                        self._last_video_ts + 1,
+                        processed_frame.time_base,
+                        processed_frame.log_timestamps.copy()
+                    )
+                except Exception:
+                    pass
+            # Update last processed frame and last ts
             self.last_video_frame = processed_frame
+            self._last_video_ts = processed_frame.timestamp
             return VideoOutput(processed_frame, f"{self.__class__.__name__}_processed")
         except asyncio.QueueEmpty:
             # Return fallback - this will use last_video_frame if available
@@ -160,7 +183,15 @@ class AsyncFrameProcessor(ABC):
         # This prevents timing issues and encoder breaks
         logger.debug(f"Audio frame passthrough: {self.frame_count}")
         
-        # Return the original frame unchanged for immediate output
+        # Enforce monotonic audio timestamps for passthrough
+        try:
+            from .frames import AudioFrame as AudioFrameCls  # avoid circular import at top
+            if self._last_audio_ts is not None and frame.timestamp <= self._last_audio_ts:
+                frame = AudioFrameCls._from_existing_with_timestamp(frame, self._last_audio_ts + 1)
+            self._last_audio_ts = frame.timestamp
+        except Exception:
+            pass
+        # Return the original (or adjusted) frame for immediate output
         return AudioOutput([frame], f"{self.__class__.__name__}_passthrough")
     
     def _get_fallback_output(self, frame: Union[VideoFrame, AudioFrame]) -> Union[VideoOutput, AudioOutput]:
@@ -173,13 +204,35 @@ class AsyncFrameProcessor(ABC):
             raise ValueError(f"Unknown frame type: {type(frame)}")
     
     def _get_video_fallback(self, frame: VideoFrame) -> VideoOutput:
-        """Get fallback video output."""
-        # If we have a last processed frame, use it as fallback
-        if self.last_video_frame is not None:
-            # Return the last processed frame to maintain consistency
-            return VideoOutput(self.last_video_frame, f"{self.__class__.__name__}_fallback")
-        # Otherwise return the current frame as passthrough
-        return VideoOutput(frame, f"{self.__class__.__name__}_passthrough")
+        """Get fallback video output with monotonic timestamp enforcement."""
+        # Compute next monotonic timestamp based on current frame and last seen
+        next_ts = frame.timestamp
+        if self._last_video_ts is not None and next_ts <= self._last_video_ts:
+            next_ts = self._last_video_ts + 1
+        # If we have a last processed frame, use its tensor but issue with new timestamp
+        try:
+            if self.last_video_frame is not None:
+                fallback_frame = VideoFrame(
+                    self.last_video_frame.tensor,
+                    next_ts,
+                    frame.time_base,
+                    self.last_video_frame.log_timestamps.copy()
+                )
+            else:
+                # No previous processed frame, just enforce timestamp on current frame
+                fallback_frame = VideoFrame(
+                    frame.tensor,
+                    next_ts,
+                    frame.time_base,
+                    frame.log_timestamps.copy()
+                )
+            self._last_video_ts = fallback_frame.timestamp
+            self.last_video_frame = fallback_frame
+            return VideoOutput(fallback_frame, f"{self.__class__.__name__}_fallback")
+        except Exception:
+            # In worst case, return the current frame as passthrough
+            self._last_video_ts = next_ts
+            return VideoOutput(frame, f"{self.__class__.__name__}_passthrough")
     
     def _get_audio_fallback(self, frame: AudioFrame) -> AudioOutput:
         """Get fallback audio output."""
@@ -343,6 +396,12 @@ class AsyncFrameProcessor(ABC):
             return self.process_frame_sync(frame)
         
         return frame_processor
+
+    # Timestamp tracking controls
+    def reset_timestamp_tracking(self):
+        """Reset monotonic timestamp tracking state (call after warmup or encoder restart)."""
+        self._last_video_ts = None
+        self._last_audio_ts = None
     
     @classmethod
     def create_bridge(cls, async_processor: 'AsyncFrameProcessor') -> Callable:
