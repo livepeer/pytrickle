@@ -8,7 +8,7 @@ making it easy to integrate AI models and async pipelines with PyTrickle.
 import asyncio
 import logging
 from abc import ABC, abstractmethod
-from typing import Union, Optional, Callable, Any, Dict
+from typing import Union, Optional, Callable, Any, Dict, List
 from .frames import VideoFrame, AudioFrame, VideoOutput, AudioOutput
 
 logger = logging.getLogger(__name__)
@@ -31,44 +31,46 @@ class AsyncFrameProcessor(ABC):
         queue_maxsize: int = 30,
         error_callback: Optional[Callable[[Exception], None]] = None
     ):
-        """
-        Initialize the async frame processor.
-        
-        Args:
-            queue_maxsize: Maximum size for processing queues
-            error_callback: Callback for error handling
-        """
+        """Initialize the async frame processor."""
         self.queue_maxsize = queue_maxsize
         self.error_callback = error_callback
         
-        # Processing queues
+        # Processing state
+        self.is_started = False
+        self.processor_task: Optional[asyncio.Task] = None
+        self.frame_count = 0
+        
+        # Queues for frame processing
         self.input_queue = asyncio.Queue(maxsize=queue_maxsize)
         self.video_output_queue = asyncio.Queue(maxsize=queue_maxsize)
         self.audio_output_queue = asyncio.Queue(maxsize=queue_maxsize)
         
-        # State management
-        self.is_started = False
-        self.frame_count = 0
-        
-        # Async tasks
-        self.processor_task: Optional[asyncio.Task] = None
-        
-        # Fallback frames for when processing isn't ready
+        # Frame correlation and fallback storage
+        self.pending_video_frames: Dict[int, VideoFrame] = {}
+        self.pending_audio_frames: Dict[int, AudioFrame] = {}
         self.last_video_frame: Optional[VideoFrame] = None
         self.last_audio_frame: Optional[AudioFrame] = None
         
-        logger.info(f"{self.__class__.__name__} initialized")
+        # Event coordination
+        self.shutdown_event = asyncio.Event()
+        
+        logger = logging.getLogger(self.__class__.__name__)
     
     async def start(self):
         """Start the async processor."""
-        if self.is_started:
+        if self.is_started and self.processor_task and not self.processor_task.done():
             return
         
         logger.info(f"Starting {self.__class__.__name__}")
         self.is_started = True
         
+        # Cancel existing task if it exists and is done/cancelled
+        if self.processor_task and self.processor_task.done():
+            self.processor_task = None
+        
         # Start async processing task
-        self.processor_task = asyncio.create_task(self._process_frames_async())
+        if not self.processor_task:
+            self.processor_task = asyncio.create_task(self._process_frames_async())
     
     async def stop(self):
         """Stop the async processor."""
@@ -107,6 +109,10 @@ class AsyncFrameProcessor(ABC):
                 return self._process_video_frame_sync(frame)
             elif isinstance(frame, AudioFrame):
                 return self._process_audio_frame_sync(frame)
+            else:
+                # Handle unknown frame types
+                logger.warning(f"Unknown frame type: {type(frame)}")
+                return self._get_fallback_output(frame)
         
         except Exception as e:
             logger.error(f"Error in sync frame processing: {e}")
@@ -123,39 +129,39 @@ class AsyncFrameProcessor(ABC):
         self.last_video_frame = frame
         
         # Enqueue for async processing (non-blocking)
-        if self.is_started and not self.input_queue.full():
+        if self.is_started:
             try:
                 self.input_queue.put_nowait(("video", frame, self.frame_count))
             except asyncio.QueueFull:
-                pass  # Skip frame if queue is full
+                logger.debug(f"Input queue full, skipping video frame {self.frame_count}")
         
         # Try to get processed frame
         try:
             processed_frame = self.video_output_queue.get_nowait()
+            # Update last processed frame for better fallback
+            self.last_video_frame = processed_frame
             return VideoOutput(processed_frame, f"{self.__class__.__name__}_processed")
         except asyncio.QueueEmpty:
-            # Return fallback
+            # Return fallback - this will use last_video_frame if available
+            return self._get_video_fallback(frame)
+        except Exception as e:
+            logger.error(f"Error getting processed video frame: {e}")
             return self._get_video_fallback(frame)
     
     def _process_audio_frame_sync(self, frame: AudioFrame) -> AudioOutput:
         """Process audio frame in sync interface."""
-        # Store for fallback
+        # For audio frames, we want to pass them through unchanged to avoid encoder issues
+        # This maintains proper audio timing and prevents encoder breaks
+        
+        # Store for potential fallback use
         self.last_audio_frame = frame
         
-        # Enqueue for async processing (non-blocking)
-        if self.is_started and not self.input_queue.full():
-            try:
-                self.input_queue.put_nowait(("audio", frame, self.frame_count))
-            except asyncio.QueueFull:
-                pass  # Skip frame if queue is full
+        # Don't enqueue audio for async processing - just pass through
+        # This prevents timing issues and encoder breaks
+        logger.debug(f"Audio frame passthrough: {self.frame_count}")
         
-        # Try to get processed frame
-        try:
-            processed_frames = self.audio_output_queue.get_nowait()
-            return AudioOutput(processed_frames, f"{self.__class__.__name__}_processed")
-        except asyncio.QueueEmpty:
-            # Return fallback
-            return self._get_audio_fallback(frame)
+        # Return the original frame unchanged for immediate output
+        return AudioOutput([frame], f"{self.__class__.__name__}_passthrough")
     
     def _get_fallback_output(self, frame: Union[VideoFrame, AudioFrame]) -> Union[VideoOutput, AudioOutput]:
         """Get fallback output for unknown frame types."""
@@ -168,10 +174,20 @@ class AsyncFrameProcessor(ABC):
     
     def _get_video_fallback(self, frame: VideoFrame) -> VideoOutput:
         """Get fallback video output."""
+        # If we have a last processed frame, use it as fallback
+        if self.last_video_frame is not None:
+            # Return the last processed frame to maintain consistency
+            return VideoOutput(self.last_video_frame, f"{self.__class__.__name__}_fallback")
+        # Otherwise return the current frame as passthrough
         return VideoOutput(frame, f"{self.__class__.__name__}_passthrough")
     
     def _get_audio_fallback(self, frame: AudioFrame) -> AudioOutput:
         """Get fallback audio output."""
+        # If we have a last processed audio frame, use it as fallback
+        if self.last_audio_frame is not None:
+            # Return the last processed audio frame to maintain consistency
+            return AudioOutput([self.last_audio_frame], f"{self.__class__.__name__}_fallback")
+        # Otherwise return the current frame as passthrough
         return AudioOutput([frame], f"{self.__class__.__name__}_passthrough")
     
     async def _process_frames_async(self):
@@ -188,30 +204,18 @@ class AsyncFrameProcessor(ABC):
                     frame_type, frame, frame_id = frame_data
                     
                     if frame_type == "video":
+                        # Store frame for correlation
+                        self.pending_video_frames[frame_id] = frame
                         processed_frame = await self.process_video_async(frame)
                         if processed_frame:
-                            try:
-                                self.video_output_queue.put_nowait(processed_frame)
-                            except asyncio.QueueFull:
-                                # Remove oldest and add new
-                                try:
-                                    self.video_output_queue.get_nowait()
-                                    self.video_output_queue.put_nowait(processed_frame)
-                                except asyncio.QueueEmpty:
-                                    pass
+                            # Ensure frame gets added to output queue
+                            await self._add_to_video_queue(processed_frame, frame_id)
                     
                     elif frame_type == "audio":
-                        processed_frames = await self.process_audio_async(frame)
-                        if processed_frames:
-                            try:
-                                self.audio_output_queue.put_nowait(processed_frames)
-                            except asyncio.QueueFull:
-                                # Remove oldest and add new
-                                try:
-                                    self.audio_output_queue.get_nowait()
-                                    self.audio_output_queue.put_nowait(processed_frames)
-                                except asyncio.QueueEmpty:
-                                    pass
+                        # Audio frames are now handled with immediate passthrough in sync interface
+                        # Skip async processing to avoid timing issues
+                        logger.debug(f"Skipping async audio processing for frame {frame_id}")
+                        continue
                 
                 except asyncio.TimeoutError:
                     continue
@@ -228,6 +232,48 @@ class AsyncFrameProcessor(ABC):
             pass
         except Exception as e:
             logger.error(f"Async processor error: {e}")
+    
+    async def _add_to_video_queue(self, processed_frame: VideoFrame, frame_id: int):
+        """Add processed video frame to output queue with proper queue management."""
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            try:
+                self.video_output_queue.put_nowait(processed_frame)
+                # Clean up correlation data for processed frame
+                self.pending_video_frames.pop(frame_id, None)
+                return
+            except asyncio.QueueFull:
+                if attempt < max_attempts - 1:
+                    # Remove oldest frame to make room
+                    try:
+                        self.video_output_queue.get_nowait()
+                        logger.debug("Removed oldest video frame to make room for new frame")
+                    except asyncio.QueueEmpty:
+                        # Queue was emptied, try again
+                        continue
+                else:
+                    logger.warning(f"Could not add processed video frame {frame_id} to output queue after {max_attempts} attempts")
+    
+    async def _add_to_audio_queue(self, processed_frames: List[AudioFrame], frame_id: int):
+        """Add processed audio frames to output queue with proper queue management."""
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            try:
+                self.audio_output_queue.put_nowait(processed_frames)
+                # Clean up correlation data for processed frame
+                self.pending_audio_frames.pop(frame_id, None)
+                return
+            except asyncio.QueueFull:
+                if attempt < max_attempts - 1:
+                    # Remove oldest frame to make room
+                    try:
+                        self.audio_output_queue.get_nowait()
+                        logger.debug("Removed oldest audio frame to make room for new frame")
+                    except asyncio.QueueEmpty:
+                        # Queue was emptied, try again
+                        continue
+                else:
+                    logger.warning(f"Could not add processed audio frame {frame_id} to output queue after {max_attempts} attempts")
     
     async def _clear_queues(self):
         """Clear all processing queues."""
@@ -255,7 +301,7 @@ class AsyncFrameProcessor(ABC):
         pass
     
     @abstractmethod
-    async def process_audio_async(self, frame: AudioFrame) -> Optional[list[AudioFrame]]:
+    async def process_audio_async(self, frame: AudioFrame) -> Optional[List[AudioFrame]]:
         """
         Process an audio frame asynchronously.
         
@@ -266,8 +312,6 @@ class AsyncFrameProcessor(ABC):
             List of processed audio frames or None if processing failed
         """
         pass
-    
-
     
     def update_params(self, params: Dict[str, Any]):
         """
