@@ -9,6 +9,7 @@ import asyncio
 import json
 import queue
 import logging
+import time
 from typing import Optional, AsyncGenerator, Callable
 
 from .base import TrickleComponent
@@ -36,7 +37,8 @@ class TrickleProtocol(TrickleComponent):
         data_url: Optional[str] = None,
         width: Optional[int] = None,
         height: Optional[int] = None,
-        error_callback: Optional[ErrorCallback] = None
+        error_callback: Optional[ErrorCallback] = None,
+        heartbeat_interval: float = 10.0,
     ):
         super().__init__(error_callback)
         self.subscribe_url = subscribe_url
@@ -46,6 +48,7 @@ class TrickleProtocol(TrickleComponent):
         self.data_url = data_url
         self.width = width
         self.height = height
+        self.heartbeat_interval = heartbeat_interval
         
         # Tasks and components
         self.subscribe_task: Optional[asyncio.Task] = None
@@ -61,6 +64,7 @@ class TrickleProtocol(TrickleComponent):
         # Coordination events
         self.subscription_ended = asyncio.Event()
         self._monitor_task: Optional[asyncio.Task] = None
+        self._heartbeat_task: Optional[asyncio.Task] = None
 
     async def _on_component_error(self, error_type: str, exception: Optional[Exception] = None):
         """Handle errors from subscriber/publisher components."""
@@ -83,6 +87,13 @@ class TrickleProtocol(TrickleComponent):
                 if self.events_publisher:
                     await self.events_publisher.shutdown()
                     logger.info("Events publisher shutdown signaled due to subscription end")
+                # Stop heartbeat task on subscription end
+                if self._heartbeat_task and not self._heartbeat_task.done():
+                    self._heartbeat_task.cancel()
+                    try:
+                        await self._heartbeat_task
+                    except asyncio.CancelledError:
+                        pass
                 
                 # Also signal shutdown to control subscriber
                 if self.control_subscriber:
@@ -132,6 +143,9 @@ class TrickleProtocol(TrickleComponent):
         if self.events_url and self.events_url.strip():
             self.events_publisher = TricklePublisher(self.events_url, "application/json", error_callback=self._on_component_error)
             await self.events_publisher.start()
+            # Start protocol-level heartbeat loop if enabled
+            if self.heartbeat_interval and self.heartbeat_interval > 0:
+                self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
             
         # Initialize data publisher if URL provided
         if self.data_url and self.data_url.strip():
@@ -148,6 +162,15 @@ class TrickleProtocol(TrickleComponent):
         # Signal shutdown immediately to all components
         self.shutdown_event.set()
         
+        # Stop heartbeat task first
+        if self._heartbeat_task and not self._heartbeat_task.done():
+            self._heartbeat_task.cancel()
+            try:
+                await self._heartbeat_task
+            except asyncio.CancelledError:
+                pass
+        self._heartbeat_task = None
+
         # Stop monitoring task
         if self._monitor_task and not self._monitor_task.done():
             self._monitor_task.cancel()
@@ -249,6 +272,41 @@ class TrickleProtocol(TrickleComponent):
                 await segment.write(event_json.encode())
         except Exception as e:
             logger.error(f"Error reporting status: {e}")
+
+    async def _heartbeat_loop(self):
+        """Emit minimal liveness events at a fixed cadence."""
+        try:
+            while not self.shutdown_event.is_set():
+                try:
+                    heartbeat_event = {
+                        "type": "heartbeat",
+                        "timestamp": __import__("time").time(),
+                    }
+                    # Use milliseconds for timestamp consistency
+                    heartbeat_event["timestamp"] = int(heartbeat_event["timestamp"] * 1000)
+                    heartbeat_event.update({
+                        "urls": {
+                            "subscribe": self.subscribe_url,
+                            "publish": self.publish_url,
+                            "control": self.control_url or "",
+                            "events": self.events_url or "",
+                            "data": self.data_url or "",
+                        },
+                        "dimensions": {
+                            "width": self.width or DEFAULT_WIDTH,
+                            "height": self.height or DEFAULT_HEIGHT,
+                        },
+                    })
+                    await self.emit_monitoring_event(heartbeat_event, queue_event_type="stream_heartbeat")
+                except Exception as e:
+                    logger.warning(f"Heartbeat emission error: {e}")
+                # Wait for interval or shutdown
+                try:
+                    await asyncio.wait_for(self.shutdown_event.wait(), timeout=self.heartbeat_interval)
+                except asyncio.TimeoutError:
+                    continue
+        except asyncio.CancelledError:
+            pass
 
     async def control_loop(self, done: asyncio.Event) -> AsyncGenerator[dict, None]:
         """Generate control messages from the control stream."""

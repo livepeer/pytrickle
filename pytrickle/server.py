@@ -9,7 +9,7 @@ import asyncio
 import logging
 import json
 import time
-from typing import Optional, Dict, Any, Callable
+from typing import Optional, Dict, Any, Callable, Union
 from dataclasses import dataclass
 
 from aiohttp import web
@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 
 from .client import TrickleClient
 from .protocol import TrickleProtocol
-from .frames import VideoFrame, VideoOutput
+from .frames import VideoFrame, VideoOutput, AudioFrame, AudioOutput
 from .api import StreamParamsUpdateRequest, StreamStartRequest
 
 logger = logging.getLogger(__name__)
@@ -29,7 +29,7 @@ class TrickleApp:
     
     def __init__(
         self, 
-        frame_processor: Optional[Callable[[VideoFrame], VideoOutput]] = None,
+        frame_processor: Optional[Callable[[Union[VideoFrame, AudioFrame]], Union[VideoOutput, AudioOutput]]] = None,
         port: int = 8080
     ):
         self.frame_processor = frame_processor or self._default_frame_processor
@@ -41,9 +41,14 @@ class TrickleApp:
         # Setup routes
         self._setup_routes()
     
-    def _default_frame_processor(self, frame: VideoFrame) -> VideoOutput:
+    def _default_frame_processor(self, frame: Union[VideoFrame, AudioFrame]) -> Union[VideoOutput, AudioOutput]:
         """Default frame processor that passes frames through unchanged."""
-        return VideoOutput(frame, self.current_params.gateway_request_id if self.current_params else "default")
+        if isinstance(frame, VideoFrame):
+            return VideoOutput(frame, self.current_params.gateway_request_id if self.current_params else "default")
+        elif isinstance(frame, AudioFrame):
+            return AudioOutput([frame], self.current_params.gateway_request_id if self.current_params else "default")
+        else:
+            raise ValueError(f"Unknown frame type: {type(frame)}")
     
     def _setup_routes(self):
         """Setup HTTP routes."""
@@ -257,6 +262,6 @@ class TrickleApp:
             await self._stop_current_stream()
             await runner.cleanup()
 
-def create_app(frame_processor: Optional[Callable[[VideoFrame], VideoOutput]] = None) -> TrickleApp:
+def create_app(frame_processor: Optional[Callable[[Union[VideoFrame, AudioFrame]], Union[VideoOutput, AudioOutput]]] = None) -> TrickleApp:
     """Create a trickle app instance."""
     return TrickleApp(frame_processor) 
