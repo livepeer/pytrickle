@@ -52,6 +52,9 @@ class StreamParamsUpdateRequest(BaseModel):
         for key in v.keys():
             if not isinstance(key, str):
                 raise ValueError(f"All field names must be strings, got {type(key)} for key: {key}")
+        
+        # Convert and validate dimensions if present
+        return cls._convert_dimensions(v)
     
     @classmethod
     def _convert_dimensions(cls, params_dict: dict) -> dict:
