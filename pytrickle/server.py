@@ -30,9 +30,11 @@ class TrickleApp:
     def __init__(
         self, 
         frame_processor: Optional[Callable[[Union[VideoFrame, AudioFrame]], Union[VideoOutput, AudioOutput]]] = None,
-        port: int = 8080
+        port: int = 8080,
+        param_update_callback: Optional[Callable[[Dict[str, Any]], None]] = None
     ):
         self.frame_processor = frame_processor or self._default_frame_processor
+        self.param_update_callback = param_update_callback
         self.port = port
         self.app = web.Application()
         self.current_client: Optional[TrickleClient] = None
@@ -162,6 +164,18 @@ class TrickleApp:
             # Parse and validate request
             validated_params = await self._parse_and_validate_request(request, StreamParamsUpdateRequest)
             data = validated_params.model_dump()
+            
+            # Call parameter update callback if provided
+            if self.param_update_callback:
+                try:
+                    self.param_update_callback(data)
+                    logger.info(f"Parameters updated via callback: {data}")
+                except Exception as e:
+                    logger.error(f"Error in parameter update callback: {e}")
+                    return web.json_response({
+                        "status": "error",
+                        "message": f"Parameter update failed: {str(e)}"
+                    }, status=500)
             
             # Emit parameter update event via protocol events publisher if available
             if self.current_client.protocol:

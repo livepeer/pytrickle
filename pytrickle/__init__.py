@@ -29,7 +29,6 @@ from .register import RegisterCapability
 
 # Async processing utilities
 from .async_processor import AsyncFrameProcessor
-from .simple_async_processor import SimpleAsyncProcessor
 
 from . import api
 
@@ -55,8 +54,5 @@ __all__ = [
     "RegisterCapability",
     "api",
     "ErrorCallback",
-    
-    # Async processing utilities
-    "AsyncFrameProcessor",
-    "SimpleAsyncProcessor",
+    "AsyncFrameProcessor"
 ] 
