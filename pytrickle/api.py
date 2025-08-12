@@ -8,7 +8,7 @@ API request parameters used across trickle streaming applications.
 import json
 from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, Field, field_validator
-
+from utils.hardware import GPUComputeInfo, GPUUtilizationInfo
 class StreamStartRequest(BaseModel):
     """Base request model for starting a trickle stream.
     
@@ -125,3 +125,25 @@ class HealthStatus(BaseModel):
     active_streams: int = Field(default=0, description="Number of active streams")
     startup_complete: bool = Field(default=False, description="Whether startup is complete")
     additional_info: Optional[Dict[str, Any]] = Field(default=None, description="Additional status information")
+
+class Version(BaseModel):
+    """Model for version information."""
+    pipeline: str = "byoc"
+    model_id: str = Field(..., description="Model identifier")
+    version: str = Field(..., description="Version string")
+
+
+class HardwareInformation(BaseModel):
+    """Response model for GPU information."""
+
+    pipeline: str
+    model_id: str
+    gpu_info: Dict[int, GPUComputeInfo]
+
+
+class HardwareStats(BaseModel):
+    """Response model for real-time GPU statistics."""
+
+    pipeline: str
+    model_id: str
+    gpu_stats: Dict[int, GPUUtilizationInfo]

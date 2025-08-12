@@ -16,6 +16,16 @@ from enum import Enum, auto
 logger = logging.getLogger(__name__)
 
 
+class PipelineVersion:
+    """Version information for the pipeline."""
+    
+    def __init__(self, version: str):
+        self.version = version
+    
+    @property
+    def state(self) -> str:
+        return self.version
+
 class PipelineState(Enum):
     """Lifecycle states for a stream/pipeline.
 
@@ -30,7 +40,6 @@ class PipelineState(Enum):
     SHUTTING_DOWN = "IDLE"       # coordinated shutdown
     ERROR = "ERROR"              # error state
     STOPPED = "IDLE"             # stopped state
-
 
 class StreamState:
     """Unified state management for stream lifecycle using enums and events.
@@ -77,6 +86,15 @@ class StreamState:
         """Compatibility: True when the pipeline is warmed/ready."""
         return self._state is PipelineState.READY
 
+    def get_stream_state(self) -> dict:
+        """Get a dict representation of the current state."""
+        return {
+            "status": self._state,
+            "pipeline_ready": self.pipeline_ready,
+            "shutdown_initiated": self.shutdown_event.is_set(),
+            "error": self.error_event.is_set(),
+        }
+    
     # State transitions
     def start(self) -> None:
         """Begin stream startup; transitions to LOADING."""

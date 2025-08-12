@@ -11,6 +11,7 @@ import json
 import time
 from typing import Optional, Dict, Any, Callable, Union
 from dataclasses import dataclass
+import os
 
 from aiohttp import web
 from pydantic import BaseModel, Field
@@ -18,11 +19,11 @@ from pydantic import BaseModel, Field
 from .client import TrickleClient
 from .protocol import TrickleProtocol
 from .frames import VideoFrame, VideoOutput, AudioFrame, AudioOutput
-from .api import StreamParamsUpdateRequest, StreamStartRequest
+from .api import StreamParamsUpdateRequest, StreamStartRequest, Version, HardwareInformation, HardwareStats
+from .state import StreamState, PipelineState
+from .utils.hardware import HardwareInfo
 
 logger = logging.getLogger(__name__)
-
-
 
 class TrickleApp:
     """HTTP server application for trickle streaming."""
@@ -31,15 +32,21 @@ class TrickleApp:
         self, 
         frame_processor: Optional[Callable[[Union[VideoFrame, AudioFrame]], Union[VideoOutput, AudioOutput]]] = None,
         port: int = 8080,
+        capability_name: str = "",
+        version: str = "0.0.1",
         param_update_callback: Optional[Callable[[Dict[str, Any]], None]] = None
     ):
         self.frame_processor = frame_processor or self._default_frame_processor
         self.param_update_callback = param_update_callback
         self.port = port
+        self.state = StreamState()
         self.app = web.Application()
         self.current_client: Optional[TrickleClient] = None
         self.current_params: Optional[StreamStartRequest] = None
-        
+        self.version = version
+        self.hardware_info = HardwareInfo()
+        self.capability_name = capability_name or os.getenv("CAPABILITY_NAME", "")
+
         # Setup routes
         self._setup_routes()
     
@@ -52,6 +59,10 @@ class TrickleApp:
         else:
             raise ValueError(f"Unknown frame type: {type(frame)}")
     
+    def _default_hardware_info(self) -> Dict[str, Any]:
+        """Return default hardware info."""
+        return self.hardware_info.get_gpu_compute_info()
+    
     def _setup_routes(self):
         """Setup HTTP routes."""
         self.app.router.add_post("/api/stream/start", self._handle_start_stream)
@@ -59,7 +70,10 @@ class TrickleApp:
         self.app.router.add_post("/api/stream/params", self._handle_update_params)
         self.app.router.add_get("/api/stream/status", self._handle_get_status)
         self.app.router.add_get("/health", self._handle_health)
-        
+        self.app.router.add_get("/version", self._handle_version)
+        self.app.router.add_get("/hardware/info", self._handle_hardware_info)
+        self.app.router.add_get("/hardware/stats", self._handle_hardware_stats)
+
         # Alias for live-video-to-video endpoint (same as stream/start)
         self.app.router.add_post("/live-video-to-video", self._handle_start_stream)
     
@@ -220,18 +234,33 @@ class TrickleApp:
     
     async def _handle_health(self, request: web.Request) -> web.Response:
         """Handle health check requests."""
-        return web.json_response({
-            "status": "healthy",
-            "service": "Pytrickle Streaming Server",
-            "endpoints": {
-                "start": "POST /api/stream/start - Start streaming",
-                "stop": "POST /api/stream/stop - Stop streaming", 
-                "params": "POST /api/stream/params - Update parameters",
-                "status": "GET /api/stream/status - Get status",
-                "health": "GET /health - Health check",
-                "live_video": "POST /live-video-to-video - Start live video processing (alias for /api/stream/start)"
-            }
-        })
+        return web.json_response(self.state.get_stream_state())
+    
+    async def _handle_version(self, request: web.Request) -> web.Response:
+        """Handle health check requests."""
+        capability_name = os.getenv("CAPABILITY_NAME", "")
+        return web.json_response(Version(
+            pipeline="byoc",
+            model_id=capability_name,
+            version=self.version
+        ).model_dump())
+    
+    async def _handle_hardware_info(self, request: web.Request) -> web.Response:
+        """Handle hardware info requests."""
+
+        return web.json_response(HardwareInformation(
+            pipeline="byoc",
+            model_id=self.capability_name,
+            gpu_info=self._default_hardware_info()
+        ).model_dump())
+
+    async def _handle_hardware_stats(self, request: web.Request) -> web.Response:
+        """Handle hardware stats requests."""
+        return web.json_response(HardwareStats(
+            pipeline="byoc",
+            model_id=self.capability_name,
+            gpu_stats=self.hardware_info.get_gpu_utilization_stats()
+        ).model_dump())
     
     async def _run_client(self, request_id: str):
         """Run the trickle client."""
