@@ -290,13 +290,13 @@ class TrickleApp:
         if self.current_client:
             await self.current_client.stop()
             
-            # Stop frame processor to return to idle state
-            await self.frame_processor.stop_processing()
             logger.info("AsyncFrameProcessor returned to idle state")
                 
             self.current_client = None
             self.current_params = None
-            logger.info("Current stream stopped")
+    async def stop(self):
+        """Stop the current trickle client and clean up resources."""
+        await self._stop_current_stream()
     
     async def start_server(self):
         """Start the HTTP server."""

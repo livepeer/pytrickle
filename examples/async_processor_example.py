@@ -92,11 +92,11 @@ async def main():
         port = int(os.getenv("PORT", "8080"))
     
     logger.info(f"🎨 Starting Accent Green Tinting Service on port {port}")
-    
+    app = None
     try:
         # Create and initialize processor
         processor = AccentGreenProcessor(intensity=0.5)
-        await processor.start()  # Initializes processor and calls initialize() hook
+        await processor.initialize()  # Initializes processor and calls initialize() hook
         
         # Register with orchestrator if URL provided
         if capability_url:
@@ -128,8 +128,8 @@ async def main():
     except KeyboardInterrupt:
         logger.info("🛑 Service stopped")
     finally:
-        if 'processor' in locals():
-            await processor.stop()
+        if 'app' in locals() and app is not None:
+            await app.stop()
 
 
 if __name__ == "__main__":
