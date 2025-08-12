@@ -84,7 +84,18 @@ class AccentGreenProcessor(AsyncFrameProcessor):
 async def main():
     """Start the Accent Green tinting service."""
     capability_url = os.getenv("CAPABILITY_URL")
-    port = int(os.getenv("PORT", "8080"))
+    # Parse port from capability_url if provided, otherwise use PORT env var or default to 8080
+    port = 8080
+    if capability_url:
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(capability_url)
+            if parsed.port:
+                port = parsed.port
+        except Exception:
+            pass
+    if not capability_url or not port or port == 8080:
+        port = int(os.getenv("PORT", "8080"))
     
     logger.info(f"🎨 Starting Accent Green Tinting Service on port {port}")
     
