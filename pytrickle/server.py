@@ -22,22 +22,32 @@ from .frames import VideoFrame, VideoOutput, AudioFrame, AudioOutput
 from .api import StreamParamsUpdateRequest, StreamStartRequest, Version, HardwareInformation, HardwareStats
 from .state import StreamState, PipelineState
 from .utils.hardware import HardwareInfo
+from .async_processor import AsyncFrameProcessor
 
 logger = logging.getLogger(__name__)
 
 class TrickleApp:
-    """HTTP server application for trickle streaming."""
+    """HTTP server application for trickle streaming with native async processor support."""
     
     def __init__(
         self, 
-        frame_processor: Optional[Callable[[Union[VideoFrame, AudioFrame]], Union[VideoOutput, AudioOutput]]] = None,
+        frame_processor: 'AsyncFrameProcessor',
         port: int = 8080,
         capability_name: str = "",
         version: str = "0.0.1",
         param_update_callback: Optional[Callable[[Dict[str, Any]], None]] = None
     ):
-        self.frame_processor = frame_processor or self._default_frame_processor
-        self.param_update_callback = param_update_callback
+        """Initialize TrickleApp.
+        
+        Args:
+            frame_processor: AsyncFrameProcessor for native async processing
+            port: HTTP server port
+            capability_name: Name of the capability
+            version: Version string
+            param_update_callback: Callback for parameter updates
+        """
+        self.frame_processor = frame_processor
+        self.param_update_callback = param_update_callback or self._default_param_update_callback
         self.port = port
         self.state = StreamState()
         self.app = web.Application()
@@ -50,14 +60,15 @@ class TrickleApp:
         # Setup routes
         self._setup_routes()
     
-    def _default_frame_processor(self, frame: Union[VideoFrame, AudioFrame]) -> Union[VideoOutput, AudioOutput]:
-        """Default frame processor that passes frames through unchanged."""
-        if isinstance(frame, VideoFrame):
-            return VideoOutput(frame, self.current_params.gateway_request_id if self.current_params else "default")
-        elif isinstance(frame, AudioFrame):
-            return AudioOutput([frame], self.current_params.gateway_request_id if self.current_params else "default")
+
+    
+    def _default_param_update_callback(self, params: Dict[str, Any]):
+        """Default parameter update callback that updates frame processor."""
+        if self.frame_processor.update_params:
+            self.frame_processor.update_params(params)
+            logger.info(f"Updated frame processor parameters: {params}")
         else:
-            raise ValueError(f"Unknown frame type: {type(frame)}")
+            logger.info(f"Frame processor does not support parameter updates: {params}")
     
     def _default_hardware_info(self) -> Dict[str, Any]:
         """Return default hardware info."""
@@ -114,6 +125,8 @@ class TrickleApp:
                 height=height,
             )
 
+            # Create TrickleClient with native async processor
+            logger.info("Creating TrickleClient with native async processor")
             self.current_client = TrickleClient(
                 protocol=protocol,
                 frame_processor=self.frame_processor,
@@ -180,16 +193,15 @@ class TrickleApp:
             data = validated_params.model_dump()
             
             # Call parameter update callback if provided
-            if self.param_update_callback:
-                try:
-                    self.param_update_callback(data)
-                    logger.info(f"Parameters updated via callback: {data}")
-                except Exception as e:
-                    logger.error(f"Error in parameter update callback: {e}")
-                    return web.json_response({
-                        "status": "error",
-                        "message": f"Parameter update failed: {str(e)}"
-                    }, status=500)
+            try:
+                self.param_update_callback(data)
+                logger.info(f"Parameters updated via callback: {data}")
+            except Exception as e:
+                logger.error(f"Error in parameter update callback: {e}")
+                return web.json_response({
+                    "status": "error",
+                    "message": f"Parameter update failed: {str(e)}"
+                }, status=500)
             
             # Emit parameter update event via protocol events publisher if available
             if self.current_client.protocol:
@@ -270,13 +282,18 @@ class TrickleApp:
         except Exception as e:
             logger.error(f"Error running client: {e}")
         finally:
-            self.current_client = None
-            self.current_params = None
+            # Properly stop the current stream instead of just clearing references
+            await self._stop_current_stream()
     
     async def _stop_current_stream(self):
         """Stop the current stream."""
         if self.current_client:
             await self.current_client.stop()
+            
+            # Stop frame processor to return to idle state
+            await self.frame_processor.stop_processing()
+            logger.info("AsyncFrameProcessor returned to idle state")
+                
             self.current_client = None
             self.current_params = None
             logger.info("Current stream stopped")
@@ -305,6 +322,32 @@ class TrickleApp:
             await self._stop_current_stream()
             await runner.cleanup()
 
-def create_app(frame_processor: Optional[Callable[[Union[VideoFrame, AudioFrame]], Union[VideoOutput, AudioOutput]]] = None) -> TrickleApp:
-    """Create a trickle app instance."""
-    return TrickleApp(frame_processor) 
+def create_app(
+    frame_processor: 'AsyncFrameProcessor',
+    port: int = 8080,
+    capability_name: str = "",
+    version: str = "0.0.1"
+) -> TrickleApp:
+    """Create a trickle app instance.
+    
+    Args:
+        frame_processor: AsyncFrameProcessor for native async processing
+        port: HTTP server port
+        capability_name: Name of the capability
+        version: Version string
+        
+    Returns:
+        TrickleApp instance
+        
+    Example:
+        processor = MyAsyncProcessor()
+        await processor.start()
+        app = create_app(frame_processor=processor, port=8080)
+        await app.run_forever()
+    """
+    return TrickleApp(
+        frame_processor=frame_processor,
+        port=port,
+        capability_name=capability_name,
+        version=version
+    ) 

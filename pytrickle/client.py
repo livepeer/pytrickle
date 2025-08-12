@@ -13,20 +13,29 @@ from typing import Callable, Optional, Union
 from .protocol import TrickleProtocol
 from .frames import VideoFrame, AudioFrame, VideoOutput, AudioOutput, OutputFrame
 from . import ErrorCallback
+from .async_processor import AsyncFrameProcessor
 
 logger = logging.getLogger(__name__)
 
 
 class TrickleClient:
-    """High-level client for trickle stream processing."""
+    """High-level client for trickle stream processing with native async support."""
     
     def __init__(
         self,
         protocol: TrickleProtocol,
-        frame_processor: Callable[[Union[VideoFrame, AudioFrame]], Union[VideoOutput, AudioOutput]],
+        frame_processor: 'AsyncFrameProcessor',
         control_handler: Optional[Callable] = None,
         error_callback: Optional[ErrorCallback] = None
     ):
+        """Initialize TrickleClient.
+        
+        Args:
+            protocol: TrickleProtocol instance
+            frame_processor: AsyncFrameProcessor for native async processing
+            control_handler: Optional control message handler
+            error_callback: Optional error callback
+        """
         self.protocol = protocol
         self.frame_processor = frame_processor
         self.control_handler = control_handler
@@ -112,7 +121,7 @@ class TrickleClient:
         return await self.protocol.publish_data(data)
     
     async def _ingress_loop(self):
-        """Process incoming frames."""
+        """Process incoming frames with native async support."""
         try:
             frame_count = 0
             async for frame in self.protocol.ingress_loop(self.stop_event):
@@ -120,32 +129,47 @@ class TrickleClient:
                 if self.error_event.is_set() or self.stop_event.is_set():
                     logger.info("Stopping ingress loop due to error or stop signal")
                     break
-                    
+                
+                # Process frames directly in ingress loop
+                try:
+                    if isinstance(frame, VideoFrame):
+                        logger.debug(f"Processing video frame {frame_count} with frame processor: {frame.tensor.shape}")
+                        
+                        # Direct async processing
+                        processed_frame = await self.frame_processor.process_video_async(frame)
+                        if processed_frame:
+                            output = VideoOutput(processed_frame, self.request_id)
+                            await self._send_output(output)
+                            logger.debug(f"Sent async processed video frame {frame_count} to egress")
+                        else:
+                            logger.warning(f"Frame processor returned None for video frame {frame_count}")
+                            
+                    elif isinstance(frame, AudioFrame):
+                        logger.debug(f"Processing audio frame with frame processor: {frame.samples.shape}")
+                        
+                        # Direct async processing for audio
+                        processed_frames = await self.frame_processor.process_audio_async(frame)
+                        if processed_frames:
+                            output = AudioOutput(processed_frames, self.request_id)
+                            await self._send_output(output)
+                            logger.debug(f"Sent async processed audio frame to egress")
+                        else:
+                            logger.warning(f"Frame processor returned None for audio frame")
+                    else:
+                        logger.debug(f"Received unknown frame type: {type(frame)}")
+                        
+                except Exception as e:
+                    logger.error(f"Error in async frame processing: {e}")
+                    # Still send the original frame as fallback
+                    if isinstance(frame, VideoFrame):
+                        fallback_output = VideoOutput(frame, self.request_id)
+                        await self._send_output(fallback_output)
+                    elif isinstance(frame, AudioFrame):
+                        fallback_output = AudioOutput([frame], self.request_id)
+                        await self._send_output(fallback_output)
+                
                 if isinstance(frame, VideoFrame):
                     frame_count += 1
-                    logger.debug(f"Processing video frame {frame_count}: {frame.tensor.shape}")
-                    
-                    # Process the frame
-                    output = self.frame_processor(frame)
-                    if output:
-                        # Send to egress
-                        await self._send_output(output)
-                        logger.debug(f"Sent processed frame {frame_count} to egress")
-                    else:
-                        logger.warning(f"Frame processor returned None for frame {frame_count}")
-                elif isinstance(frame, AudioFrame):
-                    logger.debug(f"Processing audio frame: {frame.samples.shape}")
-                    
-                    # Process the audio frame
-                    output = self.frame_processor(frame)
-                    if output:
-                        # Send to egress
-                        await self._send_output(output)
-                        logger.debug(f"Sent processed audio frame to egress")
-                    else:
-                        logger.warning(f"Frame processor returned None for audio frame")
-                else:
-                    logger.debug(f"Received unknown frame type: {type(frame)}")
             
             # Send sentinel to signal egress loop to complete
             logger.info("Ingress loop completed, sending sentinel to egress loop")
@@ -165,7 +189,6 @@ class TrickleClient:
                         self.error_callback("ingress_loop_error", e)
                 except Exception as cb_error:
                     logger.error(f"Error in error callback: {cb_error}")
-    
     async def _egress_loop(self):
         """Handle outgoing frames."""
         try:

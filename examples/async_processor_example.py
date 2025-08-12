@@ -16,7 +16,7 @@ import os
 from typing import Optional, Dict, Any, List
 import torch
 
-from pytrickle import TrickleApp, AsyncFrameProcessor, RegisterCapability
+from pytrickle import AsyncFrameProcessor, TrickleApp, RegisterCapability
 from pytrickle.frames import VideoFrame, AudioFrame
 
 logging.basicConfig(level=logging.INFO)
@@ -31,16 +31,13 @@ class AccentGreenProcessor(AsyncFrameProcessor):
         self.intensity = max(0.0, min(1.0, intensity))
         self.ready = False
     
-    async def start(self):
+    async def initialize(self):
         """Initialize and warm up the processor."""
-        await super().start()
-        
         # Simple warmup
         dummy_frame = VideoFrame(torch.rand(1, 256, 256, 3), 0, 30, {})
         await self._apply_tint(dummy_frame.tensor)
         
         self.ready = True
-        self.reset_timestamp_tracking()
         logger.info(f"✅ Accent Green processor ready (intensity: {self.intensity})")
     
     async def process_video_async(self, frame: VideoFrame) -> Optional[VideoFrame]:
@@ -53,8 +50,6 @@ class AccentGreenProcessor(AsyncFrameProcessor):
     
     async def _apply_tint(self, tensor: torch.Tensor) -> torch.Tensor:
         """Apply Accent Green tint (#18794E: rgb(24,121,78) -> (0.094,0.475,0.306))."""
-        await asyncio.sleep(0.01)  # Simulate processing
-        
         # Accent Green target color
         target = torch.tensor([0.094, 0.475, 0.306], device=tensor.device)
         
@@ -80,7 +75,6 @@ class AccentGreenProcessor(AsyncFrameProcessor):
             if old != self.intensity:
                 logger.info(f"Intensity: {old:.2f} → {self.intensity:.2f}")
 
-
 async def main():
     """Start the Accent Green tinting service."""
     capability_url = os.getenv("CAPABILITY_URL")
@@ -100,9 +94,9 @@ async def main():
     logger.info(f"🎨 Starting Accent Green Tinting Service on port {port}")
     
     try:
-        # Create and start processor
+        # Create and initialize processor
         processor = AccentGreenProcessor(intensity=0.5)
-        await processor.start()
+        await processor.start()  # Initializes processor and calls initialize() hook
         
         # Register with orchestrator if URL provided
         if capability_url:
@@ -117,18 +111,18 @@ async def main():
             except Exception as e:
                 logger.warning(f"Registration failed: {e}")
         
-        # Create TrickleApp with parameter update support
-        app = TrickleApp(
-            frame_processor=processor.create_sync_bridge(),
-            port=port,
-            param_update_callback=processor.update_params
-        )
-        
+        # Create TrickleApp with native async processor support
         logger.info(f"🌐 Service ready at http://localhost:{port}")
         logger.info("API: /api/stream/start, /api/stream/params, /api/stream/status")
         logger.info(f"Update intensity: curl -X POST http://localhost:{port}/api/stream/params \\")
         logger.info("  -H 'Content-Type: application/json' -d '{\"intensity\": 0.8}'")
         
+        # Create and run TrickleApp with the async processor
+        app = TrickleApp(
+            frame_processor=processor,
+            port=port,
+            capability_name="accent-green-processor"
+        )
         await app.run_forever()
         
     except KeyboardInterrupt:
@@ -147,9 +141,22 @@ if __name__ == "__main__":
     - Real-time intensity control (0.0 to 1.0)  
     - Orchestrator registration (optional)
     - HTTP API for stream management
+    - Clean separation: AsyncFrameProcessor + TrickleApp
     
     Usage:
+        # HTTP API server (recommended)
         python async_processor_example.py
         CAPABILITY_URL=http://orchestrator:8080/caps PORT=9090 python async_processor_example.py
+        
+        # Direct client usage (advanced)
+        from pytrickle import TrickleProtocol, TrickleClient
+        processor = AccentGreenProcessor()
+        await processor.start()
+        protocol = TrickleProtocol(
+            subscribe_url="http://localhost:3389/sample",
+            publish_url="http://localhost:3389/output"
+        )
+        client = TrickleClient(protocol=protocol, frame_processor=processor)
+        await client.start("request_id")
     """
     asyncio.run(main())
