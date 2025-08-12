@@ -16,3 +16,4 @@ pytest-mock>=3.10.0
 
 # Optional performance enhancements
 uvloop>=0.17.0; sys_platform != "win32" 
+pynvml

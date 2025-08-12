@@ -8,7 +8,7 @@ API request parameters used across trickle streaming applications.
 import json
 from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, Field, field_validator
-from utils.hardware import GPUComputeInfo, GPUUtilizationInfo
+from .utils.hardware import GPUComputeInfo, GPUUtilizationInfo
 class StreamStartRequest(BaseModel):
     """Base request model for starting a trickle stream.
     
