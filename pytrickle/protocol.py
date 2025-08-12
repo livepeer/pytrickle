@@ -40,7 +40,7 @@ class TrickleProtocol(TrickleComponent):
         error_callback: Optional[ErrorCallback] = None,
         heartbeat_interval: float = 10.0,
     ):
-        super().__init__(error_callback)
+        super().__init__(error_callback, component_name="protocol")
         self.subscribe_url = subscribe_url
         self.publish_url = publish_url
         self.control_url = control_url
@@ -105,6 +105,7 @@ class TrickleProtocol(TrickleComponent):
 
     async def start(self):
         """Start the trickle protocol."""
+        self._update_state("STARTING")
         logger.info(f"Starting trickle protocol: subscribe={self.subscribe_url}, publish={self.publish_url}")
         
         # Initialize queues
@@ -154,9 +155,12 @@ class TrickleProtocol(TrickleComponent):
         
         # Start monitoring subscription end for immediate cleanup
         self._monitor_task = asyncio.create_task(self._monitor_subscription_end())
+        
+        self._update_state("RUNNING")
 
     async def stop(self):
         """Stop the trickle protocol."""
+        self._update_state("STOPPING")
         logger.info("Stopping trickle protocol")
         
         # Signal shutdown immediately to all components
@@ -216,14 +220,25 @@ class TrickleProtocol(TrickleComponent):
         if tasks:
             try:
                 await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=5.0)
+                logger.info("All protocol tasks completed gracefully")
             except asyncio.TimeoutError:
                 logger.warning("Tasks did not complete within timeout, canceling...")
                 for task in tasks:
                     if not task.done():
                         task.cancel()
+                
+                # Wait a bit more for cancellation to take effect
+                try:
+                    await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=2.0)
+                    logger.info("Tasks cancelled successfully")
+                except asyncio.TimeoutError:
+                    logger.error("Some tasks failed to cancel - forcing cleanup")
+                except Exception as e:
+                    logger.warning(f"Expected errors during task cancellation: {e}")
 
         self.subscribe_task = None
         self.publish_task = None
+        self._update_state("STOPPED")
 
     async def ingress_loop(self, done: asyncio.Event) -> AsyncGenerator[InputFrame, None]:
         """Generate frames from the ingress stream."""

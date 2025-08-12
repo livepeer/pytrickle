@@ -10,11 +10,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from enum import Enum, auto
-
+from enum import Enum
 
 logger = logging.getLogger(__name__)
-
 
 class PipelineVersion:
     """Version information for the pipeline."""
@@ -57,6 +55,9 @@ class StreamState:
         self.shutdown_event = asyncio.Event()
         self.error_event = asyncio.Event()
         self.pipeline_ready_event = asyncio.Event()
+        
+        # Client tracking
+        self.active_client: bool = False
 
     # State and derived flags
     @property
@@ -86,14 +87,36 @@ class StreamState:
         """Compatibility: True when the pipeline is warmed/ready."""
         return self._state is PipelineState.READY
 
-    def get_stream_state(self) -> dict:
+    def set_active_client(self, active: bool):
+        """Track whether there's an active streaming client."""
+        self.active_client = active
+
+    def update_component_health(self, component_name: str, health_data: dict):
+        """Update component health and propagate errors to main state."""
+        # If component has error, set main error event
+        if health_data.get("error"):
+            self.error_event.set()
+
+    def get_state(self) -> dict:
         """Get a dict representation of the current state."""
+        # Determine status: prioritize ERROR, then "OK" if actively streaming, otherwise pipeline state
+        if self.error_event.is_set():
+            status = "ERROR"
+        elif self._state is PipelineState.READY and self.active_client:
+            status = "OK"
+        else:
+            status = self._state.value
+            
         return {
-            "status": self._state,
+            "status": status,
             "pipeline_ready": self.pipeline_ready,
             "shutdown_initiated": self.shutdown_event.is_set(),
             "error": self.error_event.is_set(),
         }
+
+    def get_stream_state(self) -> dict:
+        """Get current state (alias for get_state)."""
+        return self.get_state()
     
     # State transitions
     def start(self) -> None:

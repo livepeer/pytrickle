@@ -34,8 +34,7 @@ class TrickleApp:
         frame_processor: 'AsyncFrameProcessor',
         port: int = 8080,
         capability_name: str = "",
-        version: str = "0.0.1",
-        param_update_callback: Optional[Callable[[Dict[str, Any]], None]] = None
+        version: str = "0.0.1"
     ):
         """Initialize TrickleApp.
         
@@ -44,31 +43,21 @@ class TrickleApp:
             port: HTTP server port
             capability_name: Name of the capability
             version: Version string
-            param_update_callback: Callback for parameter updates
         """
         self.frame_processor = frame_processor
-        self.param_update_callback = param_update_callback or self._default_param_update_callback
         self.port = port
         self.state = StreamState()
         self.app = web.Application()
         self.current_client: Optional[TrickleClient] = None
         self.current_params: Optional[StreamStartRequest] = None
+        self._health_monitor_task: Optional[asyncio.Task] = None
+        self._client_task: Optional[asyncio.Task] = None
         self.version = version
         self.hardware_info = HardwareInfo()
         self.capability_name = capability_name or os.getenv("CAPABILITY_NAME", "")
 
         # Setup routes
         self._setup_routes()
-    
-
-    
-    def _default_param_update_callback(self, params: Dict[str, Any]):
-        """Default parameter update callback that updates frame processor."""
-        if self.frame_processor.update_params:
-            self.frame_processor.update_params(params)
-            logger.info(f"Updated frame processor parameters: {params}")
-        else:
-            logger.info(f"Frame processor does not support parameter updates: {params}")
     
     def _default_hardware_info(self) -> Dict[str, Any]:
         """Return default hardware info."""
@@ -132,8 +121,12 @@ class TrickleApp:
                 frame_processor=self.frame_processor,
             )
             
+            # Track active client and start health monitoring
+            self.state.set_active_client(True)
+            self._start_health_monitoring()
+            
             # Start the client in background
-            asyncio.create_task(self._run_client(params.gateway_request_id))
+            self._client_task = asyncio.create_task(self._run_client(params.gateway_request_id))
             
             # Emit start event via protocol events publisher if available
             if self.current_client and self.current_client.protocol:
@@ -151,6 +144,8 @@ class TrickleApp:
             
         except Exception as e:
             logger.error(f"Error starting stream: {e}")
+            self.state.stream_errors.append(f"Stream start failed: {str(e)}")
+            self.state.error_event.set()
             return web.json_response({
                 "status": "error",
                 "message": f"Error starting stream: {str(e)}"
@@ -192,12 +187,12 @@ class TrickleApp:
             validated_params = await self._parse_and_validate_request(request, StreamParamsUpdateRequest)
             data = validated_params.model_dump()
             
-            # Call parameter update callback if provided
+            # Update frame processor parameters directly
             try:
-                self.param_update_callback(data)
-                logger.info(f"Parameters updated via callback: {data}")
+                self.frame_processor.update_params(data)
+                logger.info(f"Parameters updated: {data}")
             except Exception as e:
-                logger.error(f"Error in parameter update callback: {e}")
+                logger.error(f"Error updating parameters: {e}")
                 return web.json_response({
                     "status": "error",
                     "message": f"Parameter update failed: {str(e)}"
@@ -226,16 +221,9 @@ class TrickleApp:
             }, status=500)
     
     async def _handle_get_status(self, request: web.Request) -> web.Response:
-        """Handle status requests."""
+        """Handle status requests with simplified state response."""
         try:
-            status = {
-                "status": "online" if self.current_client else "offline",
-                "timestamp": int(time.time() * 1000),
-                "has_active_stream": self.current_client is not None,
-                "current_params": self.current_params.model_dump() if self.current_params else None
-            }
-            
-            return web.json_response(status)
+            return web.json_response(self.state.get_state())
             
         except Exception as e:
             logger.error(f"Error getting status: {e}")
@@ -245,8 +233,18 @@ class TrickleApp:
             }, status=500)
     
     async def _handle_health(self, request: web.Request) -> web.Response:
-        """Handle health check requests."""
-        return web.json_response(self.state.get_stream_state())
+        """Handle health check requests with simplified state."""
+        try:
+            state_data = self.state.get_state()
+            #TODO: Should we return 503 if in error state?
+            # status_code = 503 if state_data["error"] else 200
+            return web.json_response(state_data, status=200)
+        except Exception as e:
+            logger.error(f"Health check error: {e}")
+            return web.json_response({
+                "status": "error",
+                "message": f"Health check failed: {str(e)}"
+            }, status=500)
     
     async def _handle_version(self, request: web.Request) -> web.Response:
         """Handle health check requests."""
@@ -278,22 +276,75 @@ class TrickleApp:
         """Run the trickle client."""
         try:
             if self.current_client:
+                # Set pipeline ready when client starts successfully
+                self.state.set_pipeline_ready()
                 await self.current_client.start(request_id)
         except Exception as e:
             logger.error(f"Error running client: {e}")
+            # Set error state on client failure
+            self.state.error_event.set()
         finally:
             # Properly stop the current stream instead of just clearing references
             await self._stop_current_stream()
     
+    def _start_health_monitoring(self):
+        """Start background health monitoring task."""
+        if self._health_monitor_task and not self._health_monitor_task.done():
+            return
+        self._health_monitor_task = asyncio.create_task(self._health_monitoring_loop())
+
+    async def _health_monitoring_loop(self):
+        """Background task to monitor component health."""
+        try:
+            while self.current_client:
+                await asyncio.sleep(5.0)  # Check every 5 seconds
+                
+                if self.current_client and self.current_client.protocol:
+                    protocol = self.current_client.protocol
+                    self.state.update_component_health(
+                        protocol.component_name,
+                        protocol.get_component_health()
+                    )
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"Health monitoring error: {e}")
+
     async def _stop_current_stream(self):
-        """Stop the current stream."""
+        """Stop the current stream and wait for complete cleanup."""
         if self.current_client:
+            logger.info("Stopping current stream...")
+            
+            # Stop the client and wait for cleanup
             await self.current_client.stop()
             
             logger.info("AsyncFrameProcessor returned to idle state")
                 
             self.current_client = None
             self.current_params = None
+            
+            # Update state and stop monitoring
+            self.state.set_active_client(False)
+            
+            # Cancel client task
+            if self._client_task and not self._client_task.done():
+                self._client_task.cancel()
+                try:
+                    await self._client_task
+                except asyncio.CancelledError:
+                    pass
+            self._client_task = None
+            
+            # Cancel health monitoring task  
+            if self._health_monitor_task:
+                self._health_monitor_task.cancel()
+                try:
+                    await self._health_monitor_task
+                except asyncio.CancelledError:
+                    pass
+            
+            logger.info("Current stream stopped and resources cleaned up")
+    
     async def stop(self):
         """Stop the current trickle client and clean up resources."""
         await self._stop_current_stream()
@@ -305,6 +356,9 @@ class TrickleApp:
         
         site = web.TCPSite(runner, "0.0.0.0", self.port)
         await site.start()
+        
+        # Set pipeline ready when server is up and ready to accept requests
+        self.state.set_pipeline_ready()
         
         logger.info(f"Trickle app server started on port {self.port}")
         return runner
