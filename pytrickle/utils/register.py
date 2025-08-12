@@ -88,9 +88,9 @@ class RegisterCapability:
         capability_capacity: Optional[int] = None,
         capability_price_per_unit: Optional[int] = None,
         capability_price_scaling: Optional[int] = None,
-        max_retries: int = 10,
+        max_retries: int = 3,
         delay: float = 2.0,
-        timeout: float = 5.0
+        timeout: float = 1.5
     ) -> bool:
         """
         Register this worker capability with the orchestrator.
