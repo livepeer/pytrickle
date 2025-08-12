@@ -13,7 +13,7 @@ from typing import Callable, Optional, Union
 from .protocol import TrickleProtocol
 from .frames import VideoFrame, AudioFrame, VideoOutput, AudioOutput, OutputFrame
 from . import ErrorCallback
-from .async_processor import AsyncFrameProcessor
+from .frame_processor import FrameProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ class TrickleClient:
     def __init__(
         self,
         protocol: TrickleProtocol,
-        frame_processor: 'AsyncFrameProcessor',
+        frame_processor: 'FrameProcessor',
         control_handler: Optional[Callable] = None,
         error_callback: Optional[ErrorCallback] = None
     ):
@@ -32,14 +32,15 @@ class TrickleClient:
         
         Args:
             protocol: TrickleProtocol instance
-            frame_processor: AsyncFrameProcessor for native async processing
+            frame_processor: FrameProcessor for native async processing
             control_handler: Optional control message handler
-            error_callback: Optional error callback
+            error_callback: Optional error callback (if None, uses frame_processor.error_callback)
         """
         self.protocol = protocol
         self.frame_processor = frame_processor
         self.control_handler = control_handler
-        self.error_callback = error_callback
+        # Use provided error_callback, or fall back to frame_processor's error_callback
+        self.error_callback = error_callback or frame_processor.error_callback
         
         # Client state
         self.running = False
@@ -123,7 +124,6 @@ class TrickleClient:
     async def _ingress_loop(self):
         """Process incoming frames with native async support."""
         try:
-            frame_count = 0
             async for frame in self.protocol.ingress_loop(self.stop_event):
                 # Check for error state or stop signal
                 if self.error_event.is_set() or self.stop_event.is_set():
@@ -133,16 +133,16 @@ class TrickleClient:
                 # Process frames directly in ingress loop
                 try:
                     if isinstance(frame, VideoFrame):
-                        logger.debug(f"Processing video frame {frame_count} with frame processor: {frame.tensor.shape}")
+                        logger.debug(f"Processing video frame with frame processor: {frame.tensor.shape}")
                         
                         # Direct async processing
                         processed_frame = await self.frame_processor.process_video_async(frame)
                         if processed_frame:
                             output = VideoOutput(processed_frame, self.request_id)
                             await self._send_output(output)
-                            logger.debug(f"Sent async processed video frame {frame_count} to egress")
+                            logger.debug(f"Sent async processed video frame to egress")
                         else:
-                            logger.warning(f"Frame processor returned None for video frame {frame_count}")
+                            logger.warning(f"Frame processor returned None for video frame")
                             
                     elif isinstance(frame, AudioFrame):
                         logger.debug(f"Processing audio frame with frame processor: {frame.samples.shape}")
@@ -160,6 +160,17 @@ class TrickleClient:
                         
                 except Exception as e:
                     logger.error(f"Error in async frame processing: {e}")
+                    
+                    # Notify frame processor about the error
+                    if self.error_callback:
+                        try:
+                            if asyncio.iscoroutinefunction(self.error_callback):
+                                await self.error_callback("frame_processing_error", e)
+                            else:
+                                self.error_callback("frame_processing_error", e)
+                        except Exception as cb_error:
+                            logger.error(f"Error in frame processing error callback: {cb_error}")
+                    
                     # Still send the original frame as fallback
                     if isinstance(frame, VideoFrame):
                         fallback_output = VideoOutput(frame, self.request_id)
@@ -167,9 +178,6 @@ class TrickleClient:
                     elif isinstance(frame, AudioFrame):
                         fallback_output = AudioOutput([frame], self.request_id)
                         await self._send_output(fallback_output)
-                
-                if isinstance(frame, VideoFrame):
-                    frame_count += 1
             
             # Send sentinel to signal egress loop to complete
             logger.info("Ingress loop completed, sending sentinel to egress loop")

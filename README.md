@@ -50,16 +50,16 @@ make build
 
 ## Quick Start
 
-PyTrickle uses the AsyncFrameProcessor pattern for building video processing applications. See the complete example in `examples/async_processor_example.py`.
+PyTrickle uses the FrameProcessor pattern for building video processing applications. See the complete example in `examples/async_processor_example.py`.
 
-### Basic AsyncFrameProcessor
+### Basic FrameProcessor
 
 ```python
-from pytrickle import AsyncFrameProcessor, TrickleApp
+from pytrickle import FrameProcessor, TrickleApp
 from pytrickle.frames import VideoFrame, AudioFrame
 from typing import Optional, List
 
-class MyProcessor(AsyncFrameProcessor):
+class MyProcessor(FrameProcessor):
     """Custom video processor with real-time parameter updates."""
     
     def __init__(self, intensity: float = 0.5, **kwargs):
@@ -157,7 +157,7 @@ curl -X POST http://localhost:8080/api/stream/stop
 ### GPU Processing
 
 ```python
-class GPUProcessor(AsyncFrameProcessor):
+class GPUProcessor(FrameProcessor):
     """GPU-accelerated video processor."""
     
     async def process_video_async(self, frame: VideoFrame) -> Optional[VideoFrame]:
@@ -260,7 +260,7 @@ PyTrickle consists of several key components:
 
 - **TrickleApp**: HTTP server for API-based integration
 - **TrickleClient**: Direct client for custom applications
-- **AsyncFrameProcessor**: Base class for async AI processors
+- **FrameProcessor**: Base class for async AI processors
 - **TrickleProtocol**: High-level protocol implementation
 - **Frame Processing**: Video/audio frame handling with PyTorch tensors
 
@@ -276,7 +276,7 @@ Input Stream → Decoder → Frame Processor → Encoder → Output Stream
 
 The `examples/` directory contains:
 
-- `async_processor_example.py`: Complete AsyncFrameProcessor with green tint processing and real-time parameter updates
+- `async_processor_example.py`: Complete FrameProcessor with green tint processing and real-time parameter updates
 
 ## Troubleshooting
 

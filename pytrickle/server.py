@@ -18,11 +18,10 @@ from pydantic import BaseModel, Field
 
 from .client import TrickleClient
 from .protocol import TrickleProtocol
-from .frames import VideoFrame, VideoOutput, AudioFrame, AudioOutput
 from .api import StreamParamsUpdateRequest, StreamStartRequest, Version, HardwareInformation, HardwareStats
-from .state import StreamState, PipelineState
+from .state import StreamState
 from .utils.hardware import HardwareInfo
-from .async_processor import AsyncFrameProcessor
+from .frame_processor import FrameProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +30,7 @@ class TrickleApp:
     
     def __init__(
         self, 
-        frame_processor: 'AsyncFrameProcessor',
+        frame_processor: 'FrameProcessor',
         port: int = 8080,
         capability_name: str = "",
         version: str = "0.0.1"
@@ -39,7 +38,7 @@ class TrickleApp:
         """Initialize TrickleApp.
         
         Args:
-            frame_processor: AsyncFrameProcessor for native async processing
+            frame_processor: FrameProcessor for native async processing
             port: HTTP server port
             capability_name: Name of the capability
             version: Version string
@@ -221,9 +220,27 @@ class TrickleApp:
             }, status=500)
     
     async def _handle_get_status(self, request: web.Request) -> web.Response:
-        """Handle status requests with simplified state response."""
+        """Handle status requests with detailed state and frame processing statistics."""
         try:
-            return web.json_response(self.state.get_state())
+            # Get base state
+            status_data = self.state.get_state()
+            
+            # Add basic client information if active
+            if self.current_client:
+                status_data["client_active"] = True
+                status_data["client_running"] = self.current_client.running
+            else:
+                status_data["client_active"] = False
+            
+            # Add current parameters if available
+            if self.current_params:
+                status_data["current_params"] = {
+                    "subscribe_url": self.current_params.subscribe_url,
+                    "publish_url": self.current_params.publish_url,
+                    "gateway_request_id": getattr(self.current_params, 'gateway_request_id', None)
+                }
+            
+            return web.json_response(status_data)
             
         except Exception as e:
             logger.error(f"Error getting status: {e}")
@@ -318,7 +335,7 @@ class TrickleApp:
             # Stop the client and wait for cleanup
             await self.current_client.stop()
             
-            logger.info("AsyncFrameProcessor returned to idle state")
+            logger.info("FrameProcessor returned to idle state")
                 
             self.current_client = None
             self.current_params = None
@@ -377,7 +394,7 @@ class TrickleApp:
             await runner.cleanup()
 
 def create_app(
-    frame_processor: 'AsyncFrameProcessor',
+    frame_processor: 'FrameProcessor',
     port: int = 8080,
     capability_name: str = "",
     version: str = "0.0.1"
@@ -385,7 +402,7 @@ def create_app(
     """Create a trickle app instance.
     
     Args:
-        frame_processor: AsyncFrameProcessor for native async processing
+        frame_processor: FrameProcessor for native async processing
         port: HTTP server port
         capability_name: Name of the capability
         version: Version string

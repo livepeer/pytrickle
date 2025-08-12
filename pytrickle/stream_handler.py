@@ -13,7 +13,7 @@ from abc import abstractmethod
 from typing import Optional, Dict, Any, Callable, Union
 
 from . import ErrorCallback
-from .async_processor import AsyncFrameProcessor
+from .frame_processor import FrameProcessor
 from .client import TrickleClient
 from .protocol import TrickleProtocol
 from .subscriber import TrickleSubscriber
@@ -33,7 +33,7 @@ class TrickleStreamHandler(StreamHandler):
     - Monitoring and cleanup
     
     Applications only need to implement:
-    - create_frame_processor(): Return the AsyncFrameProcessor instance
+    - create_frame_processor(): Return the FrameProcessor instance
     - handle_control_message(): Handle control channel messages
     """
     
@@ -102,14 +102,14 @@ class TrickleStreamHandler(StreamHandler):
                 not self.error_event.is_set())
     
     @abstractmethod
-    async def create_frame_processor(self) -> 'AsyncFrameProcessor':
+    async def create_frame_processor(self) -> 'FrameProcessor':
         """Create the async frame processor.
         
         This method must be implemented by subclasses to provide
         the actual async frame processing logic.
         
         Returns:
-            AsyncFrameProcessor instance for native async processing
+            FrameProcessor instance for native async processing
         """
         pass
     

@@ -27,8 +27,8 @@ from .manager import BaseStreamManager, TrickleStreamManager, StreamHandler
 from .stream_handler import TrickleStreamHandler
 from .utils.register import RegisterCapability
 
-# Async processing utilities
-from .async_processor import AsyncFrameProcessor
+# Processing utilities
+from .frame_processor import FrameProcessor
 
 from . import api
 
@@ -54,5 +54,5 @@ __all__ = [
     "RegisterCapability",
     "api",
     "ErrorCallback",
-    "AsyncFrameProcessor"
+    "FrameProcessor"
 ] 

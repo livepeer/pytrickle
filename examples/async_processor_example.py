@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-AsyncFrameProcessor BYOC Demo - Accent Green Tinting
+FrameProcessor BYOC Demo - Accent Green Tinting
 
-Simple BYOC service that applies Accent Green (#18794E) color tinting
-with real-time intensity control via HTTP API.
+BYOC service that applies Accent Green (#18794E) color tinting
+with real-time intensity control, error handling, and configurable initialization.
 
 Environment Variables:
 - CAPABILITY_URL: URL to register with orchestrator (optional)
@@ -16,26 +16,32 @@ import os
 from typing import Optional, Dict, Any, List
 import torch
 
-from pytrickle import AsyncFrameProcessor, TrickleApp, RegisterCapability
+from pytrickle import FrameProcessor, TrickleApp, RegisterCapability
 from pytrickle.frames import VideoFrame, AudioFrame
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-class AccentGreenProcessor(AsyncFrameProcessor):
+class AccentGreenProcessor(FrameProcessor):
     """Applies Accent Green (#18794E) color tinting with adjustable intensity."""
     
     def __init__(self, intensity: float = 0.5, **kwargs):
-        super().__init__(**kwargs)
-        self.intensity = max(0.0, min(1.0, intensity))
+        # Simple error callback that logs processing errors
+        def log_processing_error(error_type: str, exception: Optional[Exception] = None):
+            logger.warning(f"Processing error: {error_type} - {exception}")
+            logger.info("Fallback frame will be sent automatically")
+        
+        self.intensity = intensity
         self.ready = False
+        
+        super().__init__(error_callback=log_processing_error, **kwargs)
     
-    async def initialize(self):
+    def initialize(self, **kwargs):
         """Initialize and warm up the processor."""
-        # Simple warmup
-        dummy_frame = VideoFrame(torch.rand(1, 256, 256, 3), 0, 30, {})
-        await self._apply_tint(dummy_frame.tensor)
+        # Allow intensity override from kwargs
+        self.intensity = kwargs.get('intensity', self.intensity)
+        self.intensity = max(0.0, min(1.0, self.intensity))
         
         self.ready = True
         logger.info(f"✅ Accent Green processor ready (intensity: {self.intensity})")
@@ -94,9 +100,10 @@ async def main():
     logger.info(f"🎨 Starting Accent Green Tinting Service on port {port}")
     app = None
     try:
-        # Create and initialize processor
-        processor = AccentGreenProcessor(intensity=0.5)
-        await processor.initialize()  # Initializes processor and calls initialize() hook
+        # Create processor with initialization kwargs
+        processor = AccentGreenProcessor(
+            intensity=0.5
+        )
         
         # Register with orchestrator if URL provided
         if capability_url:
@@ -136,22 +143,23 @@ if __name__ == "__main__":
     """
     Accent Green Tinting BYOC Service
     
-    Simple BYOC service demonstrating AsyncFrameProcessor with:
+    Simple BYOC service demonstrating FrameProcessor with:
     - Accent Green (#18794E) color tinting
     - Real-time intensity control (0.0 to 1.0)  
+    - Error handling with error callbacks
+    - Configurable initialization via kwargs
     - Orchestrator registration (optional)
     - HTTP API for stream management
-    - Clean separation: AsyncFrameProcessor + TrickleApp
+    - Clean separation: FrameProcessor + TrickleApp
     
     Usage:
         # HTTP API server (recommended)
         python async_processor_example.py
         CAPABILITY_URL=http://orchestrator:8080/caps PORT=9090 python async_processor_example.py
         
-        # Direct client usage (advanced)
+        # Direct client usage with kwargs
         from pytrickle import TrickleProtocol, TrickleClient
-        processor = AccentGreenProcessor()
-        await processor.start()
+        processor = AccentGreenProcessor(intensity=0.8)
         protocol = TrickleProtocol(
             subscribe_url="http://localhost:3389/sample",
             publish_url="http://localhost:3389/output"
