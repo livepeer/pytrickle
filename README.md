@@ -23,7 +23,7 @@ Perfect for building AI-powered video processing services, real-time filters, st
 - 🔧 **Extensible**: Easy to add custom frame processing algorithms
 - 📊 **Monitoring**: Built-in monitoring and event reporting
 - 🛡️ **Reliable**: Automatic reconnection and error recovery
-- 🎛️ **Multi-Channel Audio**: Handles mono, stereo, and multi-channel audio automatically
+- 🎵 **Audio Support**: Handles mono, stereo, and multi-channel audio
 
 ## Installation
 
@@ -32,9 +32,8 @@ Perfect for building AI-powered video processing services, real-time filters, st
 - Python 3.8+
 - PyTorch
 - FFmpeg (for video encoding/decoding)
-- http-trickle Go package (for testing)
 
-### Install Dependencies
+### Install PyTrickle
 
 ```bash
 pip install -r requirements.txt
@@ -44,7 +43,6 @@ pip install -e .
 ### Install http-trickle (for testing)
 
 ```bash
-# Clone the http-trickle repository
 git clone https://github.com/livepeer/http-trickle.git ~/repos/http-trickle
 cd ~/repos/http-trickle
 make build
@@ -52,342 +50,254 @@ make build
 
 ## Quick Start
 
-### Simple Stream Processing
+PyTrickle uses the AsyncFrameProcessor pattern for building video processing applications. See the complete example in `examples/async_processor_example.py`.
+
+### Basic AsyncFrameProcessor
 
 ```python
-import asyncio
-import torch
-from pytrickle import TrickleClient
-from pytrickle.frames import VideoFrame, VideoOutput
+from pytrickle import AsyncFrameProcessor, TrickleApp
+from pytrickle.frames import VideoFrame, AudioFrame
+from typing import Optional, List
 
-def red_tint_processor(frame: VideoFrame) -> VideoOutput:
-    """Add a red tint to video frames."""
-    tensor = frame.tensor.clone()
-    tensor[:, :, :, 0] = torch.clamp(tensor[:, :, :, 0] + 0.3, 0, 1)
-    new_frame = frame.replace_tensor(tensor)
-    return VideoOutput(new_frame, "red_tint")
+class MyProcessor(AsyncFrameProcessor):
+    """Custom video processor with real-time parameter updates."""
+    
+    def __init__(self, intensity: float = 0.5, **kwargs):
+        super().__init__(**kwargs)
+        self.intensity = intensity
+        self.ready = False
+    
+    async def initialize(self):
+        """Initialize and warm up the processor."""
+        # Load your AI model or initialize processing here
+        self.ready = True
+    
+    async def process_video_async(self, frame: VideoFrame) -> Optional[VideoFrame]:
+        """Process video frame asynchronously."""
+        if not self.ready:
+            return frame
+        
+        # Your processing logic here
+        tensor = frame.tensor.clone()
+        # Apply effects, AI models, filters, etc.
+        
+        return frame.replace_tensor(tensor)
+    
+    async def process_audio_async(self, frame: AudioFrame) -> Optional[List[AudioFrame]]:
+        """Process audio frame asynchronously."""
+        return [frame]  # Pass through or process
+    
+    def update_params(self, params: dict):
+        """Update processing parameters in real-time."""
+        if "intensity" in params:
+            self.intensity = float(params["intensity"])
 
 async def main():
-    client = TrickleClient(
-        subscribe_url="http://localhost:3389/sample",
-        publish_url="http://localhost:3389/sample-output",
-        width=704,
-        height=384,
-        frame_processor=red_tint_processor
+    # Create and initialize processor
+    processor = MyProcessor(intensity=0.5)
+    await processor.start()
+    
+    # Create app with processor
+    app = TrickleApp(
+        frame_processor=processor,
+        port=8080,
+        capability_name="my-video-processor"
     )
-    
-    await client.start("simple_example")
-
-asyncio.run(main())
+    await app.run_forever()
 ```
 
-### HTTP Server Integration (TrickleApp)
+For a complete working example with green tint processing, see `examples/async_processor_example.py`.
 
-The simplest way to integrate PyTrickle into your application is using `TrickleApp`:
+## HTTP API
 
-```python
-from pytrickle import create_app
+PyTrickle automatically provides a REST API for your video processor:
 
-# Create app with custom frame processor
-app = create_app(frame_processor=your_processor_function)
+### Start Processing
 
-# Run the server
-await app.run_forever()
-```
-
-## API Reference
-
-### HTTP Endpoints
-
-#### Start Stream
-```bash
-POST /api/stream/start
-POST /live-video-to-video  # Alias
-```
-
-**Request:**
-```json
-{
-    "subscribe_url": "http://localhost:3389/sample",
-    "publish_url": "http://localhost:3389/sample-output",
-    "control_url": "http://localhost:3389/control",     // Optional
-    "events_url": "http://localhost:3389/events",       // Optional
-    "data_url": "http://localhost:3389/data",           // Optional
-    "gateway_request_id": "stream_001",
-    "params": {                                         // Optional
-        "width": 1920,
-        "height": 1080,
-        "effect": "enhancement",
-        "quality": "high"
-    }
-}
-```
-
-**Parameters:**
-- `subscribe_url` (required): Source URL for incoming video stream
-- `publish_url` (required): Destination URL for processed video stream  
-- `control_url` (optional): URL for receiving control messages
-- `events_url` (optional): URL for publishing monitoring events
-- `data_url` (optional): URL for publishing text/data output
-- `gateway_request_id` (required): Unique identifier for the stream request
-- `params` (optional): Processing parameters (any key-value pairs)
-
-#### Update Parameters
-```bash
-POST /api/stream/params
-```
-
-**Request:**
-```json
-{
-    "params": {
-        "effect": "blue_tint",
-        "intensity": 0.5,
-        "width": 1024,
-        "height": 768
-    }
-}
-```
-
-#### Get Status
-```bash
-GET /api/stream/status
-```
-
-#### Stop Stream
-```bash
-POST /api/stream/stop
-```
-
-#### Health Check
-```bash
-GET /health
-```
-
-### Python API
-
-#### TrickleClient (Direct Integration)
-
-```python
-from pytrickle import TrickleClient
-
-client = TrickleClient(
-    subscribe_url="http://localhost:3389/input",
-    publish_url="http://localhost:3389/output",
-    control_url="http://localhost:3389/control",  # Optional
-    events_url="http://localhost:3389/events",    # Optional
-    width=1920,
-    height=1080,
-    frame_processor=your_processor
-)
-
-await client.start("request_id")
-```
-
-#### TrickleApp (HTTP Server)
-
-```python
-from pytrickle import TrickleApp
-
-app = TrickleApp(frame_processor=your_processor, port=8080)
-await app.run_forever()
-```
-
-## Frame Processing
-
-### Custom Frame Processors
-
-Create custom frame processors by implementing a function that takes a `VideoFrame` and returns a `VideoOutput`:
-
-```python
-def custom_processor(frame: VideoFrame) -> VideoOutput:
-    # Get the tensor (shape: [1, height, width, 3])
-    tensor = frame.tensor.clone()
-    
-    # Apply your processing
-    processed_tensor = your_model(tensor)
-    
-    # Create new frame with processed tensor
-    new_frame = frame.replace_tensor(processed_tensor)
-    return VideoOutput(new_frame, "custom_processor")
-```
-
-### GPU Processing
-
-```python
-def gpu_processor(frame: VideoFrame) -> VideoOutput:
-    tensor = frame.tensor
-    
-    # Move to GPU if not already there
-    if not tensor.is_cuda and torch.cuda.is_available():
-        tensor = tensor.cuda()
-    
-    # GPU processing
-    processed = your_gpu_model(tensor)
-    
-    new_frame = frame.replace_tensor(processed)
-    return VideoOutput(new_frame, "gpu_processor")
-```
-
-### Audio Processing
-
-PyTrickle automatically handles different audio channel configurations:
-
-```python
-def audio_processor(frame: AudioFrame) -> AudioOutput:
-    # Audio tensor is automatically converted to the right format
-    # Supports mono, stereo, and multi-channel audio
-    tensor = frame.tensor.clone()
-    
-    # Apply audio processing
-    processed = apply_audio_filter(tensor)
-    
-    new_frame = frame.replace_tensor(processed)
-    return AudioOutput(new_frame, "audio_processed")
-```
-
-## Testing
-
-### Quick Test with Make
-
-```bash
-# Install and run basic tests
-make install
-make test
-
-# Run integration tests (requires http-trickle)
-make test-integration
-
-# Start example server
-make run-server
-
-# Start simple processing example
-make run-example
-```
-
-### Manual Testing with http-trickle
-
-1. **Start the trickle server**:
-```bash
-cd ~/repos/http-trickle && make trickle-server addr=0.0.0.0:3389
-```
-
-2. **Start the pytrickle server**:
-```bash
-make run-server
-```
-
-3. **Start a video stream**:
-```bash
-cd ~/repos/http-trickle && make publisher-ffmpeg in=bbb_sunflower_1080p_30fps_normal.mp4 stream=sample url=http://127.0.0.1:3389
-```
-
-4. **Start processing via API**:
 ```bash
 curl -X POST http://localhost:8080/api/stream/start \
   -H "Content-Type: application/json" \
   -d '{
-    "subscribe_url": "http://127.0.0.1:3389/sample",
-    "publish_url": "http://127.0.0.1:3389/sample-output",
-    "gateway_request_id": "test",
+    "subscribe_url": "http://localhost:3389/input",
+    "publish_url": "http://localhost:3389/output",
+    "gateway_request_id": "demo_stream",
     "params": {
       "width": 704,
       "height": 384,
-      "effect": "red_tint",
-      "intensity": 0.3
+      "intensity": 0.7
     }
   }'
 ```
 
-5. **Play the processed stream**:
+### Update Parameters
+
 ```bash
-cd ~/repos/http-trickle && go run cmd/read2pipe/*.go --url http://127.0.0.1:3389/ --stream sample-output | ffplay -probesize 64 -
+curl -X POST http://localhost:8080/api/stream/params \
+  -H "Content-Type: application/json" \
+  -d '{
+    "intensity": 0.9,
+    "effect": "enhanced"
+  }'
 ```
 
-## Performance Optimization
+### Check Status
 
-### Throughput Optimization
+```bash
+curl http://localhost:8080/api/stream/status
+```
+
+### Stop Processing
+
+```bash
+curl -X POST http://localhost:8080/api/stream/stop
+```
+
+## Advanced Usage
+
+### GPU Processing
+
+```python
+class GPUProcessor(AsyncFrameProcessor):
+    """GPU-accelerated video processor."""
+    
+    async def process_video_async(self, frame: VideoFrame) -> Optional[VideoFrame]:
+        tensor = frame.tensor
+        
+        # Move to GPU if available
+        if torch.cuda.is_available() and not tensor.is_cuda:
+            tensor = tensor.cuda()
+        
+        # Apply GPU processing
+        processed = await self.gpu_model(tensor)
+        
+        return frame.replace_tensor(processed)
+```
+
+### Direct Client Integration
+
+For applications that need direct control without HTTP, see the TrickleClient documentation and `examples/async_processor_example.py` for advanced usage patterns.
+
+## Testing
+
+### Quick Test
+
+```bash
+# Install and test
+make install
+make test
+
+# Run the example processor
+python examples/async_processor_example.py
+```
+
+### Full Integration Test
+
+1. **Start trickle server**:
+```bash
+cd ~/repos/http-trickle && make trickle-server addr=0.0.0.0:3389
+```
+
+2. **Start the example processor**:
+```bash
+python examples/async_processor_example.py
+```
+
+3. **Start video stream**:
+```bash
+cd ~/repos/http-trickle && make publisher-ffmpeg in=video.mp4 stream=input url=http://127.0.0.1:3389
+```
+
+4. **Begin processing**:
+```bash
+curl -X POST http://localhost:8080/api/stream/start \
+  -H "Content-Type: application/json" \
+  -d '{
+    "subscribe_url": "http://127.0.0.1:3389/input",
+    "publish_url": "http://127.0.0.1:3389/output",
+    "gateway_request_id": "test",
+    "params": {"intensity": 0.7}
+  }'
+```
+
+5. **Update parameters in real-time**:
+```bash
+curl -X POST http://localhost:8080/api/stream/params \
+  -H "Content-Type: application/json" \
+  -d '{"intensity": 0.9}'
+```
+
+6. **View processed stream**:
+```bash
+cd ~/repos/http-trickle && go run cmd/read2pipe/*.go --url http://127.0.0.1:3389/ --stream output | ffplay -
+```
+
+## Performance Tips
+
+### Optimization
 
 - Use GPU processing when available
-- Minimize tensor copying with `.clone()` only when necessary
-- Process frames in batches when possible
-- Use efficient PyTorch operations
+- Minimize tensor copying with efficient PyTorch operations
+- Process frames in batches for AI models
+- Use async/await for I/O operations
 
 ### Memory Management
 
-- The package automatically handles CUDA memory management
-- Tensors are automatically moved between CPU/GPU as needed
-- Frame timestamps and metadata are preserved during processing
+- PyTrickle automatically handles CUDA memory
+- Tensors are moved between CPU/GPU as needed
+- Frame metadata is preserved during processing
 
-### Monitoring Performance
+### Monitoring
 
-The package includes built-in performance monitoring:
-
-- Frame processing timestamps
-- Input/output FPS tracking
-- Memory usage monitoring
-- Error rate tracking
+Built-in performance tracking includes:
+- Frame processing times
+- Input/output FPS
+- Memory usage
+- Error rates
 
 ## Architecture
 
-### Components
+PyTrickle consists of several key components:
 
-- **TrickleClient**: High-level client interface for direct integration
-- **TrickleApp**: HTTP server application for API-based integration
-- **TrickleStreamHandler**: Complete stream handler with built-in protocol management (NEW)
-- **TrickleSubscriber**: Handles subscription to trickle streams
-- **TricklePublisher**: Handles publishing to trickle streams  
+- **TrickleApp**: HTTP server for API-based integration
+- **TrickleClient**: Direct client for custom applications
+- **AsyncFrameProcessor**: Base class for async AI processors
 - **TrickleProtocol**: High-level protocol implementation
-- **Decoder**: Video decoding with PyAV
-- **Encoder**: Video encoding with PyAV
-- **StreamHealthManager**: Health monitoring and management
-- **BaseStreamManager/TrickleStreamManager**: Stream lifecycle management
+- **Frame Processing**: Video/audio frame handling with PyTorch tensors
 
 ### Data Flow
 
 ```
-Input Stream → Subscriber → Decoder → Frame Processor → Encoder → Publisher → Output Stream
-                                            ↓
-                                    Events/Monitoring
+Input Stream → Decoder → Frame Processor → Encoder → Output Stream
+                               ↓
+                       Parameter Updates & Monitoring
 ```
 
-The package uses asyncio for concurrent processing and PyTorch tensors for efficient frame manipulation.
+## Examples
+
+The `examples/` directory contains:
+
+- `async_processor_example.py`: Complete AsyncFrameProcessor with green tint processing and real-time parameter updates
 
 ## Troubleshooting
 
 ### Common Issues
 
-**Error: "http-trickle not found"**
-- Ensure http-trickle is cloned to `~/repos/http-trickle`
-- Run `make build` in the http-trickle directory
+**CUDA out of memory**
+- Use smaller frame dimensions
+- Process on CPU instead of GPU
 
-**Error: "CUDA out of memory"**
-- Reduce frame dimensions
-- Process frames on CPU instead of GPU
-- Ensure proper tensor cleanup
-
-**Error: "Connection refused"**
-- Check that the trickle server is running
-- Verify the correct host and port
+**Connection refused**
+- Ensure trickle server is running on correct port
 - Check firewall settings
 
-**Error: "cannot reshape array of size X into shape (2)"**
-- This audio error is now automatically handled
-- The package detects and properly processes mono, stereo, and multi-channel audio
-
-### Performance Issues
-
-**Low FPS**
-- Use GPU processing if available
-- Optimize frame processor algorithms
+**Low performance**
+- Use GPU processing when available
+- Optimize your processing algorithms
 - Check network bandwidth
-- Monitor CPU/memory usage
 
-**High Latency**
-- Reduce processing complexity
-- Use smaller frame dimensions
-- Check network latency
-- Optimize encoder settings
+### Audio Issues
+
+PyTrickle automatically handles different audio formats. If you encounter audio-related errors, the SDK will automatically detect and convert between mono, stereo, and multi-channel configurations.
 
 ## Contributing
 
@@ -401,18 +311,6 @@ The package uses asyncio for concurrent processing and PyTorch tensors for effic
 
 [MIT License](LICENSE)
 
-## Recent Updates
+---
 
-### Version 0.1.1
-- **Unified API Parameters**: StreamStartRequest now uses `params` field directly (matching update requests)
-- **Enhanced Audio Support**: Automatic handling of mono, stereo, and multi-channel audio configurations
-- **Improved Integration**: Better support for different integration patterns
-- **Runtime Fixes**: Resolved async/sync compatibility issues in metadata caching
-- **Robust Error Handling**: Enhanced encoder metadata validation and error recovery
-
-## Acknowledgments
-
-- Built on top of the http-trickle protocol
-- Uses PyAV for video encoding/decoding
-- Leverages PyTorch for tensor operations
-- Based on architecture from ai-runner
+**Get started with PyTrickle today and build powerful real-time video processing applications!**

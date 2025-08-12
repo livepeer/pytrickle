@@ -40,7 +40,7 @@ run-server:
 	python examples/http_server_example.py
 
 run-example:
-	python examples/simple_stream_processing.py
+	python examples/async_processor_example.py
 
 run-workflow:
 	python scripts/test_workflow.py
