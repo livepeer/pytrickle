@@ -9,7 +9,8 @@ import os
 import time
 import logging
 from typing import Optional
-import requests
+import aiohttp
+import asyncio
 
 class RegisterCapability:
     """
@@ -41,7 +42,7 @@ class RegisterCapability:
             "price_scaling": values["capability_price_scaling"],
         }
         
-    def _make_registration_request(self, orch_url: str, orch_secret: str, register_req: dict, 
+    async def _make_registration_request(self, orch_url: str, orch_secret: str, register_req: dict,
                                  max_retries: int = 10, delay: float = 2.0, timeout: float = 5.0) -> bool:
         """Make the actual HTTP registration request with retry logic."""
         headers = {"Authorization": orch_secret, "Content-Type": "application/json"}
@@ -50,28 +51,28 @@ class RegisterCapability:
         
         for attempt in range(1, max_retries + 1):
             try:
-                resp = requests.post(
-                    f"{orch_url}/capability/register",
-                    json=register_req,
-                    headers=headers,
-                    timeout=timeout,
-                    verify=False,
-                )
-                
-                if resp.status_code == 200:
-                    self.logger.info("Capability registered successfully")
-                    return True
-                elif resp.status_code == 400:
-                    self.logger.error("Orchestrator secret incorrect")
-                    return False
-                else:
-                    self.logger.warning(f"Register attempt {attempt} failed: {resp.status_code} {resp.text}")
-                    
-            except requests.RequestException as e:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        f"{orch_url}/capability/register",
+                        json=register_req,
+                        headers=headers,
+                        timeout=timeout,
+                        ssl=False,
+                    ) as resp:
+                        if resp.status == 200:
+                            self.logger.info("Capability registered successfully")
+                            return True
+                        elif resp.status_code == 400:
+                            self.logger.error("Orchestrator secret incorrect")
+                            return False
+                        else:
+                            self.logger.warning(f"Register attempt {attempt} failed: {resp.status} {resp.text}")
+
+            except aiohttp.ClientError as e:
                 self.logger.warning(f"Register attempt {attempt} failed with exception: {e}")
                 
             if attempt < max_retries:
-                time.sleep(delay)
+                await asyncio.sleep(delay)
             else:
                 self.logger.error("All registration retries failed")
                 return False
