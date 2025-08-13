@@ -1,0 +1,28 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "PyTrickle Demo App",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/examples/async_processor_example.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}/examples",
+            "env": {
+                "ORCH_URL": "https://localhost:9995",
+                "ORCH_SECRET": "orch-secret",
+                "CAPABILITY_NAME": "trickle-stream-example",
+                "CAPABILITY_DESCRIPTION": "Flip video upside down using pytrickle",
+                "CAPABILITY_URL": "http://localhost:7777",
+                "CAPABILITY_PRICE_PER_UNIT": "0",
+                "CAPABILITY_PRICE_SCALING": "1",
+                "CAPABILITY_CAPACITY": "1"
+            },
+            "justMyCode": true,
+            "python": "${command:python.interpreterPath}"
+        }
+    ]
+}
