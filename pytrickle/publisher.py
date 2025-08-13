@@ -8,7 +8,6 @@ with automatic preconnection and background task management.
 import asyncio
 import aiohttp
 import logging
-from contextlib import asynccontextmanager
 from typing import Optional, List
 
 from . import ErrorCallback

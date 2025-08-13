@@ -6,7 +6,6 @@ enabling automatic discovery and scaling of AI processing workers.
 """
 
 import os
-import time
 import logging
 from typing import Optional, Union
 from urllib.parse import urlparse, ParseResult

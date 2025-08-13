@@ -6,7 +6,7 @@ Provides real-time FPS tracking with rolling windows and overflow protection.
 
 import time
 from collections import deque
-from typing import Dict, Optional
+from typing import Dict
 
 
 class FPSMeter:

@@ -12,11 +12,10 @@ Environment Variables:
 
 import asyncio
 import logging
-import os
 from typing import Optional, Dict, Any, List
 import torch
 
-from pytrickle import FrameProcessor, TrickleApp, RegisterCapability
+from pytrickle import FrameProcessor, StreamServer, RegisterCapability
 from pytrickle.frames import VideoFrame, AudioFrame
 
 logging.basicConfig(level=logging.INFO)
@@ -109,15 +108,15 @@ async def main():
                 logger.warning("Registration failed")
         except Exception as e:
             logger.warning(f"Registration failed: {e}")
-        
-        # Create TrickleApp with native async processor support
+
+        # Create StreamServer with native async processor support
         logger.info(f"🌐 Service ready at http://localhost:{port}")
         logger.info("API: /api/stream/start, /api/stream/params, /api/stream/status")
         logger.info(f"Update intensity: curl -X POST http://localhost:{port}/api/stream/params \\")
         logger.info("  -H 'Content-Type: application/json' -d '{\"intensity\": 0.8}'")
-        
-        # Create and run TrickleApp with the async processor
-        app = TrickleApp(
+
+        # Create and run StreamServer with the async processor
+        app = StreamServer(
             frame_processor=processor,
             port=port,
             capability_name="accent-green-processor"
@@ -142,8 +141,8 @@ if __name__ == "__main__":
     - Configurable initialization via kwargs
     - Orchestrator registration (optional)
     - HTTP API for stream management
-    - Clean separation: FrameProcessor + TrickleApp
-    
+    - Clean separation: FrameProcessor + StreamServer
+
     Usage:
         # HTTP API server (recommended)
         python async_processor_example.py

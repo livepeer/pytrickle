@@ -5,9 +5,6 @@ from pydantic import BaseModel
 import logging
 import pynvml
 import atexit
-import asyncio
-import os
-from aiohttp import web
 
 logger = logging.getLogger(__name__)
 

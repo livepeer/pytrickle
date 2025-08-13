@@ -5,8 +5,7 @@ This module defines reusable BaseModel classes for validating and serializing
 API request parameters used across trickle streaming applications.
 """
 
-import json
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, Optional
 from pydantic import BaseModel, Field, field_validator
 from .utils.hardware import GPUComputeInfo, GPUUtilizationInfo
 

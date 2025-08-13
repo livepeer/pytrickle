@@ -9,8 +9,7 @@ import asyncio
 import json
 import queue
 import logging
-import time
-from typing import Optional, AsyncGenerator, Callable
+from typing import Optional, AsyncGenerator
 
 from .base import TrickleComponent, ComponentState
 from .subscriber import TrickleSubscriber

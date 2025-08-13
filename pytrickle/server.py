@@ -7,14 +7,11 @@ starting streams, updating parameters, and monitoring status.
 
 import asyncio
 import logging
-import json
 import time
-from typing import Optional, Dict, Any, Callable, Union
-from dataclasses import dataclass
+from typing import Optional, Dict, Any
 import os
 
 from aiohttp import web
-from pydantic import BaseModel, Field
 
 from .client import TrickleClient
 from .protocol import TrickleProtocol

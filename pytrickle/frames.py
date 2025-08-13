@@ -6,13 +6,11 @@ utilities, and streaming utilities for handling media data in the trickle
 streaming pipeline.
 """
 
-import asyncio
 import logging
-import time
 import torch
 import numpy as np
 import av
-from typing import Optional, Dict, Any, Union, List, Deque
+from typing import Optional, Dict, Union, List, Deque
 from fractions import Fraction
 from collections import deque
 from abc import ABC

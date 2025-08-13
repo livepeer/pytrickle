@@ -26,7 +26,7 @@ RUN pip install -r requirements.txt
 #install pytrickle
 # Install pytrickle from a specific branch
 # Replace BRANCH_NAME with the branch you need
-ARG PYTRICKLE_BRANCH=feat/add-api-spec-utils
+ARG PYTRICKLE_BRANCH=main
 RUN pip install git+https://github.com/livepeer/pytrickle.git@${PYTRICKLE_BRANCH}
 
 WORKDIR /app

@@ -14,7 +14,7 @@ from typing import Optional, cast, Callable
 import numpy as np
 import torch
 
-from .frames import InputFrame, VideoFrame, AudioFrame, DEFAULT_WIDTH, DEFAULT_HEIGHT
+from .frames import VideoFrame, AudioFrame, DEFAULT_WIDTH, DEFAULT_HEIGHT
 
 logger = logging.getLogger(__name__)
 

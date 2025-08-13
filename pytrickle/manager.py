@@ -8,7 +8,7 @@ extended for specific use cases while maintaining core streaming patterns.
 import asyncio
 import logging
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, Protocol, Callable
+from typing import Dict, Any, Optional, Callable
 
 from .health import StreamHealthManager
 

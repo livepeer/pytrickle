@@ -6,7 +6,7 @@ making it easy to integrate AI models and async pipelines with PyTrickle.
 
 import logging
 from abc import ABC, abstractmethod
-from typing import Optional, Callable, Any, Dict, List
+from typing import Optional, Any, Dict, List
 from .frames import VideoFrame, AudioFrame
 from . import ErrorCallback
 

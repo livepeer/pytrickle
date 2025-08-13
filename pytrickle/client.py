@@ -11,7 +11,7 @@ import logging
 from typing import Callable, Optional, Union
 
 from .protocol import TrickleProtocol
-from .frames import VideoFrame, AudioFrame, VideoOutput, AudioOutput, OutputFrame
+from .frames import VideoFrame, AudioFrame, VideoOutput, AudioOutput
 from . import ErrorCallback
 from .frame_processor import FrameProcessor
 

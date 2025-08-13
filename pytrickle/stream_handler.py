@@ -10,7 +10,7 @@ import asyncio
 import json
 import logging
 from abc import abstractmethod
-from typing import Optional, Dict, Any, Callable, Union
+from typing import Optional, Dict, Any
 
 from . import ErrorCallback
 from .frame_processor import FrameProcessor

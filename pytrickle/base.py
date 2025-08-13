@@ -9,7 +9,7 @@ import asyncio
 import logging
 import time
 from enum import Enum
-from typing import Optional, Callable
+from typing import Optional
 
 from . import ErrorCallback
 
