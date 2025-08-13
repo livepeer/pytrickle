@@ -83,22 +83,8 @@ class AccentGreenProcessor(FrameProcessor):
 
 async def main():
     """Start the Accent Green tinting service."""
-    capability_url = os.getenv("CAPABILITY_URL")
-    # Parse port from capability_url if provided, otherwise use PORT env var or default to 8080
-    port = 8080
-    if capability_url:
-        try:
-            from urllib.parse import urlparse
-            parsed = urlparse(capability_url)
-            if parsed.port:
-                port = parsed.port
-        except Exception:
-            pass
-    if not capability_url or not port or port == 8080:
-        port = int(os.getenv("PORT", "8080"))
-    
-    logger.info(f"🎨 Starting Accent Green Tinting Service on port {port}")
     app = None
+    port = 8080
     try:
         # Create processor with initialization kwargs
         processor = AccentGreenProcessor(
@@ -106,17 +92,23 @@ async def main():
         )
         
         # Register with orchestrator if URL provided
-        if capability_url:
-            try:
-                RegisterCapability.register(
-                    logger,
-                    capability_name="accent-green-processor",
-                    capability_desc="Accent Green color tinting service",
-                    capability_url=capability_url
-                )
-                logger.info("✅ Registered with orchestrator")
-            except Exception as e:
-                logger.warning(f"Registration failed: {e}")
+        try:
+            result = await RegisterCapability.register(
+                logger,
+                capability_name="accent-green-processor",
+                capability_desc="Accent Green color tinting service"
+            )
+            if result and result != False:
+                # Extract port from returned capability URL
+                if result.port:
+                    port = result.port
+                    logger.info(f"✅ Registered with orchestrator, using port {port} from returned URL")
+                else:
+                    logger.info("✅ Registered with orchestrator")
+            else:
+                logger.warning("Registration failed")
+        except Exception as e:
+            logger.warning(f"Registration failed: {e}")
         
         # Create TrickleApp with native async processor support
         logger.info(f"🌐 Service ready at http://localhost:{port}")

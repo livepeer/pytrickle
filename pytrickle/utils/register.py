@@ -8,7 +8,8 @@ enabling automatic discovery and scaling of AI processing workers.
 import os
 import time
 import logging
-from typing import Optional
+from typing import Optional, Union
+from urllib.parse import urlparse, ParseResult
 import aiohttp
 import asyncio
 
@@ -41,9 +42,8 @@ class RegisterCapability:
             "price_per_unit": values["capability_price_per_unit"],
             "price_scaling": values["capability_price_scaling"],
         }
-        
     async def _make_registration_request(self, orch_url: str, orch_secret: str, register_req: dict,
-                                 max_retries: int = 10, delay: float = 2.0, timeout: float = 5.0) -> bool:
+                                 max_retries: int = 10, delay: float = 2.0, timeout: float = 5.0) -> Union[ParseResult, bool]:
         """Make the actual HTTP registration request with retry logic."""
         headers = {"Authorization": orch_secret, "Content-Type": "application/json"}
         
@@ -61,7 +61,7 @@ class RegisterCapability:
                     ) as resp:
                         if resp.status == 200:
                             self.logger.info("Capability registered successfully")
-                            return True
+                            return urlparse(register_req["url"])
                         elif resp.status_code == 400:
                             self.logger.error("Orchestrator secret incorrect")
                             return False
@@ -79,20 +79,19 @@ class RegisterCapability:
                 
         return False
         
-    def register_capability(
+    async def register_capability(
         self,
         orch_url: Optional[str] = None,
         orch_secret: Optional[str] = None,
         capability_name: Optional[str] = None,
         capability_desc: Optional[str] = None,
-        capability_url: Optional[str] = None,
         capability_capacity: Optional[int] = None,
         capability_price_per_unit: Optional[int] = None,
         capability_price_scaling: Optional[int] = None,
         max_retries: int = 3,
         delay: float = 2.0,
         timeout: float = 1.5
-    ) -> bool:
+    ) -> Union[ParseResult, bool]:
         """
         Register this worker capability with the orchestrator.
         
@@ -104,7 +103,7 @@ class RegisterCapability:
         - ORCH_SECRET: Orchestrator secret
         - CAPABILITY_NAME: Capability name
         - CAPABILITY_DESCRIPTION: Capability description 
-        - CAPABILITY_URL: Capability URL
+        - CAPABILITY_URL: Capability URL (always from environment, cannot be overridden)
         - CAPABILITY_CAPACITY: Max concurrent streams
         - CAPABILITY_PRICE_PER_UNIT: Price per unit 
         - CAPABILITY_PRICE_SCALING: Price scaling
@@ -115,14 +114,14 @@ class RegisterCapability:
         - timeout: Request timeout in seconds (default: 5.0)
             
         Returns:
-            True if registration succeeded, False otherwise
+            The registered capability URL (as ParseResult object) if registration succeeded, False otherwise
         """
         # Get values from env vars if not provided
         orch_url = orch_url or os.environ.get("ORCH_URL", "")
         orch_secret = orch_secret or os.environ.get("ORCH_SECRET", "")
         capability_name = capability_name or os.environ.get("CAPABILITY_NAME", "pytrickle-worker")
         capability_desc = capability_desc or os.environ.get("CAPABILITY_DESCRIPTION", "PyTrickle video processing worker")
-        capability_url = capability_url or os.environ.get("CAPABILITY_URL", "http://localhost:8080")
+        capability_url = os.environ.get("CAPABILITY_URL", "http://localhost:8080")
         capability_capacity = capability_capacity or int(os.environ.get("CAPABILITY_CAPACITY", 1))
         capability_price_per_unit = capability_price_per_unit or int(os.environ.get("CAPABILITY_PRICE_PER_UNIT", 0))
         capability_price_scaling = capability_price_scaling or int(os.environ.get("CAPABILITY_PRICE_SCALING", 1))
@@ -143,7 +142,7 @@ class RegisterCapability:
             return False
             
         register_req = self._build_register_request(**values)
-        return self._make_registration_request(
+        result = await self._make_registration_request(
             values["orch_url"], 
             values["orch_secret"], 
             register_req, 
@@ -151,9 +150,10 @@ class RegisterCapability:
             delay, 
             timeout
         )
+        return result
     
     @classmethod
-    def register(cls, logger: Optional[logging.Logger] = None, **kwargs) -> bool:
+    async def register(cls, logger: Optional[logging.Logger] = None, **kwargs) -> Union[ParseResult, bool]:
         """
         Class method for simple one-line registration.
         
@@ -163,10 +163,10 @@ class RegisterCapability:
         
         Args:
             logger: Optional logger instance
-            **kwargs: Any parameters to override (same as register_capability)
+            **kwargs: Any parameters to override (same as register_capability, except capability_url which always comes from CAPABILITY_URL env var)
             
         Returns:
-            True if registration succeeded, False otherwise
+            The registered capability URL (as ParseResult object) if registration succeeded, False otherwise
         """
         instance = cls(logger)
-        return instance.register_capability(**kwargs)
+        return await instance.register_capability(**kwargs)
