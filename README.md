@@ -254,6 +254,38 @@ Built-in performance tracking includes:
 - Memory usage
 - Error rates
 
+### Frame Rate Configuration
+
+PyTrickle allows you to control the maximum frame rate for video processing:
+
+**Set framerate when starting a stream:**
+```bash
+curl -X POST http://localhost:8080/api/stream/start \
+  -H "Content-Type: application/json" \
+  -d '{
+    "subscribe_url": "http://127.0.0.1:3389/",
+    "publish_url": "http://127.0.0.1:3389/",
+    "gateway_request_id": "test",
+    "params": {
+      "width": 512,
+      "height": 512,
+      "max_framerate": 30
+    }
+  }'
+```
+
+
+
+**Framerate options:**
+- **Default**: 24 FPS (balanced performance)
+- **Low**: 15 FPS (reduced CPU usage)
+- **Standard**: 30 FPS (smooth video)
+- **High**: 60 FPS (ultra-smooth, higher resource usage)
+- **Custom**: Any positive integer value from 1 to 60 FPS
+- **Maximum**: 60 FPS (values above 60 will be rejected)
+
+The framerate setting controls the maximum number of frames processed per second, helping balance performance and resource usage.
+
 ## Architecture
 
 PyTrickle consists of several key components:

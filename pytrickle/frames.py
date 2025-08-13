@@ -22,9 +22,8 @@ logger = logging.getLogger(__name__)
 # Tensor Conversion Utilities
 # ============================
 
-# Default dimensions for video frames  
-DEFAULT_WIDTH = 704
-DEFAULT_HEIGHT = 384
+DEFAULT_WIDTH = 512
+DEFAULT_HEIGHT = 512
 
 class SideData:
     """Base class for side data, needed to keep it consistent with av frame side_data"""

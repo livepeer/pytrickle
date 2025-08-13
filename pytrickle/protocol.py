@@ -16,15 +16,13 @@ from .base import TrickleComponent, ComponentState
 from .subscriber import TrickleSubscriber
 from .publisher import TricklePublisher
 from .media import run_subscribe, run_publish
-from .frames import InputFrame, OutputFrame, AudioFrame, VideoFrame, AudioOutput, VideoOutput
+from .frames import InputFrame, OutputFrame, AudioFrame, VideoFrame, AudioOutput, VideoOutput, DEFAULT_WIDTH, DEFAULT_HEIGHT
+from .decoder import DEFAULT_MAX_FRAMERATE
 from .cache import LastValueCache
 from .fps_meter import FPSMeter
 from . import ErrorCallback
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_WIDTH = 512
-DEFAULT_HEIGHT = 512
 
 class TrickleProtocol(TrickleComponent):
     """Trickle protocol coordinator that manages subscription, publishing, control, and events."""
@@ -38,6 +36,7 @@ class TrickleProtocol(TrickleComponent):
         data_url: Optional[str] = None,
         width: Optional[int] = None,
         height: Optional[int] = None,
+        max_framerate: Optional[int] = None,
         error_callback: Optional[ErrorCallback] = None,
         heartbeat_interval: float = 10.0,
     ):
@@ -49,6 +48,7 @@ class TrickleProtocol(TrickleComponent):
         self.data_url = data_url
         self.width = width
         self.height = height
+        self.max_framerate = max_framerate
         self.heartbeat_interval = heartbeat_interval
         
         # Tasks and components
@@ -127,7 +127,8 @@ class TrickleProtocol(TrickleComponent):
                 metadata_cache.put, 
                 self.emit_monitoring_event, 
                 self.width or DEFAULT_WIDTH, 
-                self.height or DEFAULT_HEIGHT
+                self.height or DEFAULT_HEIGHT,
+                self.max_framerate or DEFAULT_MAX_FRAMERATE
             )
         )
         
@@ -243,6 +244,8 @@ class TrickleProtocol(TrickleComponent):
         self.subscribe_task = None
         self.publish_task = None
         self._update_state(ComponentState.STOPPED)
+
+
 
     async def ingress_loop(self, done: asyncio.Event) -> AsyncGenerator[InputFrame, None]:
         """Generate frames from the ingress stream."""

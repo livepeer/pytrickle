@@ -10,25 +10,26 @@ from av.video.reformatter import VideoReformatter
 from av.container import InputContainer
 import time
 import logging
-from typing import cast, Callable
+from typing import Optional, cast, Callable
 import numpy as np
 import torch
 
-from .frames import InputFrame, VideoFrame, AudioFrame
+from .frames import InputFrame, VideoFrame, AudioFrame, DEFAULT_WIDTH, DEFAULT_HEIGHT
 
 logger = logging.getLogger(__name__)
 
-MAX_FRAMERATE = 24
+DEFAULT_MAX_FRAMERATE = 24
 
-def decode_av(pipe_input, frame_callback: Callable, put_metadata: Callable, target_width: int, target_height: int):
+def decode_av(pipe_input, frame_callback: Callable, put_metadata: Callable, target_width: Optional[int] = DEFAULT_WIDTH, target_height: Optional[int] = DEFAULT_HEIGHT, max_framerate: Optional[int] = DEFAULT_MAX_FRAMERATE):
     """
     Reads from a pipe (or file-like object) and decodes video/audio frames.
 
     :param pipe_input: File path, 'pipe:', sys.stdin, or another file-like object.
     :param frame_callback: A function that accepts an InputFrame object
     :param put_metadata: A function that accepts audio/video metadata
-    :param target_width: Target width for output frames
-    :param target_height: Target height for output frames
+    :param target_width: Target width for output frames (default: DEFAULT_WIDTH)
+    :param target_height: Target height for output frames (default: DEFAULT_HEIGHT)
+    :param max_framerate: Maximum frame rate (FPS) for output video (default: DEFAULT_MAX_FRAMERATE)
     """
     container = cast(InputContainer, av.open(pipe_input, 'r'))
 
@@ -81,7 +82,11 @@ def decode_av(pipe_input, frame_callback: Callable, put_metadata: Callable, targ
     put_metadata(metadata)
 
     reformatter = VideoReformatter()
-    frame_interval = 1.0 / MAX_FRAMERATE
+    # Ensure max_framerate is not None
+    if max_framerate is None:
+        max_framerate = DEFAULT_MAX_FRAMERATE
+    logger.info(f"Decoder configured with max frame rate: {max_framerate} FPS")
+    frame_interval = 1.0 / max_framerate
     next_pts_time = 0.0
     
     try:

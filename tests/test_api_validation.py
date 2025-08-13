@@ -1,8 +1,8 @@
 """
 Tests for Pydantic validation logic in pytrickle.api module.
 
-Focuses on testing the params validation and dimension conversion behavior
-in StreamStartRequest and StreamParamsUpdateRequest models.
+Focuses on testing the params validation, dimension conversion, and max_framerate
+validation behavior in StreamStartRequest and StreamParamsUpdateRequest models.
 """
 
 import pytest
@@ -134,6 +134,58 @@ class TestStreamParamsUpdateRequest:
         
         # Test None
         assert StreamParamsUpdateRequest.validate_params(None) is None
+    
+    def test_max_framerate_rejected_in_updates(self):
+        """Test that max_framerate cannot be updated during runtime."""
+        # Test that max_framerate is rejected in runtime updates
+        invalid_params = {"max_framerate": 60}
+        with pytest.raises(ValueError, match="max_framerate cannot be updated during runtime"):
+            StreamParamsUpdateRequest.model_validate(invalid_params)
+        
+        # Test that other parameters still work
+        valid_params = {"intensity": 0.8, "effect": "enhanced"}
+        request = StreamParamsUpdateRequest.model_validate(valid_params)
+        assert request.model_dump()["intensity"] == 0.8
+        
+        # Test mix of valid and invalid parameters
+        mixed_params = {"intensity": 0.9, "max_framerate": 45}
+        with pytest.raises(ValueError, match="max_framerate cannot be updated during runtime"):
+            StreamParamsUpdateRequest.model_validate(mixed_params)
+        
+        # Test max_framerate rejected with string value in updates
+        string_update = {"max_framerate": "30"}
+        with pytest.raises(ValueError, match="max_framerate cannot be updated during runtime"):
+            StreamParamsUpdateRequest.model_validate(string_update)
+    
+    def test_framerate_conversion_method(self):
+        """Test the _convert_framerate method directly."""
+        # Test valid conversion
+        params = {"max_framerate": "30", "other_param": "value"}
+        converted = StreamParamsUpdateRequest._convert_framerate(params)
+        assert converted["max_framerate"] == 30
+        assert isinstance(converted["max_framerate"], int)
+        assert converted["other_param"] == "value"
+        
+        # Test no framerate parameter
+        params_no_fr = {"other_param": "value"}
+        converted_no_fr = StreamParamsUpdateRequest._convert_framerate(params_no_fr)
+        assert "max_framerate" not in converted_no_fr
+        assert converted_no_fr["other_param"] == "value"
+        
+        # Test invalid framerate
+        params_invalid = {"max_framerate": "invalid"}
+        with pytest.raises(ValueError, match="max_framerate must be a valid integer"):
+            StreamParamsUpdateRequest._convert_framerate(params_invalid)
+            
+        # Test negative framerate
+        params_negative = {"max_framerate": -10}
+        with pytest.raises(ValueError, match="max_framerate must be a positive integer"):
+            StreamParamsUpdateRequest._convert_framerate(params_negative)
+            
+        # Test framerate exceeding maximum (60 FPS)
+        params_too_high = {"max_framerate": 120}
+        with pytest.raises(ValueError, match="max_framerate cannot exceed 60 FPS"):
+            StreamParamsUpdateRequest._convert_framerate(params_too_high)
 
 
 class TestStreamStartRequest:
@@ -289,6 +341,185 @@ class TestStreamStartRequest:
         assert request.params["enabled"] is True
         assert request.params["custom_list"] == [1, 2, 3]
         assert request.params["custom_dict"] == {"nested": "value"}
+    
+    def test_max_framerate_validation(self):
+        """Test that max_framerate is correctly validated in stream start requests."""
+        # Test valid max_framerate
+        request = StreamStartRequest(
+            subscribe_url="http://example.com/input",
+            publish_url="http://example.com/output", 
+            gateway_request_id="test123",
+            params={
+                "width": 512,
+                "height": 512,
+                "max_framerate": 30
+            }
+        )
+        
+        assert request.params["max_framerate"] == 30
+        assert isinstance(request.params["max_framerate"], int)
+        
+        # Test string max_framerate gets converted to int
+        request_str = StreamStartRequest(
+            subscribe_url="http://example.com/input",
+            publish_url="http://example.com/output", 
+            gateway_request_id="test123",
+            params={
+                "width": 512,
+                "height": 512,
+                "max_framerate": "25"
+            }
+        )
+        
+        assert request_str.params["max_framerate"] == 25
+        assert isinstance(request_str.params["max_framerate"], int)
+        
+        # Test invalid max_framerate (negative)
+        with pytest.raises(ValidationError, match="max_framerate must be a positive integer"):
+            StreamStartRequest(
+                subscribe_url="http://example.com/input",
+                publish_url="http://example.com/output", 
+                gateway_request_id="test123",
+                params={
+                    "width": 512,
+                    "height": 512,
+                    "max_framerate": -5
+                }
+            )
+            
+        # Test non-numeric max_framerate
+        with pytest.raises(ValidationError, match="max_framerate must be a valid integer"):
+            StreamStartRequest(
+                subscribe_url="http://example.com/input",
+                publish_url="http://example.com/output", 
+                gateway_request_id="test123",
+                params={
+                    "width": 512,
+                    "height": 512,
+                    "max_framerate": "invalid"
+                }
+            )
+            
+        # Test max_framerate exceeding 60 FPS limit
+        with pytest.raises(ValidationError, match="max_framerate cannot exceed 60 FPS"):
+            StreamStartRequest(
+                subscribe_url="http://example.com/input",
+                publish_url="http://example.com/output", 
+                gateway_request_id="test123",
+                params={
+                    "width": 512,
+                    "height": 512,
+                    "max_framerate": 120
+                }
+            )
+            
+        # Test max_framerate at the limit (60) should work
+        request_at_limit = StreamStartRequest(
+            subscribe_url="http://example.com/input",
+            publish_url="http://example.com/output", 
+            gateway_request_id="test123",
+            params={
+                "width": 512,
+                "height": 512,
+                "max_framerate": 60
+            }
+        )
+        assert request_at_limit.params["max_framerate"] == 60
+    
+    def test_max_framerate_limits(self):
+        """Test specific max_framerate limit validation."""
+        # Test common valid values
+        valid_framerates = [1, 15, 24, 30, 45, 60]
+        for fps in valid_framerates:
+            request = StreamStartRequest(
+                subscribe_url="http://example.com/input",
+                publish_url="http://example.com/output",
+                gateway_request_id="test123",
+                params={
+                    "width": 512,
+                    "height": 512,
+                    "max_framerate": fps
+                }
+            )
+            assert request.params["max_framerate"] == fps
+        
+        # Test invalid values (above 60)
+        invalid_framerates = [61, 75, 100, 120, 240]
+        for fps in invalid_framerates:
+            with pytest.raises(ValidationError, match="max_framerate cannot exceed 60 FPS"):
+                StreamStartRequest(
+                    subscribe_url="http://example.com/input",
+                    publish_url="http://example.com/output",
+                    gateway_request_id="test123",
+                    params={
+                        "width": 512,
+                        "height": 512,
+                        "max_framerate": fps
+                    }
+                )
+    
+    def test_readme_example_parsing(self):
+        """Test that the README example request format is correctly parsed."""
+        # This is the exact format from the README
+        request = StreamStartRequest(
+            subscribe_url="http://127.0.0.1:3389/",
+            publish_url="http://127.0.0.1:3389/",
+            gateway_request_id="test",
+            params={
+                "width": 512,
+                "height": 512,
+                "max_framerate": 30
+            }
+        )
+        
+        # This should parse correctly
+        assert request.params["max_framerate"] == 30
+        assert request.params["width"] == 512
+        assert request.params["height"] == 512
+    
+    def test_complete_max_framerate_flow(self):
+        """Test the complete flow from HTTP request format to validation."""
+        # Test the exact curl format from README
+        request = StreamStartRequest(
+            subscribe_url="http://127.0.0.1:3389/",
+            publish_url="http://127.0.0.1:3389/",
+            gateway_request_id="test",
+            params={
+                "width": 512,
+                "height": 512,
+                "max_framerate": 30
+            }
+        )
+        
+        # Validate the request
+        assert request.params["max_framerate"] == 30
+        
+        # Simulate server parameter extraction
+        params_dict = request.params or {}
+        width = params_dict.get("width", 512)
+        height = params_dict.get("height", 512)
+        max_framerate = params_dict.get("max_framerate", None)
+        
+        assert width == 512
+        assert height == 512
+        assert max_framerate == 30
+        
+        # Test default case (no max_framerate)
+        request_no_framerate = StreamStartRequest(
+            subscribe_url="http://127.0.0.1:3389/",
+            publish_url="http://127.0.0.1:3389/",
+            gateway_request_id="test",
+            params={
+                "width": 512,
+                "height": 512
+                # No max_framerate specified
+            }
+        )
+        
+        params_dict_no_fr = request_no_framerate.params or {}
+        max_framerate_default = params_dict_no_fr.get("max_framerate", None)
+        
+        assert max_framerate_default is None  # Should be None when not provided
 
 
 class TestValidationIntegration:

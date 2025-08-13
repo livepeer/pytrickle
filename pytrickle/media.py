@@ -10,13 +10,13 @@ import time
 import asyncio
 import logging
 import threading
-from typing import Callable, Optional, Dict, Any
+from typing import Callable, Optional
 
 from .subscriber import TrickleSubscriber  
 from .publisher import TricklePublisher
-from .decoder import decode_av
+from .decoder import decode_av, DEFAULT_MAX_FRAMERATE
 from .encoder import encode_av
-from .frames import InputFrame, OutputFrame
+from .frames import DEFAULT_WIDTH, DEFAULT_HEIGHT
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +31,9 @@ async def run_subscribe(
     frame_callback: Callable,
     put_metadata: Callable,
     monitoring_callback: Optional[Callable] = None,
-    target_width: int = 512,
-    target_height: int = 512
+    target_width: Optional[int] = DEFAULT_WIDTH,
+    target_height: Optional[int] = DEFAULT_HEIGHT,
+    max_framerate: Optional[int] = DEFAULT_MAX_FRAMERATE
 ):
     """
     Run subscription loop to receive and decode video streams.
@@ -44,12 +45,21 @@ async def run_subscribe(
         monitoring_callback: Optional callback for monitoring events
         target_width: Target width for decoded frames
         target_height: Target height for decoded frames
+        max_framerate: Maximum framerate for decoded frames
     """
+    # Ensure default values are applied if None
+    if target_width is None:
+        target_width = DEFAULT_WIDTH
+    if target_height is None:
+        target_height = DEFAULT_HEIGHT
+    if max_framerate is None:
+        max_framerate = DEFAULT_MAX_FRAMERATE
+        
     try:
         in_pipe, out_pipe = os.pipe()
         write_fd = await _asyncify_fd_writer(out_pipe)
         parse_task = asyncio.create_task(
-            _decode_in(in_pipe, frame_callback, put_metadata, write_fd, target_width, target_height)
+            _decode_in(in_pipe, frame_callback, put_metadata, write_fd, target_width, target_height, max_framerate)
         )
         subscribe_task = asyncio.create_task(
             _subscribe(subscribe_url, write_fd, monitoring_callback)
@@ -114,15 +124,24 @@ async def _decode_in(
     put_metadata: Callable, 
     write_fd, 
     target_width: int, 
-    target_height: int
+    target_height: int,
+    max_framerate: int = 24
 ):
     """Decode video stream from pipe."""
+    # Ensure default values are applied if None
+    if target_width is None:
+        target_width = DEFAULT_WIDTH
+    if target_height is None:
+        target_height = DEFAULT_HEIGHT
+    if max_framerate is None:
+        max_framerate = DEFAULT_MAX_FRAMERATE
+        
     def decode_runner():
         retry_count = 0
         last_retry_time = time.time()
         while retry_count < MAX_DECODER_RETRIES:
             try:
-                decode_av(f"pipe:{in_pipe}", frame_callback, put_metadata, target_width, target_height)
+                decode_av(f"pipe:{in_pipe}", frame_callback, put_metadata, target_width, target_height, max_framerate)
                 break  # clean exit
             except Exception as e:
                 msg = str(e)

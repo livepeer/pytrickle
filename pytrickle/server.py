@@ -97,10 +97,11 @@ class TrickleApp:
             
             logger.info(f"Starting stream: {params.subscribe_url} -> {params.publish_url}")
             
-            # Extract dimensions from params (already converted to int by validation)
+            # Extract dimensions and framerate from params (already converted to int by validation)
             params_dict = params.params or {}
             width = params_dict.get("width", 512)
             height = params_dict.get("height", 512)
+            max_framerate = params_dict.get("max_framerate", None)  # None will use default
             
             # Create protocol and client (align with current Client/Protocol API)
             protocol = TrickleProtocol(
@@ -111,6 +112,7 @@ class TrickleApp:
                 data_url=params.data_url,
                 width=width,
                 height=height,
+                max_framerate=max_framerate,
             )
 
             # Create TrickleClient with native async processor

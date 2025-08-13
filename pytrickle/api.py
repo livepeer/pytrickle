@@ -42,6 +42,8 @@ class StreamParamsUpdateRequest(BaseModel):
     This model accepts arbitrary string field names with any value types,
     allowing flexible parameter updates without nested structure.
     Width and height values are automatically converted to integers if provided.
+    
+    Note: max_framerate cannot be updated during runtime and must be set when starting the stream.
     """
     
     model_config = {"extra": "allow"}  # Allow arbitrary fields
@@ -61,7 +63,10 @@ class StreamParamsUpdateRequest(BaseModel):
                 raise ValueError(f"All field names must be strings, got {type(key)} for key: {key}")
         
         # Convert and validate dimensions if present
-        return cls._convert_dimensions(v)
+        v = cls._convert_dimensions(v)
+        # Convert and validate framerate if present  
+        v = cls._convert_framerate(v)
+        return v
     
     @classmethod
     def _convert_dimensions(cls, params_dict: dict) -> dict:
@@ -86,9 +91,31 @@ class StreamParamsUpdateRequest(BaseModel):
         return result
     
     @classmethod
+    def _convert_framerate(cls, params_dict: dict) -> dict:
+        """Convert and validate max_framerate parameter."""
+        result = params_dict.copy()
+        if "max_framerate" in result:
+            try:
+                value = int(result["max_framerate"])
+            except (ValueError, TypeError):
+                raise ValueError("max_framerate must be a valid integer")
+            
+            if value <= 0:
+                raise ValueError("max_framerate must be a positive integer")
+            if value > 60:
+                raise ValueError("max_framerate cannot exceed 60 FPS")
+            result["max_framerate"] = value
+        
+        return result
+    
+    @classmethod
     def model_validate(cls, obj):
         """Custom validation to ensure all fields are string key-value pairs."""
         if isinstance(obj, dict):
+            # Check for unsupported runtime parameters
+            if "max_framerate" in obj:
+                raise ValueError("max_framerate cannot be updated during runtime. Set it when starting the stream.")
+            
             # Validate and get the processed dictionary with dimension conversions
             obj = cls.validate_params(obj)
         return super().model_validate(obj)
