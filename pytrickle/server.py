@@ -17,9 +17,10 @@ from aiohttp import web
 from .client import TrickleClient
 from .protocol import TrickleProtocol
 from .api import StreamParamsUpdateRequest, StreamStartRequest, Version, HardwareInformation, HardwareStats
-from .state import StreamState
+from .state import StreamState, PipelineState
 from .utils.hardware import HardwareInfo
 from .frame_processor import FrameProcessor
+from .health import StreamHealthManager
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +86,11 @@ class StreamServer:
         self.enable_default_routes = enable_default_routes
         self.health_check_interval = health_check_interval
         
+        # Built-in health manager for application health state
+        self.health_manager = StreamHealthManager(
+            service_name=capability_name or "stream-service"
+        )
+        
         # Create aiohttp application with optional configuration
         app_config = app_kwargs or {}
         self.app = web.Application(**app_config)
@@ -99,7 +105,8 @@ class StreamServer:
         self.pipeline = pipeline or os.getenv("PIPELINE", "byoc")
         self.capability_name = capability_name or os.getenv("CAPABILITY_NAME", os.getenv("MODEL_ID",""))
 
-        # Store app context
+        # Store app context and health manager
+        self.app["health_manager"] = self.health_manager
         if app_context:
             for key, value in app_context.items():
                 self.app[key] = value
@@ -341,8 +348,7 @@ class StreamServer:
             
         except Exception as e:
             logger.error(f"Error starting stream: {e}")
-            self.state.stream_errors.append(f"Stream start failed: {str(e)}")
-            self.state.error_event.set()
+            self.state.set_state(PipelineState.ERROR)
             return web.json_response({
                 "status": "error",
                 "message": f"Error starting stream: {str(e)}"
@@ -451,12 +457,23 @@ class StreamServer:
             }, status=500)
     
     async def _handle_health(self, request: web.Request) -> web.Response:
-        """Handle health check requests with simplified state."""
+        """Handle health check requests using the built-in health manager."""
         try:
-            state_data = self.state.get_state()
-            #TODO: Should we return 503 if in error state?
-            # status_code = 503 if state_data["error"] else 200
-            return web.json_response(state_data, status=200)
+            health_state = self.get_health_state()
+            
+            # Return 503 if in error state, 200 otherwise
+            status_code = 503 if self.health_manager.is_error() else 200
+            
+            return web.json_response({
+                'status': health_state['state'],
+                'pipeline_ready': health_state['pipeline_ready'],
+                'active_streams': health_state['active_streams'],
+                'startup_complete': health_state['startup_complete'],
+                'pipeline_state': health_state.get('pipeline_state'),
+                'error_message': health_state.get('error_message'),
+                'additional_info': health_state.get('additional_info', {})
+            }, status=status_code)
+            
         except Exception as e:
             logger.error(f"Health check error: {e}")
             return web.json_response({
@@ -494,12 +511,12 @@ class StreamServer:
         try:
             if self.current_client:
                 # Set pipeline ready when client starts successfully
-                self.state.set_pipeline_ready()
+                self.state.set_state(PipelineState.READY)
                 await self.current_client.start(request_id)
         except Exception as e:
             logger.error(f"Error running client: {e}")
             # Set error state on client failure
-            self.state.error_event.set()
+            self.state.set_state(PipelineState.ERROR)
         finally:
             # Properly stop the current stream instead of just clearing references
             await self._stop_current_stream()
@@ -575,11 +592,55 @@ class StreamServer:
         await site.start()
         
         # Set pipeline ready when server is up and ready to accept requests
-        self.state.set_pipeline_ready()
+        self.state.set_state(PipelineState.READY)
         
         logger.info(f"Trickle app server started on {self.host}:{self.port}")
         return runner
+
+    # Built-in State Management API
+    def set_state(self, state: PipelineState) -> None:
+        """Set pipeline state using enum value.
+        
+        Delegates to the StreamState's set_state method for consistent state management.
+        
+        Args:
+            state: PipelineState enum value indicating desired state
+        """
+        self.state.set_state(state)
     
+    def set_client_active(self, active: bool) -> None:
+        """Set whether there's an active streaming client.
+        
+        Args:
+            active: True if client is active, False otherwise
+        """
+        self.state.set_active_client(active)
+    
+    def get_state(self) -> Dict[str, Any]:
+        """Get current pipeline state information.
+        
+        Returns:
+            Dict containing current state information
+        """
+        return self.state.get_state()
+    
+    def update_active_streams(self, count: int):
+        """Update active stream count."""
+        self.health_manager.update_active_streams(count)
+    
+    def get_health_state(self) -> Dict[str, Any]:
+        """Get current health state."""
+        return self.health_manager.get_pipeline_state()
+    
+    def is_healthy(self) -> bool:
+        """Check if the server is in a healthy state."""
+        return not self.health_manager.is_error()
+    
+    def get_health_summary(self) -> str:
+        """Get a simple health status string."""
+        state = self.health_manager.get_pipeline_state()
+        return state.get('state', 'unknown')
+
     async def run_forever(self):
         """Run the server forever."""
         runner = await self.start_server()
@@ -592,36 +653,3 @@ class StreamServer:
         finally:
             await self._stop_current_stream()
             await runner.cleanup()
-
-def create_app(
-    frame_processor: 'FrameProcessor',
-    port: int = 8000,
-    capability_name: str = "",
-    version: str = "0.0.1",
-    **kwargs
-) -> StreamServer:
-    """Create a stream server instance.
-
-    Args:
-        frame_processor: FrameProcessor for native async processing
-        port: HTTP server port
-        capability_name: Name of the capability
-        version: Version string
-        **kwargs: Additional configuration options for TrickleApp
-        
-    Returns:
-        StreamServer instance
-
-    Example:
-        processor = MyAsyncProcessor()
-        await processor.start()
-        app = create_app(frame_processor=processor, port=8000)
-        await app.run_forever()
-    """
-    return StreamServer(
-        frame_processor=frame_processor,
-        port=port,
-        capability_name=capability_name,
-        version=version,
-        **kwargs
-    ) 

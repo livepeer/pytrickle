@@ -118,38 +118,71 @@ class StreamState:
         """Get current state (alias for get_state)."""
         return self.get_state()
     
-    # State transitions
-    def start(self) -> None:
+    # Internal state transition methods
+    def _start(self) -> None:
         """Begin stream startup; transitions to LOADING."""
         if self._state is PipelineState.INIT:
             self._state = PipelineState.LOADING
             self.running_event.set()
 
-    def set_loading(self) -> None:
-        """Explicitly set LOADING state (alias for start)."""
-        self.start()
+    def _set_loading(self) -> None:
+        """Explicitly set LOADING state."""
+        self._start()
 
-    def set_pipeline_warming(self) -> None:
+    def _set_pipeline_warming(self) -> None:
         """Transition to WARMING_PIPELINE."""
         if self._state in {PipelineState.INIT, PipelineState.LOADING}:
             self._state = PipelineState.WARMING_PIPELINE
             self.running_event.set()
 
-    def set_pipeline_ready(self) -> None:
+    def _set_pipeline_ready(self) -> None:
         """Set pipeline state to READY and signal waiting tasks."""
         self._state = PipelineState.READY
         self.running_event.set()
         self.pipeline_ready_event.set()
 
-    def initiate_shutdown(self, *, due_to_error: bool = False) -> None:
+    def _initiate_shutdown(self, *, due_to_error: bool = False) -> None:
         """Begin coordinated shutdown. Optionally mark as error."""
         self._state = PipelineState.ERROR if due_to_error else PipelineState.SHUTTING_DOWN
         self.shutdown_event.set()
         if due_to_error:
             self.error_event.set()
 
-    def finalize(self) -> None:
+    def _finalize(self) -> None:
         """Finalize and mark as STOPPED; clear running event."""
         self._state = PipelineState.STOPPED
         self.running_event.clear()
 
+    def _reset_to_init(self) -> None:
+        """Reset to initial state - clear events and set to INIT."""
+        self._state = PipelineState.INIT
+        self.running_event.clear()
+        self.pipeline_ready_event.clear()
+        self.shutdown_event.clear()
+        self.error_event.clear()
+
+    def set_state(self, state: PipelineState) -> None:
+        """Primary interface for setting pipeline state.
+        
+        Args:
+            state: PipelineState enum value
+        
+        Example:
+            set_state(PipelineState.READY)
+        """
+        if state == PipelineState.WARMING_PIPELINE:
+            self._set_pipeline_warming()
+        elif state == PipelineState.READY:
+            self._set_pipeline_ready()
+        elif state == PipelineState.LOADING:
+            self._set_loading()
+        elif state == PipelineState.ERROR:
+            self._initiate_shutdown(due_to_error=True)
+        elif state == PipelineState.SHUTTING_DOWN:
+            self._initiate_shutdown()
+        elif state == PipelineState.STOPPED:
+            self._finalize()
+        elif state == PipelineState.INIT:
+            self._reset_to_init()
+        else:
+            logger.warning(f"Unknown PipelineState enum: {state}")
