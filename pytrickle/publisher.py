@@ -42,10 +42,17 @@ class TricklePublisher(TrickleComponent):
 
     async def start(self):
         """Start the publisher session."""
-        if not self.session:
-            connector = aiohttp.TCPConnector(verify_ssl=False)
-            timeout = aiohttp.ClientTimeout(total=30)  # Reduced timeout for faster shutdown
-            self.session = aiohttp.ClientSession(connector=connector, timeout=timeout)
+        # Always create a fresh session on start to avoid stale keep-alives across streams
+        if self.session:
+            try:
+                await self.session.close()
+            except Exception:
+                pass
+            finally:
+                self.session = None
+        connector = aiohttp.TCPConnector(verify_ssl=False, limit=0, keepalive_timeout=5)
+        timeout = aiohttp.ClientTimeout(total=30)  # Reduced timeout for faster shutdown
+        self.session = aiohttp.ClientSession(connector=connector, timeout=timeout)
 
     def stream_idx(self):
         """Return the current stream index."""
@@ -132,6 +139,15 @@ class TricklePublisher(TrickleComponent):
     async def next(self):
         """Start or retrieve a pending POST request and preconnect for the next segment."""
         async with self.lock:
+            # Allow recovery from transient error state between encoder retries
+            # Note: This allows for encoder restarts without losing data
+            if self.error_event.is_set() and not self.shutdown_event.is_set():
+                logger.info("Publisher recovering from error state for next segment")
+                # Clear error and resume running state
+                self.error_event.clear()
+                self.component_state = self.component_state.RUNNING
+                self.last_error = None
+
             if self._should_stop():
                 logger.info(f"Publisher is in error or shutdown state, cannot get next segment")
                 return SegmentWriter(None)
@@ -139,6 +155,11 @@ class TricklePublisher(TrickleComponent):
             if self.next_writer is None:
                 logger.info(f"No pending connection, preconnecting {self.stream_idx()}...")
                 self.next_writer = await self.preconnect()
+                # If preconnect failed due to connection reuse issues, retry once immediately
+                if self.next_writer is None and not self._should_stop():
+                    logger.info("Preconnect returned None, retrying once immediately")
+                    await asyncio.sleep(0.05)
+                    self.next_writer = await self.preconnect()
 
             writer = self.next_writer
             self.next_writer = None

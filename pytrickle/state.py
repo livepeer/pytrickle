@@ -58,6 +58,8 @@ class StreamState:
         
         # Client tracking
         self.active_client: bool = False
+        self.active_streams: int = 0
+        self.startup_complete: bool = False
 
     # State and derived flags
     @property
@@ -102,11 +104,10 @@ class StreamState:
         # Determine status: prioritize ERROR, then "OK" if actively streaming, otherwise pipeline state
         if self.error_event.is_set():
             status = "ERROR"
-        elif self._state is PipelineState.READY and self.active_client:
+        elif self._state is PipelineState.READY and (self.active_client or self.active_streams > 0):
             status = "OK"
         else:
             status = self._state.value
-            
         return {
             "status": status,
             "pipeline_ready": self.pipeline_ready,
@@ -118,38 +119,125 @@ class StreamState:
         """Get current state (alias for get_state)."""
         return self.get_state()
     
-    # State transitions
-    def start(self) -> None:
+    # Internal state transition methods
+    def _start(self) -> None:
         """Begin stream startup; transitions to LOADING."""
         if self._state is PipelineState.INIT:
             self._state = PipelineState.LOADING
             self.running_event.set()
 
-    def set_loading(self) -> None:
-        """Explicitly set LOADING state (alias for start)."""
-        self.start()
+    def _set_loading(self) -> None:
+        """Explicitly set LOADING state."""
+        self._start()
 
-    def set_pipeline_warming(self) -> None:
+    def _set_pipeline_warming(self) -> None:
         """Transition to WARMING_PIPELINE."""
         if self._state in {PipelineState.INIT, PipelineState.LOADING}:
             self._state = PipelineState.WARMING_PIPELINE
             self.running_event.set()
 
-    def set_pipeline_ready(self) -> None:
+    def _set_pipeline_ready(self) -> None:
         """Set pipeline state to READY and signal waiting tasks."""
         self._state = PipelineState.READY
         self.running_event.set()
         self.pipeline_ready_event.set()
 
-    def initiate_shutdown(self, *, due_to_error: bool = False) -> None:
+    def _initiate_shutdown(self, *, due_to_error: bool = False) -> None:
         """Begin coordinated shutdown. Optionally mark as error."""
         self._state = PipelineState.ERROR if due_to_error else PipelineState.SHUTTING_DOWN
         self.shutdown_event.set()
         if due_to_error:
             self.error_event.set()
 
-    def finalize(self) -> None:
+    def _finalize(self) -> None:
         """Finalize and mark as STOPPED; clear running event."""
         self._state = PipelineState.STOPPED
         self.running_event.clear()
 
+    def _reset_to_init(self) -> None:
+        """Reset to initial state - clear events and set to INIT."""
+        self._state = PipelineState.INIT
+        self.running_event.clear()
+        self.pipeline_ready_event.clear()
+        self.shutdown_event.clear()
+        self.error_event.clear()
+
+    def set_state(self, state: PipelineState) -> None:
+        """Primary interface for setting pipeline state.
+        
+        Args:
+            state: PipelineState enum value
+        
+        Example:
+            set_state(PipelineState.READY)
+        """
+        if state == PipelineState.WARMING_PIPELINE:
+            self._set_pipeline_warming()
+        elif state == PipelineState.READY:
+            self._set_pipeline_ready()
+        elif state == PipelineState.LOADING:
+            self._set_loading()
+        elif state == PipelineState.ERROR:
+            self._initiate_shutdown(due_to_error=True)
+        elif state == PipelineState.SHUTTING_DOWN:
+            self._initiate_shutdown()
+        elif state == PipelineState.STOPPED:
+            self._finalize()
+        elif state == PipelineState.INIT:
+            self._reset_to_init()
+        else:
+            logger.warning(f"Unknown PipelineState enum: {state}")
+
+    # ---- Unified health-style API (to replace StreamHealthManager)
+    def set_startup_complete(self) -> None:
+        """Mark startup as complete for health/status reporting."""
+        self.startup_complete = True
+        # If no explicit state chosen yet, move from INIT -> LOADING
+        if self._state is PipelineState.INIT:
+            self._state = PipelineState.LOADING
+            self.running_event.set()
+
+    def update_active_streams(self, count: int) -> None:
+        """Update number of active streams for health/status reporting."""
+        self.active_streams = max(0, int(count))
+
+    def is_error(self) -> bool:
+        return self.error_event.is_set()
+
+    def set_error(self, message: str) -> None:
+        """Enter ERROR phase with an error message."""
+        self.set_state(PipelineState.ERROR)
+        logger.error(f"Stream state: ERROR - {message}")
+
+    def clear_error(self) -> None:
+        """Clear error state and return to appropriate state."""
+        if self.is_error():
+            # Clear the error event first
+            self.error_event.clear()
+            # Return to a sensible default state
+            self.set_state(PipelineState.LOADING)
+            logger.info("Stream state: ERROR cleared, returning to LOADING")
+
+    @property
+    def pipeline_warming(self) -> bool:
+        return self._state is PipelineState.WARMING_PIPELINE
+
+    def get_pipeline_state(self) -> dict:
+        """Return health-like payload used by /health endpoint."""
+        # If startup not complete, always show LOADING
+        if not self.startup_complete:
+            outward = "LOADING"
+        elif self._state is PipelineState.READY:
+            outward = "OK" if self.active_streams > 0 else "IDLE"
+        else:
+            outward = self._state.value
+        return {
+            "status": outward,  # backward-compatible key
+            "state": outward,
+            "error_message": None,  # keep compatibility with previous health payload
+            "pipeline_ready": self._state is PipelineState.READY,
+            "active_streams": self.active_streams,
+            "startup_complete": self.startup_complete,
+            "pipeline_state": self._state.name,
+            "additional_info": {},
+        }
