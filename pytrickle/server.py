@@ -32,6 +32,7 @@ class TrickleApp:
         self, 
         frame_processor: 'FrameProcessor',
         port: int = 8080,
+        pipeline: str = "",
         capability_name: str = "",
         version: str = "0.0.1"
     ):
@@ -53,7 +54,8 @@ class TrickleApp:
         self._client_task: Optional[asyncio.Task] = None
         self.version = version
         self.hardware_info = HardwareInfo()
-        self.capability_name = capability_name or os.getenv("CAPABILITY_NAME", "")
+        self.pipeline = pipeline or os.getenv("PIPELINE", "byoc")
+        self.capability_name = capability_name or os.getenv("CAPABILITY_NAME", os.getenv("MODEL_ID",""))
 
         # Setup routes
         self._setup_routes()
@@ -270,10 +272,9 @@ class TrickleApp:
     
     async def _handle_version(self, request: web.Request) -> web.Response:
         """Handle health check requests."""
-        capability_name = os.getenv("CAPABILITY_NAME", "")
         return web.json_response(Version(
-            pipeline=os.getenv("PIPELINE", "byoc"),
-            model_id=capability_name,
+            pipeline=self.pipeline,
+            model_id=self.capability_name,
             version=self.version
         ).model_dump())
     
@@ -281,7 +282,7 @@ class TrickleApp:
         """Handle hardware info requests."""
 
         return web.json_response(HardwareInformation(
-            pipeline=os.getenv("PIPELINE", "byoc"),
+            pipeline=self.pipeline,
             model_id=self.capability_name,
             gpu_info=self._default_hardware_info()
         ).model_dump())
@@ -289,7 +290,7 @@ class TrickleApp:
     async def _handle_hardware_stats(self, request: web.Request) -> web.Response:
         """Handle hardware stats requests."""
         return web.json_response(HardwareStats(
-            pipeline=os.getenv("PIPELINE", "byoc"),
+            pipeline=self.pipeline,
             model_id=self.capability_name,
             gpu_stats=self.hardware_info.get_gpu_utilization_stats()
         ).model_dump())
