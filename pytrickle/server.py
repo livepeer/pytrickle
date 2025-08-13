@@ -31,7 +31,7 @@ class TrickleApp:
     def __init__(
         self, 
         frame_processor: 'FrameProcessor',
-        port: int = 8080,
+        port: int = 8000,
         pipeline: str = "",
         capability_name: str = "",
         version: str = "0.0.1"
@@ -401,7 +401,7 @@ class TrickleApp:
 
 def create_app(
     frame_processor: 'FrameProcessor',
-    port: int = 8080,
+    port: int = 8000,
     capability_name: str = "",
     version: str = "0.0.1"
 ) -> TrickleApp:
@@ -419,7 +419,7 @@ def create_app(
     Example:
         processor = MyAsyncProcessor()
         await processor.start()
-        app = create_app(frame_processor=processor, port=8080)
+        app = create_app(frame_processor=processor, port=8000)
         await app.run_forever()
     """
     return TrickleApp(

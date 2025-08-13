@@ -7,7 +7,7 @@ with real-time intensity control, error handling, and configurable initializatio
 
 Environment Variables:
 - CAPABILITY_URL: URL to register with orchestrator (optional)
-- PORT: HTTP server port (default: 8080)
+- PORT: HTTP server port (default: 8000)
 """
 
 import asyncio
@@ -147,7 +147,7 @@ if __name__ == "__main__":
     Usage:
         # HTTP API server (recommended)
         python async_processor_example.py
-        CAPABILITY_URL=http://orchestrator:8080/caps PORT=9090 python async_processor_example.py
+        CAPABILITY_URL=http://processor:8000/caps PORT=9090 python async_processor_example.py
         
         # Direct client usage with kwargs
         from pytrickle import TrickleProtocol, TrickleClient

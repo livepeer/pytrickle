@@ -100,7 +100,7 @@ async def main():
     # Create app with processor
     app = TrickleApp(
         frame_processor=processor,
-        port=8080,
+        port=8000,
         capability_name="my-video-processor"
     )
     await app.run_forever()
@@ -115,7 +115,7 @@ PyTrickle automatically provides a REST API for your video processor:
 ### Start Processing
 
 ```bash
-curl -X POST http://localhost:8080/api/stream/start \
+curl -X POST http://localhost:8000/api/stream/start \
   -H "Content-Type: application/json" \
   -d '{
     "subscribe_url": "http://localhost:3389/input",
@@ -132,7 +132,7 @@ curl -X POST http://localhost:8080/api/stream/start \
 ### Update Parameters
 
 ```bash
-curl -X POST http://localhost:8080/api/stream/params \
+curl -X POST http://localhost:8000/api/stream/params \
   -H "Content-Type: application/json" \
   -d '{
     "intensity": 0.9,
@@ -143,13 +143,13 @@ curl -X POST http://localhost:8080/api/stream/params \
 ### Check Status
 
 ```bash
-curl http://localhost:8080/api/stream/status
+curl http://localhost:8000/api/stream/status
 ```
 
 ### Stop Processing
 
 ```bash
-curl -X POST http://localhost:8080/api/stream/stop
+curl -X POST http://localhost:8000/api/stream/stop
 ```
 
 ## Advanced Usage
@@ -209,7 +209,7 @@ cd ~/repos/http-trickle && make publisher-ffmpeg in=video.mp4 stream=input url=h
 
 4. **Begin processing**:
 ```bash
-curl -X POST http://localhost:8080/api/stream/start \
+curl -X POST http://localhost:8000/api/stream/start \
   -H "Content-Type: application/json" \
   -d '{
     "subscribe_url": "http://127.0.0.1:3389/input",
@@ -221,7 +221,7 @@ curl -X POST http://localhost:8080/api/stream/start \
 
 5. **Update parameters in real-time**:
 ```bash
-curl -X POST http://localhost:8080/api/stream/params \
+curl -X POST http://localhost:8000/api/stream/params \
   -H "Content-Type: application/json" \
   -d '{"intensity": 0.9}'
 ```
@@ -260,7 +260,7 @@ PyTrickle allows you to control the maximum frame rate for video processing:
 
 **Set framerate when starting a stream:**
 ```bash
-curl -X POST http://localhost:8080/api/stream/start \
+curl -X POST http://localhost:8000/api/stream/start \
   -H "Content-Type: application/json" \
   -d '{
     "subscribe_url": "http://127.0.0.1:3389/",
