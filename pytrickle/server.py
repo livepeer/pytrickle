@@ -272,7 +272,7 @@ class TrickleApp:
         """Handle health check requests."""
         capability_name = os.getenv("CAPABILITY_NAME", "")
         return web.json_response(Version(
-            pipeline="byoc",
+            pipeline=os.getenv("PIPELINE", "byoc"),
             model_id=capability_name,
             version=self.version
         ).model_dump())
@@ -281,7 +281,7 @@ class TrickleApp:
         """Handle hardware info requests."""
 
         return web.json_response(HardwareInformation(
-            pipeline="byoc",
+            pipeline=os.getenv("PIPELINE", "byoc"),
             model_id=self.capability_name,
             gpu_info=self._default_hardware_info()
         ).model_dump())
@@ -289,7 +289,7 @@ class TrickleApp:
     async def _handle_hardware_stats(self, request: web.Request) -> web.Response:
         """Handle hardware stats requests."""
         return web.json_response(HardwareStats(
-            pipeline="byoc",
+            pipeline=os.getenv("PIPELINE", "byoc"),
             model_id=self.capability_name,
             gpu_stats=self.hardware_info.get_gpu_utilization_stats()
         ).model_dump())
