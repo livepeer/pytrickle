@@ -1,0 +1,37 @@
+FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+#Ubuntu 24.04 default python3 is version 3.12, adjust if needed
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-venv \
+    python3-pip \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+#create virtual environment
+ENV VENV_PATH=/opt/venv
+RUN python3 -m venv $VENV_PATH
+ENV PATH="$VENV_PATH/bin:$PATH"
+
+#install torch
+RUN pip install --upgrade pip && \
+    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+
+#install requirements
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+
+#install pytrickle
+# Install pytrickle from a specific branch
+# Replace BRANCH_NAME with the branch you need
+ARG PYTRICKLE_BRANCH=main
+RUN pip install git+https://github.com/livepeer/pytrickle.git@${PYTRICKLE_BRANCH}
+
+WORKDIR /app
+COPY examples/async_processor_example.py .
+
+SHELL ["/bin/bash", "-c"]
+
+CMD ["python", "async_processor_example.py"]

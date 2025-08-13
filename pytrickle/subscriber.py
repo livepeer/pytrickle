@@ -8,7 +8,7 @@ with automatic reconnection and error handling.
 import asyncio
 import aiohttp
 import logging
-from typing import Optional, Callable, Any, List
+from typing import Optional, List
 
 from . import ErrorCallback
 from .base import TrickleComponent

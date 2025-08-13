@@ -1,21 +1,27 @@
 """
-Frame data structures for trickle streaming.
+Frame data structures and processing utilities for trickle streaming.
 
-Defines VideoFrame, AudioFrame, and their output counterparts for handling
-media data in the trickle streaming pipeline.
+Defines VideoFrame, AudioFrame, their output counterparts, frame processing
+utilities, and streaming utilities for handling media data in the trickle 
+streaming pipeline.
 """
 
-import time
+import logging
 import torch
 import numpy as np
 import av
-from typing import Optional, Dict, Any, Union, List
+from typing import Optional, Dict, Union, List, Deque
 from fractions import Fraction
+from collections import deque
 from abc import ABC
 
-# Default dimensions for video frames  
-DEFAULT_WIDTH = 704
-DEFAULT_HEIGHT = 384
+logger = logging.getLogger(__name__)
+
+# Tensor Conversion Utilities
+# ============================
+
+DEFAULT_WIDTH = 512
+DEFAULT_HEIGHT = 512
 
 class SideData:
     """Base class for side data, needed to keep it consistent with av frame side_data"""
@@ -66,6 +72,51 @@ class VideoFrame(InputFrame):
         new_frame.side_data = self.side_data
         return new_frame
 
+    @classmethod
+    def from_av_frame_with_timing(cls, av_frame: 'av.VideoFrame', original_frame: 'VideoFrame') -> 'VideoFrame':
+        """Create a VideoFrame from an av.VideoFrame while preserving original timing."""
+        frame_np = av_frame.to_ndarray(format="rgb24").astype(np.float32) / 255.0
+        tensor = torch.from_numpy(frame_np)
+        return cls(
+            tensor=tensor,
+            timestamp=original_frame.timestamp,
+            time_base=original_frame.time_base
+        )
+    
+    def to_av_frame(self, tensor: torch.Tensor) -> av.VideoFrame:
+        """
+        Convert a tensor to av.VideoFrame for use in video pipelines.
+        Handles [B, H, W, C] or [H, W, C] formats, float or uint8, and grayscale/RGB.
+        """
+        # Normalize tensor dimensions to [H, W, C]
+        if tensor.dim() == 4:
+            if tensor.shape[0] != 1:
+                raise ValueError(f"Expected batch size 1, got {tensor.shape[0]}")
+            tensor = tensor.squeeze(0)
+        elif tensor.dim() != 3:
+            raise ValueError(f"Expected 3D or 4D tensor, got {tensor.dim()}D tensor with shape {tensor.shape}")
+
+        # Validate channel count
+        if tensor.shape[2] not in [1, 3, 4]:
+            raise ValueError(f"Expected 1, 3, or 4 channels, got {tensor.shape[2]}")
+
+        # Convert to uint8 numpy array in [0, 255] range
+        if tensor.dtype in [torch.float32, torch.float64]:
+            # Handle normalized [0, 1] range
+            tensor_np = (tensor * 255.0 if tensor.max() <= 1.0 else tensor).clamp(0, 255).to(torch.uint8).cpu().numpy()
+        else:
+            tensor_np = tensor.clamp(0, 255).to(torch.uint8).cpu().numpy()
+
+        # Ensure contiguous memory layout
+        if not tensor_np.flags.c_contiguous:
+            tensor_np = np.ascontiguousarray(tensor_np)
+
+        # Convert grayscale to RGB if needed
+        if tensor_np.shape[2] == 1:
+            tensor_np = np.repeat(tensor_np, 3, axis=2)
+
+        return av.VideoFrame.from_ndarray(tensor_np, format="rgb24")
+
 class AudioFrame(InputFrame):
     """Represents an audio frame with sample data and timing information."""
     
@@ -108,6 +159,37 @@ class AudioFrame(InputFrame):
         new_frame.log_timestamps = existing_frame.log_timestamps.copy()
         new_frame.side_data = existing_frame.side_data
         return new_frame
+
+    def to_av_frame(self) -> av.AudioFrame:
+        """Convert this AudioFrame to av.AudioFrame."""
+        try:
+            samples = self.samples
+            if self.format.endswith('p'):
+                # Planar format - channels are separated (channels, samples)
+                if samples.ndim == 1:
+                    samples = samples.reshape(1, -1)
+            else:
+                # Packed format - channels are interleaved
+                if samples.ndim == 2 and samples.shape[0] > 1:
+                    # Convert (channels, samples) to (samples, channels) for packed format
+                    samples = samples.T
+                elif samples.ndim == 1:
+                    # Keep 1D for mono packed format or reshape for multi-channel
+                    if self.layout != 'mono':
+                        pass
+            av_frame = av.AudioFrame.from_ndarray(samples, format=self.format, layout=self.layout)
+            av_frame.sample_rate = self.rate
+            av_frame.pts = self.timestamp
+            av_frame.time_base = self.time_base
+            return av_frame
+        except Exception as e:
+            logger.warning(f"Audio conversion failed ({e}), creating dummy frame")
+            dummy_samples = np.zeros((1, 1024), dtype=np.int16)
+            av_frame = av.AudioFrame.from_ndarray(dummy_samples, format='s16', layout='mono')
+            av_frame.sample_rate = self.rate
+            av_frame.pts = self.timestamp
+            av_frame.time_base = self.time_base
+            return av_frame
 
 class OutputFrame(ABC):
     """Base class for output frames."""
@@ -179,4 +261,50 @@ class AudioOutput(OutputFrame):
             corrected_frame = AudioFrame._from_existing_with_timestamp(frame, corrected_timestamp)
             corrected_frames.append(corrected_frame)
         
-        return cls(corrected_frames, request_id) 
+        return cls(corrected_frames, request_id)
+
+
+# Frame Processing Utilities
+# ===========================
+
+
+
+# Streaming Utilities
+# ====================
+
+class FrameBuffer:
+    """Rolling frame buffer that keeps a fixed number of frames."""
+    
+    def __init__(self, max_frames: int = 300):
+        self.max_frames = max_frames
+        self.frames: Deque[Union[VideoFrame, AudioFrame]] = deque(maxlen=max_frames)
+        self.total_frames_received = 0
+        self.total_frames_discarded = 0
+        
+    def add_frame(self, frame: Union[VideoFrame, AudioFrame]):
+        if len(self.frames) >= self.max_frames:
+            self.total_frames_discarded += 1
+        self.frames.append(frame)
+        self.total_frames_received += 1
+        
+    def get_frame(self) -> Optional[Union[VideoFrame, AudioFrame]]:
+        return self.frames.popleft() if self.frames else None
+        
+    def get_all_frames(self) -> List[Union[VideoFrame, AudioFrame]]:
+        frames = list(self.frames)
+        self.frames.clear()
+        return frames
+        
+    def clear(self):
+        self.frames.clear()
+        
+    def size(self) -> int:
+        return len(self.frames)
+        
+    def get_stats(self) -> Dict[str, int]:
+        return {
+            "current_frames": len(self.frames),
+            "max_frames": self.max_frames,
+            "total_received": self.total_frames_received,
+            "total_discarded": self.total_frames_discarded
+        }
