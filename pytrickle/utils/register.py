@@ -121,7 +121,7 @@ class RegisterCapability:
         orch_secret = orch_secret or os.environ.get("ORCH_SECRET", "")
         capability_name = capability_name or os.environ.get("CAPABILITY_NAME", "pytrickle-worker")
         capability_desc = capability_desc or os.environ.get("CAPABILITY_DESCRIPTION", "PyTrickle video processing worker")
-        capability_url = os.environ.get("CAPABILITY_URL", "http://localhost:8080")
+        capability_url = os.environ.get("CAPABILITY_URL", "http://localhost:8000")
         capability_capacity = capability_capacity or int(os.environ.get("CAPABILITY_CAPACITY", 1))
         capability_price_per_unit = capability_price_per_unit or int(os.environ.get("CAPABILITY_PRICE_PER_UNIT", 0))
         capability_price_scaling = capability_price_scaling or int(os.environ.get("CAPABILITY_PRICE_SCALING", 1))

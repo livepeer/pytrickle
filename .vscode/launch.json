@@ -16,7 +16,7 @@
                 "ORCH_SECRET": "orch-secret",
                 "CAPABILITY_NAME": "trickle-stream-example",
                 "CAPABILITY_DESCRIPTION": "Flip video upside down using pytrickle",
-                "CAPABILITY_URL": "http://localhost:7777",
+                "CAPABILITY_URL": "http://localhost:8000",
                 "CAPABILITY_PRICE_PER_UNIT": "0",
                 "CAPABILITY_PRICE_SCALING": "1",
                 "CAPABILITY_CAPACITY": "1"

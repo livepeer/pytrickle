@@ -84,7 +84,7 @@ class AccentGreenProcessor(FrameProcessor):
 async def main():
     """Start the Accent Green tinting service."""
     app = None
-    port = 8080
+    port = 8000
     try:
         # Create processor with initialization kwargs
         processor = AccentGreenProcessor(
