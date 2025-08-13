@@ -82,7 +82,8 @@ class StreamParamsUpdateRequest(BaseModel):
     def model_validate(cls, obj):
         """Custom validation to ensure all fields are string key-value pairs."""
         if isinstance(obj, dict):
-            cls.validate_params(obj)
+            # Validate and get the processed dictionary with dimension conversions
+            obj = cls.validate_params(obj)
         return super().model_validate(obj)
     
 class StreamResponse(BaseModel):
