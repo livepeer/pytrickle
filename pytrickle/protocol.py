@@ -16,8 +16,9 @@ from .base import TrickleComponent, ComponentState
 from .subscriber import TrickleSubscriber
 from .publisher import TricklePublisher
 from .media import run_subscribe, run_publish
-from .frames import InputFrame, OutputFrame, AudioFrame, AudioOutput
+from .frames import InputFrame, OutputFrame, AudioFrame, VideoFrame, AudioOutput, VideoOutput
 from .cache import LastValueCache
+from .fps_meter import FPSMeter
 from . import ErrorCallback
 
 logger = logging.getLogger(__name__)
@@ -65,6 +66,9 @@ class TrickleProtocol(TrickleComponent):
         self.subscription_ended = asyncio.Event()
         self._monitor_task: Optional[asyncio.Task] = None
         self._heartbeat_task: Optional[asyncio.Task] = None
+        
+        # FPS tracking
+        self.fps_meter = FPSMeter()
 
     async def _on_component_error(self, error_type: str, exception: Optional[Exception] = None):
         """Handle errors from subscriber/publisher components."""
@@ -256,6 +260,12 @@ class TrickleProtocol(TrickleComponent):
             if frame is None:  # Sentinel value
                 break
             
+            # Record ingress FPS for the frame
+            if isinstance(frame, VideoFrame):
+                self.fps_meter.record_ingress_video_frame()
+            elif isinstance(frame, AudioFrame):
+                self.fps_meter.record_ingress_audio_frame()
+            
             # Send all frames to frame processor
             yield frame
 
@@ -270,6 +280,12 @@ class TrickleProtocol(TrickleComponent):
                 if self.subscription_ended.is_set() or self.shutdown_event.is_set():
                     logger.info("Subscription ended or shutdown signaled, ending egress loop")
                     break
+                
+                # Record egress FPS for the frame
+                if isinstance(frame, VideoOutput):
+                    self.fps_meter.record_egress_video_frame()
+                elif isinstance(frame, AudioOutput):
+                    self.fps_meter.record_egress_audio_frame()
                     
                 await asyncio.to_thread(enqueue_frame, frame)
         except Exception as e:
@@ -311,6 +327,7 @@ class TrickleProtocol(TrickleComponent):
                             "width": self.width or DEFAULT_WIDTH,
                             "height": self.height or DEFAULT_HEIGHT,
                         },
+                        "fps": self.fps_meter.get_fps_stats(),
                     })
                     await self.emit_monitoring_event(heartbeat_event, queue_event_type="stream_heartbeat")
                 except Exception as e:

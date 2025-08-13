@@ -30,6 +30,7 @@ from .utils.register import RegisterCapability
 
 # Processing utilities
 from .frame_processor import FrameProcessor
+from .fps_meter import FPSMeter
 
 from . import api
 
@@ -57,5 +58,6 @@ __all__ = [
     "RegisterCapability",
     "api",
     "ErrorCallback",
-    "FrameProcessor"
+    "FrameProcessor",
+    "FPSMeter"
 ] 

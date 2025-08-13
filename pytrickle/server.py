@@ -229,6 +229,9 @@ class TrickleApp:
             if self.current_client:
                 status_data["client_active"] = True
                 status_data["client_running"] = self.current_client.running
+                # Add FPS information from protocol
+                if self.current_client.protocol:
+                    status_data["fps"] = self.current_client.protocol.fps_meter.get_fps_stats()
             else:
                 status_data["client_active"] = False
             
