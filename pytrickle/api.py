@@ -9,6 +9,7 @@ import json
 from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, Field, field_validator
 from .utils.hardware import GPUComputeInfo, GPUUtilizationInfo
+
 class StreamStartRequest(BaseModel):
     """Base request model for starting a trickle stream.
     
@@ -29,8 +30,11 @@ class StreamStartRequest(BaseModel):
     @field_validator('params')
     @classmethod
     def validate_optional_params_dict(cls, value):
-        return StreamParamsUpdateRequest.validate_params(value) if value is not None else value
-    
+        """Validate and process optional params, preserving any modifications from validation."""
+        if value is not None:
+            # Call validate_params and return the processed dictionary
+            return StreamParamsUpdateRequest.validate_params(value)
+        return value
 
 class StreamParamsUpdateRequest(BaseModel):
     """Base request model for updating stream parameters.
@@ -45,6 +49,9 @@ class StreamParamsUpdateRequest(BaseModel):
     @classmethod
     def validate_params(cls, v):
         """Validation method with automatic type conversion for width/height."""
+        if v is None:
+            return v
+        
         if not isinstance(v, dict):
             raise ValueError("Params must be a dictionary")
         
