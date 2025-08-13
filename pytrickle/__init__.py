@@ -20,6 +20,7 @@ from .frames import (
     FrameBuffer,
 )
 from .state import StreamState
+from .base import TrickleComponent, ComponentState
 from .publisher import TricklePublisher
 from .subscriber import TrickleSubscriber
 from .health import StreamHealthManager
@@ -51,6 +52,8 @@ __all__ = [
     "TrickleStreamHandler",
     "FrameBuffer",
     "StreamState",
+    "TrickleComponent",
+    "ComponentState",
     "RegisterCapability",
     "api",
     "ErrorCallback",

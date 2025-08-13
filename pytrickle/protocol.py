@@ -12,7 +12,7 @@ import logging
 import time
 from typing import Optional, AsyncGenerator, Callable
 
-from .base import TrickleComponent
+from .base import TrickleComponent, ComponentState
 from .subscriber import TrickleSubscriber
 from .publisher import TricklePublisher
 from .media import run_subscribe, run_publish
@@ -105,7 +105,7 @@ class TrickleProtocol(TrickleComponent):
 
     async def start(self):
         """Start the trickle protocol."""
-        self._update_state("STARTING")
+        self._update_state(ComponentState.STARTING)
         logger.info(f"Starting trickle protocol: subscribe={self.subscribe_url}, publish={self.publish_url}")
         
         # Initialize queues
@@ -156,11 +156,11 @@ class TrickleProtocol(TrickleComponent):
         # Start monitoring subscription end for immediate cleanup
         self._monitor_task = asyncio.create_task(self._monitor_subscription_end())
         
-        self._update_state("RUNNING")
+        self._update_state(ComponentState.RUNNING)
 
     async def stop(self):
         """Stop the trickle protocol."""
-        self._update_state("STOPPING")
+        self._update_state(ComponentState.STOPPING)
         logger.info("Stopping trickle protocol")
         
         # Signal shutdown immediately to all components
@@ -238,7 +238,7 @@ class TrickleProtocol(TrickleComponent):
 
         self.subscribe_task = None
         self.publish_task = None
-        self._update_state("STOPPED")
+        self._update_state(ComponentState.STOPPED)
 
     async def ingress_loop(self, done: asyncio.Event) -> AsyncGenerator[InputFrame, None]:
         """Generate frames from the ingress stream."""
