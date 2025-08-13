@@ -25,7 +25,7 @@ from .frame_processor import FrameProcessor
 
 logger = logging.getLogger(__name__)
 
-class TrickleApp:
+class StreamServer:
     """HTTP server application for trickle streaming with native async processor support."""
     
     def __init__(
@@ -36,7 +36,7 @@ class TrickleApp:
         capability_name: str = "",
         version: str = "0.0.1"
     ):
-        """Initialize TrickleApp.
+        """Initialize StreamServer.
         
         Args:
             frame_processor: FrameProcessor for native async processing
@@ -404,9 +404,9 @@ def create_app(
     port: int = 8000,
     capability_name: str = "",
     version: str = "0.0.1"
-) -> TrickleApp:
-    """Create a trickle app instance.
-    
+) -> StreamServer:
+    """Create a stream server instance.
+
     Args:
         frame_processor: FrameProcessor for native async processing
         port: HTTP server port
@@ -414,15 +414,15 @@ def create_app(
         version: Version string
         
     Returns:
-        TrickleApp instance
-        
+        StreamServer instance
+
     Example:
         processor = MyAsyncProcessor()
         await processor.start()
         app = create_app(frame_processor=processor, port=8000)
         await app.run_forever()
     """
-    return TrickleApp(
+    return StreamServer(
         frame_processor=frame_processor,
         port=port,
         capability_name=capability_name,

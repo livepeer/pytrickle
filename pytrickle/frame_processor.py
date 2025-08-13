@@ -27,9 +27,9 @@ class FrameProcessor(ABC):
 
     Usage patterns:
 
-    # HTTP server with TrickleApp (recommended)
+    # HTTP server with StreamServer (recommended)
     processor = MyProcessor()
-    app = TrickleApp(frame_processor=processor, port=8080)
+    app = StreamServer(frame_processor=processor, port=8000)
     await app.run_forever()
 
     # Direct client usage (advanced)

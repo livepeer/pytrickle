@@ -13,7 +13,7 @@ ErrorCallback = Union[
 ]
 
 from .client import TrickleClient
-from .server import TrickleApp
+from .server import StreamServer
 from .protocol import TrickleProtocol
 from .frames import (
     VideoFrame, AudioFrame, VideoOutput, AudioOutput,
@@ -38,7 +38,7 @@ __version__ = "0.1.1"
 
 __all__ = [
     "TrickleClient",
-    "TrickleApp",
+    "StreamServer",
     "TrickleProtocol",
     "VideoFrame",
     "AudioFrame", 

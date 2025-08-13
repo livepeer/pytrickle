@@ -55,7 +55,7 @@ PyTrickle uses the FrameProcessor pattern for building video processing applicat
 ### Basic FrameProcessor
 
 ```python
-from pytrickle import FrameProcessor, TrickleApp
+from pytrickle import FrameProcessor, StreamServer
 from pytrickle.frames import VideoFrame, AudioFrame
 from typing import Optional, List
 
@@ -98,7 +98,7 @@ async def main():
     await processor.start()
     
     # Create app with processor
-    app = TrickleApp(
+    app = StreamServer(
         frame_processor=processor,
         port=8000,
         capability_name="my-video-processor"
@@ -290,11 +290,10 @@ The framerate setting controls the maximum number of frames processed per second
 
 PyTrickle consists of several key components:
 
-- **TrickleApp**: HTTP server for API-based integration
-- **TrickleClient**: Direct client for custom applications
+- **StreamServer**: HTTP server for API-based integration
 - **FrameProcessor**: Base class for async AI processors
+- **TrickleClient**: Direct client for custom applications
 - **TrickleProtocol**: High-level protocol implementation
-- **Frame Processing**: Video/audio frame handling with PyTorch tensors
 
 ### Data Flow
 
