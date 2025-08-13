@@ -376,9 +376,9 @@ class TrickleStreamHandler(StreamHandler):
                 except Exception:
                     pass
                 
-                # Update health manager if not called by manager
+                # Update stream state if not called by manager
                 if not called_by_manager:
-                    await self._update_health_manager()
+                    await self._update_stream_state()
                 
                 self._set_final_state()
                 logger.info("TrickleStreamHandler stopped successfully")
@@ -387,7 +387,7 @@ class TrickleStreamHandler(StreamHandler):
             except Exception as e:
                 logger.error(f"Error stopping TrickleStreamHandler: {e}")
                 if not called_by_manager:
-                    await self._update_health_manager(emergency=True)
+                    await self._update_stream_state(emergency=True)
                 self._set_final_state()
                 return False
     
@@ -432,14 +432,14 @@ class TrickleStreamHandler(StreamHandler):
         self.shutdown_event.set()
         self.error_event.set()
     
-    async def _update_health_manager(self, emergency: bool = False):
-        """Update health manager with stream removal."""
+    async def _update_stream_state(self, emergency: bool = False):
+        """Update stream state with stream removal."""
         try:
-            health_manager = self.app_context.get('health_manager')
-            if health_manager:
+            stream_state = self.app_context.get('stream_state')
+            if stream_state:
                 if emergency:
-                    health_manager.set_error("Emergency stream shutdown")
+                    stream_state.set_error("Emergency stream shutdown")
                 else:
-                    health_manager.clear_error()
+                    stream_state.clear_error()
         except Exception as e:
-            logger.error(f"Error updating health manager: {e}")
+            logger.error(f"Error updating stream state: {e}")
