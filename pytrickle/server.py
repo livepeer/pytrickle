@@ -129,6 +129,14 @@ class StreamServer:
             # Start the client in background
             self._client_task = asyncio.create_task(self._run_client(params.gateway_request_id))
             
+            # Set params via update_params if provided in start request
+            try:
+                logger.info("Setting params from start stream request")
+                self.frame_processor.update_params(params.params)
+                logger.info("Params set successfully from start request")
+            except Exception as e:
+                logger.warning(f"Failed to set params from start request: {e}")
+            
             # Emit start event via protocol events publisher if available
             if self.current_client and self.current_client.protocol:
                 await self.current_client.protocol.emit_monitoring_event({
@@ -174,6 +182,17 @@ class StreamServer:
                 "status": "error",
                 "message": f"Error stopping stream: {str(e)}"
             }, status=500)
+    
+    async def _handle_control_message(self, control_data: dict):
+        """Handle control messages from trickle protocol.
+        
+        Routes control messages to the frame processor's update_params method.
+        """
+        try:
+            self.frame_processor.update_params(control_data)
+            logger.debug("Control message routed to frame processor")
+        except Exception as e:
+            logger.error(f"Error handling control message: {e}")
     
     async def _handle_update_params(self, request: web.Request) -> web.Response:
         """Handle parameter update requests."""
@@ -305,7 +324,7 @@ class StreamServer:
             # Set error state on client failure
             self.state.error_event.set()
         finally:
-            # Properly stop the current stream instead of just clearing references
+            # Properly stop the current stream
             await self._stop_current_stream()
     
     def _start_health_monitoring(self):
@@ -336,7 +355,11 @@ class StreamServer:
         if self.current_client:
             logger.info("Stopping current stream...")
             
-            # Stop the client and wait for cleanup
+             # Stop the client and wait for cleanup
+            if self.current_client.protocol:
+                await self.current_client.protocol.stop()
+                logger.info("Protocol stopped")
+                
             await self.current_client.stop()
             
             logger.info("FrameProcessor returned to idle state")
@@ -369,6 +392,9 @@ class StreamServer:
     async def stop(self):
         """Stop the current trickle client and clean up resources."""
         await self._stop_current_stream()
+        self.current_client = None
+        self.current_params = None
+        self.state.set_active_client(False)
     
     async def start_server(self):
         """Start the HTTP server."""
