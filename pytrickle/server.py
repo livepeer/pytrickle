@@ -323,6 +323,7 @@ class StreamServer:
             self.current_client = TrickleClient(
                 protocol=protocol,
                 frame_processor=self.frame_processor,
+                control_handler=self._handle_control_message,
             )
             
             # Track active client and start health monitoring
