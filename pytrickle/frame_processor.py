@@ -69,6 +69,19 @@ class FrameProcessor(ABC):
         pass
 
     @abstractmethod
+    async def load_model(self, *kwargs):
+        """
+        Load the model.
+
+        This method should be implemented to load any required models or resources.
+        It is called automatically during initialization.
+        
+        Args:
+            *kwargs: Additional parameters for model loading
+        """
+        pass
+
+    @abstractmethod
     async def process_video_async(self, frame: VideoFrame) -> Optional[VideoFrame]:
         """
         Process a video frame asynchronously.

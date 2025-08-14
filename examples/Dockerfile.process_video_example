@@ -30,8 +30,8 @@ ARG PYTRICKLE_BRANCH=main
 RUN pip install git+https://github.com/livepeer/pytrickle.git@${PYTRICKLE_BRANCH}
 
 WORKDIR /app
-COPY examples/async_processor_example.py .
+COPY examples/process_video_example.py .
 
 SHELL ["/bin/bash", "-c"]
 
-CMD ["python", "async_processor_example.py"]
+CMD ["python", "process_video_example.py"]
