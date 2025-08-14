@@ -6,7 +6,6 @@ to ensure all components stop when subscription ends.
 """
 
 import asyncio
-import queue
 import logging
 from typing import Callable, Optional, Union
 
@@ -50,8 +49,16 @@ class TrickleClient:
         self.stop_event = asyncio.Event()
         self.error_event = asyncio.Event()
         
-        # Output queue for processed frames
-        self.output_queue = queue.Queue()
+        # Stream timing state (reset between streams to prevent A/V sync issues)
+        self._stream_start_time = None
+        self._first_video_timestamp = None
+        self._first_audio_timestamp = None
+        self._timestamp_offset = 0.0
+        
+        # Output queue for processed frames - use asyncio.Queue for async compatibility
+        self.output_queue = asyncio.Queue()
+        # Optional background drain task when frame_processor runs in queue mode
+        self._processor_drain_task: Optional[asyncio.Task] = None
         
     def process_frame(self, frame: Union[VideoFrame, AudioFrame]) -> Optional[Union[VideoOutput, AudioOutput]]:
         """Process a single frame and return the output."""
@@ -73,6 +80,14 @@ class TrickleClient:
         
         logger.info(f"Starting trickle client with request_id={request_id}")
         
+        # If the frame processor supports queue mode, start its queue workers
+        try:
+            if getattr(self.frame_processor, "queue_mode", False):
+                await self.frame_processor.start_queue_workers()
+                logger.info("Started frame processor queue workers")
+        except Exception as e:
+            logger.warning(f"Unable to start frame processor queue workers: {e}")
+
         # Start the protocol
         await self.protocol.start()
         
@@ -101,6 +116,15 @@ class TrickleClient:
         finally:
             self.running = False
             logger.info("Stopping protocol due to client loops ending")
+            
+            # When protocol ends, pause frame processor to prevent processing stale frames
+            try:
+                if hasattr(self.frame_processor, 'pause_inputs'):
+                    await self.frame_processor.pause_inputs()
+                    logger.info("Frame processor inputs paused due to protocol end")
+            except Exception as e:
+                logger.warning(f"Could not pause frame processor on protocol end: {e}")
+            
             await self.protocol.stop()
     
     async def stop(self):
@@ -113,9 +137,49 @@ class TrickleClient:
         
         # Send sentinel value to stop egress loop
         try:
-            self.output_queue.put_nowait(None)
-        except queue.Full:
+            await self.output_queue.put(None)
+        except asyncio.QueueFull:
             pass
+            
+        # Cancel drain task if running
+        if self._processor_drain_task and not self._processor_drain_task.done():
+            self._processor_drain_task.cancel()
+            try:
+                await self._processor_drain_task
+            except asyncio.CancelledError:
+                pass
+                
+        # Stop frame processor workers if running in queue mode
+        try:
+            if getattr(self.frame_processor, "queue_mode", False):
+                await self.frame_processor.stop_queue_workers()
+        except Exception as e:
+            logger.warning(f"Unable to stop frame processor workers: {e}")
+            
+        # Stop the frame processor if it has a stop method (for ComfyStream integration)
+        # Use stop() for model preservation during stream switches
+        try:
+            if hasattr(self.frame_processor, 'stop') and callable(self.frame_processor.stop):
+                await self.frame_processor.stop()
+                logger.info("Frame processor stopped (models preserved)")
+        except Exception as e:
+            logger.warning(f"Unable to stop frame processor: {e}")
+
+    def _reset_timing_state(self):
+        """Reset client-level timing state to prevent cross-stream timestamp conflicts."""
+        # Clear all timing-related state to ensure fresh start
+        self._stream_start_time = None
+        self._first_video_timestamp = None
+        self._first_audio_timestamp = None
+        self._timestamp_offset = 0.0
+        
+        # Clear any additional timing state that might exist
+        if hasattr(self, '_last_video_timestamp'):
+            self._last_video_timestamp = None
+        if hasattr(self, '_last_audio_timestamp'):
+            self._last_audio_timestamp = None
+            
+        logger.info("Client timing state reset for new stream")
     
     async def publish_data(self, data: str):
         """Publish data via the protocol's data publisher."""
@@ -134,27 +198,32 @@ class TrickleClient:
                 try:
                     if isinstance(frame, VideoFrame):
                         logger.debug(f"Processing video frame with frame processor: {frame.tensor.shape}")
-                        
-                        # Direct async processing
-                        processed_frame = await self.frame_processor.process_video_async(frame)
-                        if processed_frame:
-                            output = VideoOutput(processed_frame, self.request_id)
-                            await self._send_output(output)
-                            logger.debug(f"Sent async processed video frame to egress")
+                        if getattr(self.frame_processor, "queue_mode", False):
+                            # Enqueue for background processing
+                            await self.frame_processor.enqueue_video_frame(frame)
                         else:
-                            logger.warning(f"Frame processor returned None for video frame")
+                            # Direct async processing
+                            processed_frame = await self.frame_processor.process_video_async(frame)
+                            if processed_frame:
+                                output = VideoOutput(processed_frame, self.request_id)
+                                await self._send_output(output)
+                                logger.debug(f"Sent async processed video frame to egress")
+                            else:
+                                logger.warning(f"Frame processor returned None for video frame")
                             
                     elif isinstance(frame, AudioFrame):
                         logger.debug(f"Processing audio frame with frame processor: {frame.samples.shape}")
-                        
-                        # Direct async processing for audio
-                        processed_frames = await self.frame_processor.process_audio_async(frame)
-                        if processed_frames:
-                            output = AudioOutput(processed_frames, self.request_id)
-                            await self._send_output(output)
-                            logger.debug(f"Sent async processed audio frame to egress")
+                        if getattr(self.frame_processor, "queue_mode", False):
+                            await self.frame_processor.enqueue_audio_frame(frame)
                         else:
-                            logger.warning(f"Frame processor returned None for audio frame")
+                            # Direct async processing for audio
+                            processed_frames = await self.frame_processor.process_audio_async(frame)
+                            if processed_frames:
+                                output = AudioOutput(processed_frames, self.request_id)
+                                await self._send_output(output)
+                                logger.debug(f"Sent async processed audio frame to egress")
+                            else:
+                                logger.warning(f"Frame processor returned None for audio frame")
                     else:
                         logger.debug(f"Received unknown frame type: {type(frame)}")
                         
@@ -200,23 +269,26 @@ class TrickleClient:
     async def _egress_loop(self):
         """Handle outgoing frames."""
         try:
+            # If processor is running in queue mode, start a drain task to push outputs into output_queue
+            if getattr(self.frame_processor, "queue_mode", False) and not self._processor_drain_task:
+                self._processor_drain_task = asyncio.create_task(self._drain_processor_outputs())
+
             async def output_generator():
                 """Generate output frames from the queue."""
                 while not self.stop_event.is_set() and not self.error_event.is_set():
                     try:
                         # Try to get a frame from the queue with timeout
-                        frame = await asyncio.to_thread(self.output_queue.get, timeout=0.1)
+                        frame = await asyncio.wait_for(self.output_queue.get(), timeout=0.1)
                         if frame is not None:
                             yield frame
                         else:
                             # None frame indicates shutdown
                             break
-                    except queue.Empty:
+                    except asyncio.TimeoutError:
                         continue  # No frame available, continue loop
                     except Exception as e:
                         logger.error(f"Error getting frame from output queue: {e}")
                         continue
-                    
             await self.protocol.egress_loop(output_generator())
             logger.info("Egress loop completed")
         except Exception as e:
@@ -233,6 +305,48 @@ class TrickleClient:
                         self.error_callback("egress_loop_error", e)
                 except Exception as cb_error:
                     logger.error(f"Error in error callback: {cb_error}")
+
+    async def _drain_processor_outputs(self):
+        """Drain processed frames from the FrameProcessor queues into output_queue."""
+        try:
+            while not self.stop_event.is_set() and not self.error_event.is_set():
+                # Create tasks for next available outputs
+                tasks = []
+                try:
+                    tasks.append(asyncio.create_task(self.frame_processor.get_next_processed_video()))
+                except Exception:
+                    pass
+                try:
+                    tasks.append(asyncio.create_task(self.frame_processor.get_next_processed_audio()))
+                except Exception:
+                    pass
+                if not tasks:
+                    await asyncio.sleep(0.01)
+                    continue
+                done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                for t in pending:
+                    t.cancel()
+                for t in done:
+                    try:
+                        result = await t
+                        if result is None:
+                            continue
+                        # Determine type based on method returned
+                        if isinstance(result, list):
+                            # Audio
+                            output = AudioOutput(result, self.request_id)
+                        else:
+                            # Video
+                            output = VideoOutput(result, self.request_id)
+                        await self._send_output(output)
+                    except asyncio.CancelledError:
+                        return
+                    except Exception as e:
+                        logger.debug(f"Processor drain error: {e}")
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            logger.error(f"Drain task error: {e}")
     
     async def _control_loop(self):
         """Handle control messages."""
@@ -260,6 +374,41 @@ class TrickleClient:
     
     async def _handle_control_message(self, control_data: dict):
         """Handle a control message."""
+        # Built-in processor control commands
+        try:
+            cmd = control_data.get("command") if isinstance(control_data, dict) else None
+            if cmd and getattr(self.frame_processor, "queue_mode", False):
+                if cmd == "processor.start_workers":
+                    if hasattr(self.frame_processor, "start_queue_workers"):
+                        if not getattr(self.frame_processor, '_workers_started', False):
+                            await self.frame_processor.start_queue_workers()
+                            self.frame_processor._workers_started = True
+                        return
+                elif cmd == "processor.stop_workers":
+                    if hasattr(self.frame_processor, "stop_queue_workers"):
+                        await self.frame_processor.stop_queue_workers()
+                        self.frame_processor._workers_started = False
+                        return
+                elif cmd == "processor.reset_timing":
+                    if hasattr(self.frame_processor, "reset_timing"):
+                        await self.frame_processor.reset_timing()
+                        return
+                elif cmd == "processor.reset_state":
+                    if hasattr(self.frame_processor, "reset_state"):
+                        await self.frame_processor.reset_state()
+                        return
+                elif cmd == "processor.pause_inputs":
+                    if hasattr(self.frame_processor, "pause_inputs"):
+                        await self.frame_processor.pause_inputs()
+                        return
+                elif cmd == "processor.resume_inputs":
+                    if hasattr(self.frame_processor, "resume_inputs"):
+                        await self.frame_processor.resume_inputs()
+                        return
+        except Exception as e:
+            logger.error(f"Error handling built-in control command: {e}")
+
+        # User-provided control handler fallback
         if self.control_handler:
             try:
                 if asyncio.iscoroutinefunction(self.control_handler):
@@ -272,8 +421,8 @@ class TrickleClient:
     async def _send_output(self, output):
         """Send output to the egress queue."""
         try:
-            await asyncio.to_thread(self.output_queue.put, output, timeout=1.0)
-        except queue.Full:
+            await self.output_queue.put(output)
+        except asyncio.QueueFull:
             logger.warning("Output queue is full, dropping frame")
         except Exception as e:
             logger.error(f"Error sending output: {e}")

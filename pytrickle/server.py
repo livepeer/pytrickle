@@ -20,7 +20,6 @@ from .api import StreamParamsUpdateRequest, StreamStartRequest, Version, Hardwar
 from .state import StreamState, PipelineState
 from .utils.hardware import HardwareInfo
 from .frame_processor import FrameProcessor
-from .health import StreamHealthManager
 
 logger = logging.getLogger(__name__)
 
@@ -86,11 +85,6 @@ class StreamServer:
         self.enable_default_routes = enable_default_routes
         self.health_check_interval = health_check_interval
         
-        # Built-in health manager for application health state
-        self.health_manager = StreamHealthManager(
-            service_name=capability_name or "stream-service"
-        )
-        
         # Create aiohttp application with optional configuration
         app_config = app_kwargs or {}
         self.app = web.Application(**app_config)
@@ -105,8 +99,7 @@ class StreamServer:
         self.pipeline = pipeline or os.getenv("PIPELINE", "byoc")
         self.capability_name = capability_name or os.getenv("CAPABILITY_NAME", os.getenv("MODEL_ID",""))
 
-        # Store app context and health manager
-        self.app["health_manager"] = self.health_manager
+        # Store app context
         if app_context:
             for key, value in app_context.items():
                 self.app[key] = value
@@ -286,17 +279,11 @@ class StreamServer:
         else:
             raise ValueError(f"Unknown content type: {request.content_type}")
         return model_class.model_validate(data)
-    
     async def _handle_start_stream(self, request: web.Request) -> web.Response:
         """Handle stream start requests."""
         try:
-            # Stop any existing stream
-            if self.current_client:
-                await self._stop_current_stream()
-            
-            # Parse and validate request
+            # Parse and validate request first
             params = await self._parse_and_validate_request(request, StreamStartRequest)
-            self.current_params = params
             
             logger.info(f"Starting stream: {params.subscribe_url} -> {params.publish_url}")
             
@@ -306,8 +293,8 @@ class StreamServer:
             height = params_dict.get("height", 512)
             max_framerate = params_dict.get("max_framerate", None)  # None will use default
             
-            # Create protocol and client (align with current Client/Protocol API)
-            protocol = TrickleProtocol(
+            # Create new protocol for the stream
+            new_protocol = TrickleProtocol(
                 subscribe_url=params.subscribe_url,
                 publish_url=params.publish_url,
                 control_url=params.control_url or "",
@@ -317,21 +304,59 @@ class StreamServer:
                 height=height,
                 max_framerate=max_framerate,
             )
+            
+            # Reuse existing client or create new one if none exists
+            if self.current_client is not None:
+                logger.info("Reusing existing TrickleClient with new protocol")
+                # Stop current protocol if running
+                if hasattr(self.current_client.protocol, 'shutdown_event') and not self.current_client.protocol.shutdown_event.is_set():
+                    await self.current_client.protocol.stop()
+                    logger.info("Stopped previous protocol")
+                
+                # Replace protocol and reset timing
+                self.current_client.protocol = new_protocol
+                if hasattr(self.current_client, '_reset_timing_state'):
+                    self.current_client._reset_timing_state()
+                    logger.info("Client timing state reset for new stream")
+            else:
+                logger.info("Creating new TrickleClient with native async processor")
+                self.current_client = TrickleClient(
+                    protocol=new_protocol,
+                    frame_processor=self.frame_processor,
+                    control_handler=self._handle_control_message,
+                )
+                if hasattr(self.current_client, '_reset_timing_state'):
+                    self.current_client._reset_timing_state()
+                    logger.info("Client timing state reset for new stream")
+        
+            # Update current params
+            self.current_params = params
 
-            # Create TrickleClient with native async processor
-            logger.info("Creating TrickleClient with native async processor")
-            self.current_client = TrickleClient(
-                protocol=protocol,
-                frame_processor=self.frame_processor,
-                control_handler=self._handle_control_message,
-            )
+            # Ensure frame processor is ready to accept inputs after prior idle
+            if hasattr(self.frame_processor, 'resume_inputs'):
+                try:
+                    await self.frame_processor.resume_inputs()
+                    logger.info("Frame processor inputs resumed for new stream")
+                except Exception as e:
+                    logger.warning(f"Could not resume frame processor inputs: {e}")
             
             # Track active client and start health monitoring
             self.state.set_active_client(True)
+            # Update unified state for active streams
+            self.state.update_active_streams(1)
+            self.state.set_state(PipelineState.READY)
             self._start_health_monitoring()
             
             # Start the client in background
             self._client_task = asyncio.create_task(self._run_client(params.gateway_request_id))
+            
+            # Set params via update_params if provided in start request
+            try:
+                logger.info("Setting params from start stream request")
+                self.frame_processor.update_params(params.params)
+                logger.info("Params set successfully from start request")
+            except Exception as e:
+                logger.warning(f"Failed to set params from start request: {e}")
             
             # Emit start event via protocol events publisher if available
             if self.current_client and self.current_client.protocol:
@@ -366,6 +391,9 @@ class StreamServer:
             
             await self._stop_current_stream()
             
+            # Update unified state for zero active streams
+            self.state.update_active_streams(0)
+
             return web.json_response({
                 "status": "success",
                 "message": "Stream stopped successfully"
@@ -377,6 +405,17 @@ class StreamServer:
                 "status": "error",
                 "message": f"Error stopping stream: {str(e)}"
             }, status=500)
+    
+    async def _handle_control_message(self, control_data: dict):
+        """Handle control messages from trickle protocol.
+        
+        Routes control messages to the frame processor's update_params method.
+        """
+        try:
+            self.frame_processor.update_params(control_data)
+            logger.debug("Control message routed to frame processor")
+        except Exception as e:
+            logger.error(f"Error handling control message: {e}")
     
     async def _handle_update_params(self, request: web.Request) -> web.Response:
         """Handle parameter update requests."""
@@ -424,11 +463,12 @@ class StreamServer:
                 "message": f"Error updating parameters: {str(e)}"
             }, status=500)
     
+    
     async def _handle_get_status(self, request: web.Request) -> web.Response:
         """Handle status requests with detailed state and frame processing statistics."""
         try:
-            # Get base state
-            status_data = self.state.get_state()
+            # Get unified state for status
+            status_data = self.state.get_pipeline_state()
             
             # Add basic client information if active
             if self.current_client:
@@ -458,22 +498,11 @@ class StreamServer:
             }, status=500)
     
     async def _handle_health(self, request: web.Request) -> web.Response:
-        """Handle health check requests using the built-in health manager."""
+        """Handle health check requests using unified StreamState."""
         try:
-            health_state = self.get_health_state()
-            
-            # Return 503 if in error state, 200 otherwise
-            status_code = 503 if self.health_manager.is_error() else 200
-            
-            return web.json_response({
-                'status': health_state['state'],
-                'pipeline_ready': health_state['pipeline_ready'],
-                'active_streams': health_state['active_streams'],
-                'startup_complete': health_state['startup_complete'],
-                'pipeline_state': health_state.get('pipeline_state'),
-                'error_message': health_state.get('error_message'),
-                'additional_info': health_state.get('additional_info', {})
-            }, status=status_code)
+            health_state = self.state.get_pipeline_state()
+            status_code = 503 if self.state.is_error() else 200
+            return web.json_response(health_state, status=status_code)
             
         except Exception as e:
             logger.error(f"Health check error: {e}")
@@ -511,15 +540,31 @@ class StreamServer:
         """Run the trickle client."""
         try:
             if self.current_client:
+                # Note: Timing state reset is handled by client.prepare_for_restart() 
+                # to avoid duplication and race conditions
+                
                 # Set pipeline ready when client starts successfully
                 self.state.set_state(PipelineState.READY)
                 await self.current_client.start(request_id)
+                
+                logger.info("Client started with frame processor coordination")
         except Exception as e:
             logger.error(f"Error running client: {e}")
             # Set error state on client failure
             self.state.set_state(PipelineState.ERROR)
         finally:
-            # Properly stop the current stream instead of just clearing references
+            # When protocol ends, ensure frame processor stops processing
+            logger.info("Protocol ended - stopping frame processor")
+            if self.current_client:
+                # Stop frame processor when protocol ends
+                try:
+                    if hasattr(self.frame_processor, 'pause_inputs'):
+                        await self.frame_processor.pause_inputs()
+                        logger.info("Frame processor inputs paused due to protocol end")
+                except Exception as e:
+                    logger.warning(f"Could not pause frame processor on protocol end: {e}")
+            
+            # Properly stop the current stream
             await self._stop_current_stream()
     
     def _start_health_monitoring(self):
@@ -546,17 +591,41 @@ class StreamServer:
             logger.error(f"Health monitoring error: {e}")
 
     async def _stop_current_stream(self):
-        """Stop the current stream and wait for complete cleanup."""
+        """Stop the current stream protocol while preserving client."""
         if self.current_client:
-            logger.info("Stopping current stream...")
+            logger.info("Stopping current stream protocol...")
             
-            # Stop the client and wait for cleanup
-            await self.current_client.stop()
+             # Stop the client and wait for cleanup
+            if self.current_client.protocol:
+                await self.current_client.protocol.stop()
+                logger.info("Protocol stopped, client preserved")
             
             logger.info("FrameProcessor returned to idle state")
+            
+            # Put processor into idle state instead of full cleanup to preserve models/VRAM
+            if hasattr(self.frame_processor, 'idle'):
+                try:
+                    logger.info("Putting frame processor into idle state (no unload)")
+                    await self.frame_processor.idle()
+                    logger.info("Frame processor idled successfully")
+                except Exception as e:
+                    logger.error(f"Error idling frame processor: {e}")
+            # Fallback to cleanup only if idle is not available
+            elif hasattr(self.frame_processor, 'cleanup'):
+                try:
+                    logger.info("Cleaning up frame processor resources...")
+                    await self.frame_processor.cleanup(full_shutdown=False)  # Preserve client for next stream
+                    logger.info("Frame processor cleanup completed")
+                except Exception as e:
+                    logger.error(f"Error during frame processor cleanup: {e}")
+
+            # Skip state/timing resets - let natural flow handle timing
+            # Excessive resets can cause performance degradation on restart
+            logger.info("Preserving processor state for faster restart")
                 
-            self.current_client = None
-            self.current_params = None
+            # Preserve client and params for reuse to enable faster restart
+            # self.current_client = None  
+            # self.current_params = None
             
             # Update state and stop monitoring
             self.state.set_active_client(False)
@@ -582,7 +651,23 @@ class StreamServer:
     
     async def stop(self):
         """Stop the current trickle client and clean up resources."""
-        await self._stop_current_stream()
+        """Fully clean up client and frame processor with complete shutdown."""
+        if self.current_client:
+            await self.current_client.stop()
+            
+        # Full cleanup of frame processor on shutdown
+        if hasattr(self.frame_processor, 'cleanup'):
+            try:
+                logger.info("Full cleanup of frame processor on shutdown...")
+                await self.frame_processor.cleanup(full_shutdown=True)  # Complete shutdown
+                logger.info("Frame processor full cleanup completed")
+            except Exception as e:
+                logger.error(f"Error during frame processor full cleanup: {e}")
+        
+        # Clear client references on full shutdown
+        self.current_client = None
+        self.current_params = None
+        self.state.set_active_client(False)
     
     async def start_server(self):
         """Start the HTTP server."""
@@ -652,5 +737,5 @@ class StreamServer:
         except KeyboardInterrupt:
             logger.info("Shutting down server...")
         finally:
-            await self._stop_current_stream()
+            await self.stop()
             await runner.cleanup()
