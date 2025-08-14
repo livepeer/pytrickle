@@ -1,16 +1,9 @@
-"""
-Simplified StreamProcessor interface for PyTrickle.
-
-Allows users to define video and audio processing functions without
-needing to inherit from complex base classes or understand async details.
-"""
-
 import asyncio
 import logging
 from typing import Optional, Callable, Dict, Any, List, Union
 
 from .frames import VideoFrame, AudioFrame
-from .frame_processor import BaseFrameProcessor
+from .frame_processor import FrameProcessor
 from .server import StreamServer
 
 logger = logging.getLogger(__name__)
@@ -74,7 +67,7 @@ class StreamProcessor:
         """Run the stream processor server (blocking)."""
         asyncio.run(self.run_forever())
 
-class _InternalFrameProcessor(BaseFrameProcessor):
+class _InternalFrameProcessor(FrameProcessor):
     """Internal frame processor that wraps user-provided functions."""
     
     def __init__(
@@ -85,18 +78,25 @@ class _InternalFrameProcessor(BaseFrameProcessor):
         param_updater: Optional[Callable[[Dict[str, Any]], None]] = None,
         name: str = "internal-processor"
     ):
-        super().__init__(name=name)
+        # Set attributes first
         self.video_processor = video_processor
         self.audio_processor = audio_processor
         self.model_loader = model_loader
         self.param_updater = param_updater
         self._ready = False
+        self.name = name
+        
+        # Set error_callback like parent constructor but skip load_model call
+        self.error_callback = None
+        
+        # Call load_model manually after attributes are set
+        self.load_model()
     
-    async def load_model(self, **kwargs):
+    def load_model(self, **kwargs):
         """Load model using provided function."""
         if self.model_loader:
             try:
-                await asyncio.to_thread(self.model_loader, **kwargs)
+                self.model_loader(**kwargs)
                 logger.info(f"StreamProcessor '{self.name}' model loaded successfully")
             except Exception as e:
                 logger.error(f"Error in model loader: {e}")

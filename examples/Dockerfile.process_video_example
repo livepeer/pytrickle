@@ -2,36 +2,53 @@ FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-#Ubuntu 24.04 default python3 is version 3.12, adjust if needed
+# Install system dependencies including those needed for av package
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-venv \
     python3-pip \
     git \
+    ffmpeg \
+    libavformat-dev \
+    libavcodec-dev \
+    libavdevice-dev \
+    libavutil-dev \
+    libavfilter-dev \
+    libswscale-dev \
+    libswresample-dev \
+    pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
-#create virtual environment
+# Create virtual environment
 ENV VENV_PATH=/opt/venv
 RUN python3 -m venv $VENV_PATH
 ENV PATH="$VENV_PATH/bin:$PATH"
 
-#install torch
-RUN pip install --upgrade pip && \
-    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+# Upgrade pip first
+RUN pip install --upgrade pip
 
-#install requirements
-COPY requirements.txt .
-RUN pip install -r requirements.txt
+# Install torch with CUDA support first (before requirements.txt to avoid conflicts)
+RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
 
-#install pytrickle
-# Install pytrickle from a specific branch
-# Replace BRANCH_NAME with the branch you need
-ARG PYTRICKLE_BRANCH=main
-RUN pip install git+https://github.com/livepeer/pytrickle.git@${PYTRICKLE_BRANCH}
+# Set working directory for pytrickle installation
+WORKDIR /tmp/pytrickle
 
+# Copy the entire pytrickle project
+COPY . .
+
+# Install pytrickle dependencies (excluding torch which we already installed)
+RUN pip install aiohttp>=3.8.0 asyncio-mqtt>=0.11.0 numpy>=1.21.0 Pillow>=9.0.0 pydantic>=1.10.0 av pytest>=7.0.0 pytest-asyncio>=0.21.0 pytest-mock>=3.10.0 pynvml
+
+# Install pytrickle in development mode
+RUN pip install -e .
+
+# Set up application directory
 WORKDIR /app
+
+# Copy the specific example file
 COPY examples/process_video_example.py .
 
+# Set shell for better error handling
 SHELL ["/bin/bash", "-c"]
 
 CMD ["python", "process_video_example.py"]
