@@ -127,6 +127,8 @@ def encode_av(
     last_kf = None
     audio_received = False
     first_video_ts = None
+    last_video_pts = None  # monotonic guard in dest time base
+    last_audio_pts = None  # monotonic guard in dest time base
     dropped_video = 0
     dropped_audio = 0
     audio_buffer = deque()
@@ -156,8 +158,13 @@ def encode_av(
             else:
                 dest_time_base = output_video_stream.codec_context.time_base
                 
-            frame.pts = _rescale_ts(avframe.timestamp, avframe.time_base, dest_time_base)
+            raw_pts = _rescale_ts(avframe.timestamp, avframe.time_base, dest_time_base)
+            # Enforce strictly increasing PTS for video
+            if last_video_pts is not None and raw_pts <= last_video_pts:
+                raw_pts = last_video_pts + 1
+            frame.pts = raw_pts
             frame.time_base = dest_time_base
+            last_video_pts = raw_pts
             current = avframe.timestamp * avframe.time_base
 
             # if there is pending audio, check whether video is too far behind
@@ -233,11 +240,14 @@ def encode_av(
                 if not audio_received and first_video_ts is not None:
                     first_audio_ts = af.timestamp * af.time_base
                     delta = first_audio_ts - first_video_ts
-                    if abs(delta) > AUDIO_BUFFER_SECS:
-                        # A/V is out of sync badly enough so exit for now
-                        av_broken = True
-                        logger.error(f"A/V is out of sync, exiting from audio audio_ts={float(first_audio_ts)} video_ts={float(first_video_ts)} delta={float(delta)}")
-                        break
+                    # If audio is too early compared to video, drop until within threshold
+                    if delta < -AUDIO_BUFFER_SECS:
+                        dropped_audio += 1
+                        continue
+                    # If audio is too late compared to video, drop this frame as well
+                    if delta > AUDIO_BUFFER_SECS:
+                        dropped_audio += 1
+                        continue
                     logger.info(f"Received first audio_ts={float(first_audio_ts)} video_ts={float(first_video_ts)} delta={float(delta)}")
                     audio_received = True
                 frame = av.audio.frame.AudioFrame.from_ndarray(af.samples, format=af.format, layout=af.layout)
@@ -250,8 +260,13 @@ def encode_av(
                 else:
                     dest_time_base = output_audio_stream.codec_context.time_base
                     
-                frame.pts = _rescale_ts(af.timestamp, af.time_base, dest_time_base)
+                raw_pts = _rescale_ts(af.timestamp, af.time_base, dest_time_base)
+                # Enforce strictly increasing PTS for audio
+                if last_audio_pts is not None and raw_pts <= last_audio_pts:
+                    raw_pts = last_audio_pts + 1
+                frame.pts = raw_pts
                 frame.time_base = dest_time_base
+                last_audio_pts = raw_pts
                 encoded_packets = output_audio_stream.encode(frame)
                 for ep in encoded_packets:
                     output_container.mux(ep)
