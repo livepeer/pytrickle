@@ -50,13 +50,7 @@ class TrickleClient:
         self.stop_event = asyncio.Event()
         self.error_event = asyncio.Event()
         
-        # Stream timing state (reset between streams to prevent A/V sync issues)
-        self._stream_start_time = None
-        self._first_video_timestamp = None
-        self._first_audio_timestamp = None
-        self._timestamp_offset = 0.0
-        
-        # Output queue for processed frames - use asyncio.Queue for async compatibility
+        # Output queue for processed frames
         self.output_queue = asyncio.Queue()
         # Optional background drain task when frame_processor runs in queue mode
         self._processor_drain_task: Optional[asyncio.Task] = None
