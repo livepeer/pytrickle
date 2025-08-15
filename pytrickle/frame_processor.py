@@ -55,7 +55,7 @@ class FrameProcessor(ABC):
         self.load_model(**init_kwargs)
 
     @abstractmethod
-    async def load_model(self, *kwargs):
+    def load_model(self, *kwargs):
         """
         Load the model.
 
