@@ -197,7 +197,6 @@ class TrickleClient:
                 # Process frames directly in ingress loop
                 try:
                     if isinstance(frame, VideoFrame):
-                        logger.debug(f"Processing video frame with frame processor: {frame.tensor.shape}")
                         if getattr(self.frame_processor, "queue_mode", False):
                             # Enqueue for background processing
                             await self.frame_processor.enqueue_video_frame(frame)
@@ -212,7 +211,6 @@ class TrickleClient:
                                 logger.warning(f"Frame processor returned None for video frame")
                             
                     elif isinstance(frame, AudioFrame):
-                        logger.debug(f"Processing audio frame with frame processor: {frame.samples.shape}")
                         if getattr(self.frame_processor, "queue_mode", False):
                             # Check if audio workers are disabled (passthrough mode)
                             audio_concurrency = self.frame_processor._audio_concurrency
