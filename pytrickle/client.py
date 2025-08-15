@@ -214,7 +214,20 @@ class TrickleClient:
                     elif isinstance(frame, AudioFrame):
                         logger.debug(f"Processing audio frame with frame processor: {frame.samples.shape}")
                         if getattr(self.frame_processor, "queue_mode", False):
-                            await self.frame_processor.enqueue_audio_frame(frame)
+                            # Check if audio workers are disabled (passthrough mode)
+                            audio_concurrency = self.frame_processor._audio_concurrency
+                            if audio_concurrency == 0:
+                                # Direct passthrough for audio when no workers - skip queuing
+                                processed_frames = await self.frame_processor.process_audio_async(frame)
+                                if processed_frames:
+                                    output = AudioOutput(processed_frames, self.request_id)
+                                    await self._send_output(output)
+                                    logger.debug(f"Sent passthrough audio frame to egress (no workers)")
+                                else:
+                                    logger.warning(f"Frame processor returned None for passthrough audio frame")
+                            else:
+                                # Normal queue mode with audio workers
+                                await self.frame_processor.enqueue_audio_frame(frame)
                         else:
                             # Direct async processing for audio
                             processed_frames = await self.frame_processor.process_audio_async(frame)
@@ -312,17 +325,27 @@ class TrickleClient:
             while not self.stop_event.is_set() and not self.error_event.is_set():
                 # Create tasks for next available outputs
                 tasks = []
+                
+                # Always try to get video output
                 try:
                     tasks.append(asyncio.create_task(self.frame_processor.get_next_processed_video()))
                 except Exception:
                     pass
-                try:
-                    tasks.append(asyncio.create_task(self.frame_processor.get_next_processed_audio()))
-                except Exception:
-                    pass
+                
+                # Only try to get audio output if audio workers are enabled
+                audio_concurrency = self.frame_processor._audio_concurrency
+                if audio_concurrency > 0:
+                    try:
+                        tasks.append(asyncio.create_task(self.frame_processor.get_next_processed_audio()))
+                    except Exception:
+                        pass
+                else:
+                    logger.debug("Skipping audio drain - audio workers disabled (passthrough mode)")
+                
                 if not tasks:
                     await asyncio.sleep(0.01)
                     continue
+                    
                 done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
                 for t in pending:
                     t.cancel()

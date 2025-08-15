@@ -54,7 +54,7 @@ class FrameProcessor(ABC):
         video_queue_size: int = 8,
         audio_queue_size: int = 32,
         video_concurrency: int = 1,
-        audio_concurrency: int = 1,
+        audio_concurrency: int = 0,  # Audio passthrough mode=0 (otherwise audio latency occurs)
         **init_kwargs
     ):
         """Initialize the frame processor.
