@@ -50,11 +50,8 @@ class TrickleClient:
         self.error_event = asyncio.Event()
         
         # Stream timing state (reset between streams to prevent A/V sync issues)
-        self._stream_start_time = None
         self._first_video_timestamp = None
         self._first_audio_timestamp = None
-        self._timestamp_offset = 0.0
-        self._first_video_ts_sec: Optional[float] = None
         
         # Output queue for processed frames - use asyncio.Queue for async compatibility
         self.output_queue = asyncio.Queue()
@@ -63,11 +60,8 @@ class TrickleClient:
         
         # Egress coordination state
         self._video_emit_baseline: Optional[int] = None
-        self._saw_first_video_output: bool = False
+        self._video_output_recieved: bool = False
         self._buffered_audio_outputs: list = []
-        self._audio_emit_offset_sec: Optional[float] = None
-        # Ingress audio buffering before first video
-        self._pre_video_audio_buffer: list = []
         
     def process_frame(self, frame: Union[VideoFrame, AudioFrame]) -> Optional[Union[VideoOutput, AudioOutput]]:
         """Process a single frame and return the output."""
@@ -97,12 +91,9 @@ class TrickleClient:
         logger.info(f"Starting trickle client with request_id={request_id}")
         
         # If the frame processor supports queue mode, start its queue workers
-        try:
-            if getattr(self.frame_processor, "queue_mode", False):
-                await self.frame_processor.start_queue_workers()
-                logger.info("Started frame processor queue workers")
-        except Exception as e:
-            logger.warning(f"Unable to start frame processor queue workers: {e}")
+        if getattr(self.frame_processor, "queue_mode", False):
+            await self.frame_processor.start_queue_workers()
+            logger.info("Started frame processor queue workers")
 
         # Start the protocol
         await self.protocol.start()
@@ -133,13 +124,9 @@ class TrickleClient:
             self.running = False
             logger.info("Stopping protocol due to client loops ending")
             
-            # When protocol ends, pause frame processor to prevent processing stale frames
-            try:
-                if hasattr(self.frame_processor, 'pause_inputs'):
-                    await self.frame_processor.pause_inputs()
-                    logger.info("Frame processor inputs paused due to protocol end")
-            except Exception as e:
-                logger.warning(f"Could not pause frame processor on protocol end: {e}")
+            # # When protocol ends, pause frame processor to prevent processing stale frames
+            # await self.frame_processor.pause_inputs()
+            # logger.info("Frame processor inputs paused due to protocol end")
             
             await self.protocol.stop()
     
@@ -165,41 +152,21 @@ class TrickleClient:
             except asyncio.CancelledError:
                 pass
                 
-        # Stop frame processor workers if running in queue mode
+        # Signal frame processor to stop and include queue workers
         try:
-            if getattr(self.frame_processor, "queue_mode", False):
-                await self.frame_processor.stop_queue_workers()
-        except Exception as e:
-            logger.warning(f"Unable to stop frame processor workers: {e}")
-            
-        # Stop the frame processor if it has a stop method (for ComfyStream integration)
-        # Use stop() for model preservation during stream switches
-        try:
-            if hasattr(self.frame_processor, 'stop') and callable(self.frame_processor.stop):
-                await self.frame_processor.stop()
-                logger.info("Frame processor stopped (models preserved)")
-        except Exception as e:
-            logger.warning(f"Unable to stop frame processor: {e}")
+            await self.frame_processor.stop_queue_workers()
+        except AttributeError:
+            pass
+        logger.info("Frame processor stop signal sent (queue workers stopped)")
 
-    def _reset_timing_state(self):
+    def reset_timing_state(self):
         """Reset client-level timing state to prevent cross-stream timestamp conflicts."""
-        # Clear all timing-related state to ensure fresh start
-        self._stream_start_time = None
         self._first_video_timestamp = None
         self._first_audio_timestamp = None
-        self._timestamp_offset = 0.0
-        self._first_video_ts_sec = None
         
-        # Clear any additional timing state that might exist
-        if hasattr(self, '_last_video_timestamp'):
-            self._last_video_timestamp = None
-        if hasattr(self, '_last_audio_timestamp'):
-            self._last_audio_timestamp = None
-        # Reset egress gating state
         self._video_emit_baseline = None
-        self._saw_first_video_output = False
+        self._video_output_recieved = False
         self._buffered_audio_outputs = []
-        self._audio_emit_offset_sec = None
             
         logger.info("Client timing state reset for new stream")
     
@@ -234,7 +201,7 @@ class TrickleClient:
                 # Process frames directly in ingress loop
                 try:
                     if isinstance(frame, VideoFrame):
-                        if getattr(self.frame_processor, "queue_mode", False):
+                        if not self.frame_processor.queue_mode:
                             # Enqueue for background processing
                             await self.frame_processor.enqueue_video_frame(frame)
                         else:
@@ -248,7 +215,7 @@ class TrickleClient:
                                 logger.warning(f"Frame processor returned None for video frame")
                             
                     elif isinstance(frame, AudioFrame):
-                        if getattr(self.frame_processor, "queue_mode", False):
+                        if not self.frame_processor.queue_mode:
                             # Check if audio workers are disabled (passthrough mode)
                             audio_concurrency = self.frame_processor._audio_concurrency
                             if audio_concurrency == 0:
@@ -323,25 +290,6 @@ class TrickleClient:
 
             async def output_generator():
                 """Generate output frames from the queue."""
-                def _shift_audio_output(ao):
-                    # Apply a constant offset (in seconds) to each audio frame timestamp
-                    try:
-                        if self._audio_emit_offset_sec is None:
-                            return ao
-                        from .frames import AudioFrame, AudioOutput
-                        shifted_frames = []
-                        for af in ao.frames:
-                            tb = float(af.time_base)
-                            if tb <= 0:
-                                shifted_frames.append(af)
-                                continue
-                            shift_pts = int(round(self._audio_emit_offset_sec / tb))
-                            new_ts = max(0, af.timestamp + shift_pts)
-                            new_af = AudioFrame._from_existing_with_timestamp(af, new_ts)
-                            shifted_frames.append(new_af)
-                        return AudioOutput(shifted_frames, ao.request_id)
-                    except Exception:
-                        return ao
                 while not self.stop_event.is_set() and not self.error_event.is_set():
                     try:
                         # Try to get a frame from the queue with timeout
@@ -351,39 +299,24 @@ class TrickleClient:
                             from .frames import AudioOutput, VideoOutput
                             if isinstance(frame, VideoOutput):
                                 # First time we see video, flip the flag and flush any buffered audio
-                                if not self._saw_first_video_output:
-                                    self._saw_first_video_output = True
-                                    # Establish audio offset relative to first video and first buffered audio (if any)
-                                    try:
-                                        video_ts_sec = float(frame.timestamp * frame.time_base)
-                                    except Exception:
-                                        video_ts_sec = 0.0
-                                    if self._buffered_audio_outputs:
-                                        try:
-                                            first_ao = self._buffered_audio_outputs[0]
-                                            first_af = first_ao.frames[0] if first_ao.frames else None
-                                            if first_af is not None:
-                                                first_audio_ts_sec = float(first_af.timestamp * first_af.time_base)
-                                                # Shift audio forward so first audio aligns with first video
-                                                self._audio_emit_offset_sec = max(0.0, video_ts_sec - first_audio_ts_sec)
-                                        except Exception:
-                                            self._audio_emit_offset_sec = None
+                                if not self._video_output_recieved:
+                                    self._video_output_recieved = True
                                     yield frame
                                     # Flush buffered audio after first video frame
                                     while self._buffered_audio_outputs:
                                         buffered = self._buffered_audio_outputs.pop(0)
-                                        yield _shift_audio_output(buffered)
+                                        yield buffered
                                 else:
                                     yield frame
                             elif isinstance(frame, AudioOutput):
-                                if not self._saw_first_video_output:
+                                if not self._video_output_recieved:
                                     # Buffer limited amount of audio until video arrives
                                     if len(self._buffered_audio_outputs) > 200:
                                         # Drop oldest to keep buffer bounded (~4s at 20ms)
                                         self._buffered_audio_outputs.pop(0)
                                     self._buffered_audio_outputs.append(frame)
                                 else:
-                                    yield _shift_audio_output(frame)
+                                    yield frame
                             else:
                                 yield frame
                         else:
@@ -451,16 +384,16 @@ class TrickleClient:
                             # Audio
                             output = AudioOutput(result, self.request_id)
                         else:
-                            # Video
                             # Rebase video timestamps relative to first emitted video to start at 0
                             try:
                                 if self._video_emit_baseline is None:
                                     self._video_emit_baseline = getattr(result, 'timestamp', 0)
                                 # Adjust in-place to avoid extra allocations
-                                if hasattr(result, 'timestamp') and isinstance(getattr(result, 'timestamp'), (int, float)):
+                                if isinstance(getattr(result, 'timestamp', None), (int, float)):
                                     adjusted = int(max(0, result.timestamp - self._video_emit_baseline))
                                     result.timestamp = adjusted
                             except Exception:
+                                logger.error(f"Error rebasing video timestamp: {e}")
                                 pass
                             output = VideoOutput(result, self.request_id)
                         await self._send_output(output)
@@ -499,40 +432,6 @@ class TrickleClient:
     
     async def _handle_control_message(self, control_data: dict):
         """Handle a control message."""
-        # Built-in processor control commands
-        try:
-            cmd = control_data.get("command") if isinstance(control_data, dict) else None
-            if cmd and getattr(self.frame_processor, "queue_mode", False):
-                if cmd == "processor.start_workers":
-                    if hasattr(self.frame_processor, "start_queue_workers"):
-                        if not getattr(self.frame_processor, '_workers_started', False):
-                            await self.frame_processor.start_queue_workers()
-                            self.frame_processor._workers_started = True
-                        return
-                elif cmd == "processor.stop_workers":
-                    if hasattr(self.frame_processor, "stop_queue_workers"):
-                        await self.frame_processor.stop_queue_workers()
-                        self.frame_processor._workers_started = False
-                        return
-                elif cmd == "processor.reset_timing":
-                    if hasattr(self.frame_processor, "reset_timing"):
-                        await self.frame_processor.reset_timing()
-                        return
-                elif cmd == "processor.reset_state":
-                    if hasattr(self.frame_processor, "reset_state"):
-                        await self.frame_processor.reset_state()
-                        return
-                elif cmd == "processor.pause_inputs":
-                    if hasattr(self.frame_processor, "pause_inputs"):
-                        await self.frame_processor.pause_inputs()
-                        return
-                elif cmd == "processor.resume_inputs":
-                    if hasattr(self.frame_processor, "resume_inputs"):
-                        await self.frame_processor.resume_inputs()
-                        return
-        except Exception as e:
-            logger.error(f"Error handling built-in control command: {e}")
-
         # User-provided control handler fallback
         if self.control_handler:
             try:
@@ -551,5 +450,3 @@ class TrickleClient:
             logger.warning("Output queue is full, dropping frame")
         except Exception as e:
             logger.error(f"Error sending output: {e}")
-
- 

@@ -180,14 +180,6 @@ class FrameProcessor(ABC):
         """Optional hook to reset timing state (e.g., frame counters) between streams."""
         return
 
-    async def pause_inputs(self) -> None:
-        """Optional hook to pause accepting inputs (subclasses may implement)."""
-        return
-
-    async def resume_inputs(self) -> None:
-        """Optional hook to resume accepting inputs (subclasses may implement)."""
-        return
-
     async def enqueue_video_frame(self, frame: VideoFrame) -> None:
         if not self.queue_mode or self._video_in_q is None:
             raise RuntimeError("Queue mode is disabled on FrameProcessor")
