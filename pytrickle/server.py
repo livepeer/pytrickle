@@ -22,6 +22,15 @@ from .frame_processor import FrameProcessor
 
 logger = logging.getLogger(__name__)
 
+@dataclass
+class RouteConfig:
+    """Configuration for custom routes."""
+    method: str
+    path: str
+    handler: Callable
+    kwargs: Optional[Dict[str, Any]] = None
+
+
 class StreamServer:
     """HTTP server application for trickle streaming with native async processor support."""
     
@@ -44,7 +53,15 @@ class StreamServer:
         self.frame_processor = frame_processor
         self.port = port
         self.state = StreamState()
-        self.app = web.Application()
+        self.route_prefix = route_prefix
+        self.enable_default_routes = enable_default_routes
+        self.health_check_interval = health_check_interval
+        
+        # Create aiohttp application with optional configuration
+        app_config = app_kwargs or {}
+        self.app = web.Application(**app_config)
+        
+        # Store configuration
         self.current_client: Optional[TrickleClient] = None
         self.current_params: Optional[StreamStartRequest] = None
         self._health_monitor_task: Optional[asyncio.Task] = None
@@ -256,10 +273,21 @@ class StreamServer:
     async def _handle_health(self, request: web.Request) -> web.Response:
         """Handle health check requests with simplified state."""
         try:
-            state_data = self.state.get_state()
-            #TODO: Should we return 503 if in error state?
-            # status_code = 503 if state_data["error"] else 200
-            return web.json_response(state_data, status=200)
+            health_state = self.get_health_state()
+            
+            # Return 503 if in error state, 200 otherwise
+            status_code = 503 if self.state.is_error() else 200
+            
+            return web.json_response({
+                'status': health_state['state'],
+                'pipeline_ready': health_state['pipeline_ready'],
+                'active_streams': health_state['active_streams'],
+                'startup_complete': health_state['startup_complete'],
+                'pipeline_state': health_state.get('pipeline_state'),
+                'error_message': health_state.get('error_message'),
+                'additional_info': health_state.get('additional_info', {})
+            }, status=status_code)
+            
         except Exception as e:
             logger.error(f"Health check error: {e}")
             return web.json_response({
@@ -382,7 +410,51 @@ class StreamServer:
         
         logger.info(f"Trickle app server started on port {self.port}")
         return runner
+
+    # Built-in State Management API
+    def set_state(self, state: PipelineState) -> None:
+        """Set pipeline state using enum value.
+        
+        Delegates to the StreamState's set_state method for consistent state management.
+        
+        Args:
+            state: PipelineState enum value indicating desired state
+        """
+        self.state.set_state(state)
     
+    def set_client_active(self, active: bool) -> None:
+        """Set whether there's an active streaming client.
+        
+        Args:
+            active: True if client is active, False otherwise
+        """
+        self.state.set_active_client(active)
+    
+    def get_state(self) -> Dict[str, Any]:
+        """Get current pipeline state information.
+        
+        Returns:
+            Dict containing current state information
+        """
+        return self.state.get_state()
+    
+    def update_active_streams(self, count: int):
+        """Update active stream count."""
+        self.state.update_active_streams(count)
+    
+    def get_health_state(self) -> Dict[str, Any]:
+        """Get current health state."""
+        return self.state.get_pipeline_state()
+    
+    def is_healthy(self) -> bool:
+        """Check if the server is in a healthy state."""
+        return not self.state.is_error()
+    
+    def get_health_summary(self) -> str:
+        """Get a simple health status string."""
+        state = self.state.get_pipeline_state()
+        return state.get('state', 'unknown')
+
     async def run_forever(self):
         """Run the server forever."""
         runner = await self.start_server()

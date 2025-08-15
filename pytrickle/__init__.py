@@ -23,7 +23,6 @@ from .state import StreamState
 from .base import TrickleComponent, ComponentState
 from .publisher import TricklePublisher
 from .subscriber import TrickleSubscriber
-from .health import StreamHealthManager
 from .manager import BaseStreamManager, TrickleStreamManager, StreamHandler
 from .stream_handler import TrickleStreamHandler
 from .utils.register import RegisterCapability
@@ -46,7 +45,7 @@ __all__ = [
     "AudioOutput",
     "TricklePublisher",
     "TrickleSubscriber",
-    "StreamHealthManager",
+
     "BaseStreamManager", 
     "TrickleStreamManager",
     "StreamHandler",

@@ -267,10 +267,26 @@ class AudioOutput(OutputFrame):
 # Frame Processing Utilities
 # ===========================
 
+class FrameFactory:
+    """Factory helpers for constructing frames with consistent side_data defaults."""
 
+    @staticmethod
+    def create_video_frame(tensor: torch.Tensor, timestamp: int = 0, time_base: Fraction = Fraction(1, 1)) -> VideoFrame:
+        frame = VideoFrame.from_tensor(tensor, timestamp)
+        frame.time_base = time_base
+        frame.side_data.input = tensor
+        # side_data.skipped defaults to False
+        return frame
 
-# Streaming Utilities
-# ====================
+    @staticmethod
+    def create_audio_frame_from_ndarray(samples: np.ndarray, timestamp: int, time_base: Fraction, sample_rate: int, layout: str) -> AudioFrame:
+        av_frame = av.AudioFrame.from_ndarray(samples, format='flt' if samples.dtype == np.float32 else 's16', layout=layout)
+        av_frame.sample_rate = sample_rate
+        av_frame.pts = timestamp
+        av_frame.time_base = time_base
+        audio_frame = AudioFrame.from_av_audio(av_frame)
+        audio_frame.side_data.input = samples
+        return audio_frame
 
 class FrameBuffer:
     """Rolling frame buffer that keeps a fixed number of frames."""
