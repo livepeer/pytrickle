@@ -56,6 +56,10 @@ class TrickleProtocol(TrickleComponent):
         self.control_subscriber: Optional[TrickleSubscriber] = None
         self.events_publisher: Optional[TricklePublisher] = None
         self.data_publisher: Optional[TricklePublisher] = None
+        
+        # Queues are initialized during start(), but attributes must always exist
+        self.subscribe_queue = None
+        self.publish_queue = None
 
         # Background tasks
         self.subscribe_task: Optional[asyncio.Task] = None
@@ -196,10 +200,16 @@ class TrickleProtocol(TrickleComponent):
             await self.control_subscriber.shutdown()
         
         # Send sentinel None values to stop the trickle tasks gracefully if queues exist
-        if self.subscribe_queue:
-            self.subscribe_queue.put(None)
-        if self.publish_queue:
-            self.publish_queue.put(None)
+        try:
+            if self.subscribe_queue is not None:
+                self.subscribe_queue.put(None)
+        except Exception:
+            pass
+        try:
+            if self.publish_queue is not None:
+                self.publish_queue.put(None)
+        except Exception:
+            pass
 
         # Close control and events components
         if self.control_subscriber:

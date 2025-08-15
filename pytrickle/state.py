@@ -58,6 +58,8 @@ class StreamState:
         
         # Client tracking
         self.active_client: bool = False
+        self.active_streams: int = 0
+        self.startup_complete: bool = False
 
     # State and derived flags
     @property
@@ -102,11 +104,10 @@ class StreamState:
         # Determine status: prioritize ERROR, then "OK" if actively streaming, otherwise pipeline state
         if self.error_event.is_set():
             status = "ERROR"
-        elif self._state is PipelineState.READY and self.active_client:
+        elif self._state is PipelineState.READY and (self.active_client or self.active_streams > 0):
             status = "OK"
         else:
             status = self._state.value
-            
         return {
             "status": status,
             "pipeline_ready": self.pipeline_ready,
@@ -186,3 +187,57 @@ class StreamState:
             self._reset_to_init()
         else:
             logger.warning(f"Unknown PipelineState enum: {state}")
+
+    # ---- Unified health-style API (to replace StreamHealthManager)
+    def set_startup_complete(self) -> None:
+        """Mark startup as complete for health/status reporting."""
+        self.startup_complete = True
+        # If no explicit state chosen yet, move from INIT -> LOADING
+        if self._state is PipelineState.INIT:
+            self._state = PipelineState.LOADING
+            self.running_event.set()
+
+    def update_active_streams(self, count: int) -> None:
+        """Update number of active streams for health/status reporting."""
+        self.active_streams = max(0, int(count))
+
+    def is_error(self) -> bool:
+        return self.error_event.is_set()
+
+    def set_error(self, message: str) -> None:
+        """Enter ERROR phase with an error message."""
+        self.set_state(PipelineState.ERROR)
+        logger.error(f"Stream state: ERROR - {message}")
+
+    def clear_error(self) -> None:
+        """Clear error state and return to appropriate state."""
+        if self.is_error():
+            # Clear the error event first
+            self.error_event.clear()
+            # Return to a sensible default state
+            self.set_state(PipelineState.LOADING)
+            logger.info("Stream state: ERROR cleared, returning to LOADING")
+
+    @property
+    def pipeline_warming(self) -> bool:
+        return self._state is PipelineState.WARMING_PIPELINE
+
+    def get_pipeline_state(self) -> dict:
+        """Return health-like payload used by /health endpoint."""
+        # If startup not complete, always show LOADING
+        if not self.startup_complete:
+            outward = "LOADING"
+        elif self._state is PipelineState.READY:
+            outward = "OK" if self.active_streams > 0 else "IDLE"
+        else:
+            outward = self._state.value
+        return {
+            "status": outward,  # backward-compatible key
+            "state": outward,
+            "error_message": None,  # keep compatibility with previous health payload
+            "pipeline_ready": self._state is PipelineState.READY,
+            "active_streams": self.active_streams,
+            "startup_complete": self.startup_complete,
+            "pipeline_state": self._state.name,
+            "additional_info": {},
+        }

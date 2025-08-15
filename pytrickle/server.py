@@ -32,6 +32,7 @@ class RouteConfig:
     handler: Callable
     kwargs: Optional[Dict[str, Any]] = None
 
+
 class StreamServer:
     """HTTP server application for trickle streaming with native async processor support."""
     
@@ -85,11 +86,6 @@ class StreamServer:
         self.route_prefix = route_prefix
         self.enable_default_routes = enable_default_routes
         self.health_check_interval = health_check_interval
-        
-        # Built-in health manager for application health state
-        self.health_manager = StreamHealthManager(
-            service_name=capability_name or "stream-service"
-        )
         
         # Create aiohttp application with optional configuration
         app_config = app_kwargs or {}
@@ -463,7 +459,7 @@ class StreamServer:
             health_state = self.get_health_state()
             
             # Return 503 if in error state, 200 otherwise
-            status_code = 503 if self.health_manager.is_error() else 200
+            status_code = 503 if self.state.is_error() else 200
             
             return web.json_response({
                 'status': health_state['state'],
@@ -627,19 +623,19 @@ class StreamServer:
     
     def update_active_streams(self, count: int):
         """Update active stream count."""
-        self.health_manager.update_active_streams(count)
+        self.state.update_active_streams(count)
     
     def get_health_state(self) -> Dict[str, Any]:
         """Get current health state."""
-        return self.health_manager.get_pipeline_state()
+        return self.state.get_pipeline_state()
     
     def is_healthy(self) -> bool:
         """Check if the server is in a healthy state."""
-        return not self.health_manager.is_error()
+        return not self.state.is_error()
     
     def get_health_summary(self) -> str:
         """Get a simple health status string."""
-        state = self.health_manager.get_pipeline_state()
+        state = self.state.get_pipeline_state()
         return state.get('state', 'unknown')
 
     async def run_forever(self):
