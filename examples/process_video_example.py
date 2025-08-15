@@ -7,12 +7,14 @@ import logging
 import torch
 from pytrickle import StreamProcessor
 from pytrickle.frames import VideoFrame
+import time
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Global state
 intensity = 0.5
+delay = 0.0
 ready = False
 
 def load_model(**kwargs):
@@ -29,7 +31,7 @@ def load_model(**kwargs):
     ready = True
     logger.info(f"✅ Accent Green processor ready (intensity: {intensity})")
 
-def process_video(frame: VideoFrame) -> VideoFrame:
+async def process_video(frame: VideoFrame) -> VideoFrame:
     """Apply Accent Green tinting to video frame."""
     global intensity, ready
     
@@ -37,6 +39,7 @@ def process_video(frame: VideoFrame) -> VideoFrame:
     if not ready:
         return frame
     
+    time.sleep(delay)
     # Accent Green target color (#18794E: rgb(24,121,78) -> (0.094,0.475,0.306))
     target = torch.tensor([0.094, 0.475, 0.306], device=frame.tensor.device)
 

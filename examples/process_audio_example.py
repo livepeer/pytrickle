@@ -44,7 +44,7 @@ def load_model(**kwargs):
     ready = True
     logger.info(f"✅ Audio Pitch Shifter ready (pitch_shift: {pitch_shift:.1f} semitones)")
 
-def process_audio(frame: AudioFrame) -> AudioFrame:
+async def process_audio(frame: AudioFrame) -> AudioFrame:
     """Apply pitch shifting to audio frame using torchaudio.transforms.PitchShift."""
     global pitch_shift, pitch_shifter, ready
     

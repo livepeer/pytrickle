@@ -109,7 +109,7 @@ class _InternalFrameProcessor(FrameProcessor):
             return frame
             
         try:
-            result = await asyncio.to_thread(self.video_processor, frame)
+            result = await self.video_processor(frame)
             return result if isinstance(result, VideoFrame) else frame
         except Exception as e:
             logger.error(f"Error in video processing: {e}")
@@ -121,7 +121,7 @@ class _InternalFrameProcessor(FrameProcessor):
             return [frame]
             
         try:
-            result = await asyncio.to_thread(self.audio_processor, frame)
+            result = await self.audio_processor(frame)
             if isinstance(result, AudioFrame):
                 return [result]
             elif isinstance(result, list):
