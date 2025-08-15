@@ -93,6 +93,11 @@ class _InternalFrameProcessor(FrameProcessor):
         self._ready = False
         self.name = name
         
+        # Frame skipping is handled at the TrickleClient level
+        # Having multiple frame skippers causes interference and double-counting
+        self.enable_frame_skipping = False  # Always False to prevent conflicts
+        self.frame_skipper = None
+        
         # Initialize parent with error_callback=None, which will call load_model
         super().__init__(error_callback=None)
     
@@ -113,6 +118,11 @@ class _InternalFrameProcessor(FrameProcessor):
             logger.info("Processor not ready or no video processor defined, passing frame unchanged")
             return frame
         
+        
+        # NOTE: Frame skipping is handled at the client level (TrickleClient)
+        # Do NOT apply additional frame skipping here as it causes double-skipping
+        # and FPS measurement interference
+            
         try:
             result = await self.video_processor(frame)
             return result if isinstance(result, VideoFrame) else frame
