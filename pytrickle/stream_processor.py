@@ -1,8 +1,7 @@
 import asyncio
+import inspect
 import logging
 from typing import Optional, Callable, Dict, Any, List, Union, Awaitable
-
-from pytrickle.state import PipelineState
 
 from .frames import VideoFrame, AudioFrame
 from .frame_processor import FrameProcessor
@@ -27,17 +26,23 @@ class StreamProcessor:
         **server_kwargs
     ):
         """
-        Initialize StreamProcessor with processing functions.
+        Initialize StreamProcessor with async processing functions.
         
         Args:
-            video_processor: Function that processes VideoFrame objects
-            audio_processor: Function that processes AudioFrame objects  
+            video_processor: Async function that processes VideoFrame objects
+            audio_processor: Async function that processes AudioFrame objects  
             model_loader: Optional function called during load_model phase
             param_updater: Optional function called when parameters update
             name: Processor name
             port: Server port
             **server_kwargs: Additional arguments passed to StreamServer
         """
+        # Validate that processors are async functions
+        if video_processor is not None and not inspect.iscoroutinefunction(video_processor):
+            raise ValueError("video_processor must be an async function")
+        if audio_processor is not None and not inspect.iscoroutinefunction(audio_processor):
+            raise ValueError("audio_processor must be an async function")
+            
         self.video_processor = video_processor
         self.audio_processor = audio_processor
         self.model_loader = model_loader
@@ -98,6 +103,11 @@ class _InternalFrameProcessor(FrameProcessor):
         self._ready = False
         self.name = name
         
+        # Frame skipping is handled at the TrickleClient level
+        # Having multiple frame skippers causes interference and double-counting
+        self.enable_frame_skipping = False  # Always False to prevent conflicts
+        self.frame_skipper = None
+        
         # Initialize parent with error_callback=None, which will call load_model
         super().__init__(error_callback=None)
     
@@ -113,10 +123,16 @@ class _InternalFrameProcessor(FrameProcessor):
         self._ready = True
     
     async def process_video_async(self, frame: VideoFrame) -> Optional[VideoFrame]:
-        """Process video frame using provided function."""
+        """Process video frame using provided async function."""
         if not self._ready or not self.video_processor:
+            logger.info("Processor not ready or no video processor defined, passing frame unchanged")
             return frame
         
+        
+        # NOTE: Frame skipping is handled at the client level (TrickleClient)
+        # Do NOT apply additional frame skipping here as it causes double-skipping
+        # and FPS measurement interference
+            
         try:
             result = await self.video_processor(frame)
             return result if isinstance(result, VideoFrame) else frame
@@ -125,7 +141,7 @@ class _InternalFrameProcessor(FrameProcessor):
             return frame
     
     async def process_audio_async(self, frame: AudioFrame) -> Optional[List[AudioFrame]]:
-        """Process audio frame using provided function."""
+        """Process audio frame using provided async function."""
         if not self._ready or not self.audio_processor:
             return [frame]
             
