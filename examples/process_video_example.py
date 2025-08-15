@@ -33,13 +33,15 @@ def load_model(**kwargs):
 
 async def process_video(frame: VideoFrame) -> VideoFrame:
     """Apply Accent Green tinting to video frame."""
-    global intensity, ready
+    global intensity, ready, delay
     
     # Return frames unchanged if not ready
     if not ready:
         return frame
     
+    #simulated processing time
     time.sleep(delay)
+
     # Accent Green target color (#18794E: rgb(24,121,78) -> (0.094,0.475,0.306))
     target = torch.tensor([0.094, 0.475, 0.306], device=frame.tensor.device)
 
