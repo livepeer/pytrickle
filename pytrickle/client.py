@@ -173,7 +173,7 @@ class TrickleClient:
                     # Process frames asynchronously
                     if isinstance(frame, VideoFrame):
                         logger.debug(f"Processing video frame with frame processor: {frame.tensor.shape}")
-                        
+                        logger.info(f"input queue size: {self.input_queue.qsize()}, output queue size: {self.output_queue.qsize()}")
                         # Async processing
                         processed_frame = await self.frame_processor.process_video_async(frame)
                         if processed_frame:

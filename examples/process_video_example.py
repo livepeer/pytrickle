@@ -2,7 +2,7 @@
 """
 OpenCV Green Processor using StreamProcessor
 """
-
+import asyncio
 import logging
 import torch
 import cv2
