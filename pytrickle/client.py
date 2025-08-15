@@ -54,11 +54,20 @@ class TrickleClient:
         self._first_video_timestamp = None
         self._first_audio_timestamp = None
         self._timestamp_offset = 0.0
+        self._first_video_ts_sec: Optional[float] = None
         
         # Output queue for processed frames - use asyncio.Queue for async compatibility
         self.output_queue = asyncio.Queue()
         # Optional background drain task when frame_processor runs in queue mode
         self._processor_drain_task: Optional[asyncio.Task] = None
+        
+        # Egress coordination state
+        self._video_emit_baseline: Optional[int] = None
+        self._saw_first_video_output: bool = False
+        self._buffered_audio_outputs: list = []
+        self._audio_emit_offset_sec: Optional[float] = None
+        # Ingress audio buffering before first video
+        self._pre_video_audio_buffer: list = []
         
     def process_frame(self, frame: Union[VideoFrame, AudioFrame]) -> Optional[Union[VideoOutput, AudioOutput]]:
         """Process a single frame and return the output."""
@@ -179,12 +188,18 @@ class TrickleClient:
         self._first_video_timestamp = None
         self._first_audio_timestamp = None
         self._timestamp_offset = 0.0
+        self._first_video_ts_sec = None
         
         # Clear any additional timing state that might exist
         if hasattr(self, '_last_video_timestamp'):
             self._last_video_timestamp = None
         if hasattr(self, '_last_audio_timestamp'):
             self._last_audio_timestamp = None
+        # Reset egress gating state
+        self._video_emit_baseline = None
+        self._saw_first_video_output = False
+        self._buffered_audio_outputs = []
+        self._audio_emit_offset_sec = None
             
         logger.info("Client timing state reset for new stream")
     
@@ -200,6 +215,21 @@ class TrickleClient:
                 if self.error_event.is_set() or self.stop_event.is_set():
                     logger.info("Stopping ingress loop due to error or stop signal")
                     break
+                
+                # Normalize timestamps to start from 0 for each stream type
+                try:
+                    if isinstance(frame, VideoFrame):
+                        if self._first_video_timestamp is None:
+                            self._first_video_timestamp = frame.timestamp
+                        # Rebase PTS ensuring non-negative
+                        frame.timestamp = max(0, frame.timestamp - self._first_video_timestamp)
+                    elif isinstance(frame, AudioFrame):
+                        if self._first_audio_timestamp is None:
+                            self._first_audio_timestamp = frame.timestamp
+                        # Rebase PTS ensuring non-negative
+                        frame.timestamp = max(0, frame.timestamp - self._first_audio_timestamp)
+                except Exception as e:
+                    logger.debug(f"Timestamp normalization skipped due to error: {e}")
                 
                 # Process frames directly in ingress loop
                 try:
@@ -293,12 +323,69 @@ class TrickleClient:
 
             async def output_generator():
                 """Generate output frames from the queue."""
+                def _shift_audio_output(ao):
+                    # Apply a constant offset (in seconds) to each audio frame timestamp
+                    try:
+                        if self._audio_emit_offset_sec is None:
+                            return ao
+                        from .frames import AudioFrame, AudioOutput
+                        shifted_frames = []
+                        for af in ao.frames:
+                            tb = float(af.time_base)
+                            if tb <= 0:
+                                shifted_frames.append(af)
+                                continue
+                            shift_pts = int(round(self._audio_emit_offset_sec / tb))
+                            new_ts = max(0, af.timestamp + shift_pts)
+                            new_af = AudioFrame._from_existing_with_timestamp(af, new_ts)
+                            shifted_frames.append(new_af)
+                        return AudioOutput(shifted_frames, ao.request_id)
+                    except Exception:
+                        return ao
                 while not self.stop_event.is_set() and not self.error_event.is_set():
                     try:
                         # Try to get a frame from the queue with timeout
                         frame = await asyncio.wait_for(self.output_queue.get(), timeout=0.1)
                         if frame is not None:
-                            yield frame
+                            # Gate audio until first video is emitted to avoid encoder A/V mismatch on startup
+                            from .frames import AudioOutput, VideoOutput
+                            if isinstance(frame, VideoOutput):
+                                # First time we see video, flip the flag and flush any buffered audio
+                                if not self._saw_first_video_output:
+                                    self._saw_first_video_output = True
+                                    # Establish audio offset relative to first video and first buffered audio (if any)
+                                    try:
+                                        video_ts_sec = float(frame.timestamp * frame.time_base)
+                                    except Exception:
+                                        video_ts_sec = 0.0
+                                    if self._buffered_audio_outputs:
+                                        try:
+                                            first_ao = self._buffered_audio_outputs[0]
+                                            first_af = first_ao.frames[0] if first_ao.frames else None
+                                            if first_af is not None:
+                                                first_audio_ts_sec = float(first_af.timestamp * first_af.time_base)
+                                                # Shift audio forward so first audio aligns with first video
+                                                self._audio_emit_offset_sec = max(0.0, video_ts_sec - first_audio_ts_sec)
+                                        except Exception:
+                                            self._audio_emit_offset_sec = None
+                                    yield frame
+                                    # Flush buffered audio after first video frame
+                                    while self._buffered_audio_outputs:
+                                        buffered = self._buffered_audio_outputs.pop(0)
+                                        yield _shift_audio_output(buffered)
+                                else:
+                                    yield frame
+                            elif isinstance(frame, AudioOutput):
+                                if not self._saw_first_video_output:
+                                    # Buffer limited amount of audio until video arrives
+                                    if len(self._buffered_audio_outputs) > 200:
+                                        # Drop oldest to keep buffer bounded (~4s at 20ms)
+                                        self._buffered_audio_outputs.pop(0)
+                                    self._buffered_audio_outputs.append(frame)
+                                else:
+                                    yield _shift_audio_output(frame)
+                            else:
+                                yield frame
                         else:
                             # None frame indicates shutdown
                             break
@@ -365,6 +452,16 @@ class TrickleClient:
                             output = AudioOutput(result, self.request_id)
                         else:
                             # Video
+                            # Rebase video timestamps relative to first emitted video to start at 0
+                            try:
+                                if self._video_emit_baseline is None:
+                                    self._video_emit_baseline = getattr(result, 'timestamp', 0)
+                                # Adjust in-place to avoid extra allocations
+                                if hasattr(result, 'timestamp') and isinstance(getattr(result, 'timestamp'), (int, float)):
+                                    adjusted = int(max(0, result.timestamp - self._video_emit_baseline))
+                                    result.timestamp = adjusted
+                            except Exception:
+                                pass
                             output = VideoOutput(result, self.request_id)
                         await self._send_output(output)
                     except asyncio.CancelledError:
