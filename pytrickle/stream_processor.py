@@ -1,6 +1,7 @@
 import asyncio
+import inspect
 import logging
-from typing import Optional, Callable, Dict, Any, List, Union
+from typing import Optional, Callable, Dict, Any, List, Union, Awaitable
 
 from .frames import VideoFrame, AudioFrame
 from .frame_processor import FrameProcessor
@@ -9,8 +10,8 @@ from .server import StreamServer
 logger = logging.getLogger(__name__)
 
 # Type aliases for processing functions
-VideoProcessor = Callable[[VideoFrame], Optional[VideoFrame]]
-AudioProcessor = Callable[[AudioFrame], Optional[List[AudioFrame]]]
+VideoProcessor = Callable[[VideoFrame], Awaitable[Optional[VideoFrame]]]
+AudioProcessor = Callable[[AudioFrame], Awaitable[Optional[List[AudioFrame]]]]
 
 class StreamProcessor:
     def __init__(
@@ -24,17 +25,23 @@ class StreamProcessor:
         **server_kwargs
     ):
         """
-        Initialize StreamProcessor with processing functions.
+        Initialize StreamProcessor with async processing functions.
         
         Args:
-            video_processor: Function that processes VideoFrame objects
-            audio_processor: Function that processes AudioFrame objects  
+            video_processor: Async function that processes VideoFrame objects
+            audio_processor: Async function that processes AudioFrame objects  
             model_loader: Optional function called during load_model phase
             param_updater: Optional function called when parameters update
             name: Processor name
             port: Server port
             **server_kwargs: Additional arguments passed to StreamServer
         """
+        # Validate that processors are async functions
+        if video_processor is not None and not inspect.iscoroutinefunction(video_processor):
+            raise ValueError("video_processor must be an async function")
+        if audio_processor is not None and not inspect.iscoroutinefunction(audio_processor):
+            raise ValueError("audio_processor must be an async function")
+            
         self.video_processor = video_processor
         self.audio_processor = audio_processor
         self.model_loader = model_loader
@@ -104,24 +111,25 @@ class _InternalFrameProcessor(FrameProcessor):
         self._ready = True
     
     async def process_video_async(self, frame: VideoFrame) -> Optional[VideoFrame]:
-        """Process video frame using provided function."""
+        """Process video frame using provided async function."""
         if not self._ready or not self.video_processor:
+            logger.info("Processor not ready or no video processor defined, passing frame unchanged")
             return frame
             
         try:
-            result = await asyncio.to_thread(self.video_processor, frame)
+            result = await self.video_processor(frame)
             return result if isinstance(result, VideoFrame) else frame
         except Exception as e:
             logger.error(f"Error in video processing: {e}")
             return frame
     
     async def process_audio_async(self, frame: AudioFrame) -> Optional[List[AudioFrame]]:
-        """Process audio frame using provided function."""
+        """Process audio frame using provided async function."""
         if not self._ready or not self.audio_processor:
             return [frame]
             
         try:
-            result = await asyncio.to_thread(self.audio_processor, frame)
+            result = await self.audio_processor(frame)
             if isinstance(result, AudioFrame):
                 return [result]
             elif isinstance(result, list):

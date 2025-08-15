@@ -2,7 +2,7 @@
 """
 Accent Green Processor using StreamProcessor
 """
-
+import asyncio
 import logging
 import torch
 from pytrickle import StreamProcessor
@@ -29,26 +29,29 @@ def load_model(**kwargs):
     ready = True
     logger.info(f"✅ Accent Green processor ready (intensity: {intensity})")
 
-def process_video(frame: VideoFrame) -> VideoFrame:
-    """Apply Accent Green tinting to video frame."""
+async def process_video(frame: VideoFrame) -> VideoFrame:
+    """Apply Accent Green tinting and horizontal mirroring to video frame."""
     global intensity, ready
     
     # Return frames unchanged if not ready
     if not ready:
         return frame
     
+    # Mirror the frame horizontally (flip left to right)
+    mirrored = torch.flip(frame.tensor, dims=[1])
+    
     # Accent Green target color (#18794E: rgb(24,121,78) -> (0.094,0.475,0.306))
-    target = torch.tensor([0.094, 0.475, 0.306], device=frame.tensor.device)
-
+    target = torch.tensor([0.094, 0.475, 0.306], device=mirrored.device)
+    await asyncio.sleep(0.1)
     # Create tinted version
-    tinted = frame.tensor.clone()
+    tinted = mirrored.clone()
     for c in range(3):
         tinted[:, :, c] = torch.clamp(
-            frame.tensor[:, :, c] + (target[c] - 0.5) * 0.4, 0, 1
+            mirrored[:, :, c] + (target[c] - 0.5) * 0.4, 0, 1
         )
     
     # Blend based on intensity and return new frame
-    blended = frame.tensor * (1.0 - intensity) + tinted * intensity
+    blended = mirrored * (1.0 - intensity) + tinted * intensity
     return frame.replace_tensor(blended)
 
 def update_params(params: dict):
