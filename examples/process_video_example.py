@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 # Global state
 intensity = 0.5
+delay = 0.00
 ready = False
 
 def load_model(**kwargs):
@@ -42,7 +43,10 @@ async def process_video(frame: VideoFrame) -> VideoFrame:
     
     # Accent Green target color (#18794E: rgb(24,121,78) -> (0.094,0.475,0.306))
     target = torch.tensor([0.094, 0.475, 0.306], device=mirrored.device)
-    await asyncio.sleep(0.1)
+    
+    #simulate processing time that is adjustable
+    await asyncio.sleep(delay)
+
     # Create tinted version
     tinted = mirrored.clone()
     for c in range(3):
@@ -56,12 +60,17 @@ async def process_video(frame: VideoFrame) -> VideoFrame:
 
 def update_params(params: dict):
     """Update tint intensity (0.0 to 1.0)."""
-    global intensity
+    global intensity, delay
     if "intensity" in params:
         old = intensity
         intensity = max(0.0, min(1.0, float(params["intensity"])))
         if old != intensity:
             logger.info(f"Intensity: {old:.2f} → {intensity:.2f}")
+    if "delay" in params:
+        old = delay
+        delay = max(0.0, float(params["delay"]))
+        if old != delay:
+            logger.info(f"Delay: {old:.2f} → {delay:.2f}")
 
 # Create and run StreamProcessor
 if __name__ == "__main__":
