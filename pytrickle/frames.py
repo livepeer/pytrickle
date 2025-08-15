@@ -71,7 +71,7 @@ class VideoFrame(InputFrame):
         new_frame = VideoFrame(new_tensor, self.timestamp, self.time_base, self.log_timestamps.copy())
         new_frame.side_data = self.side_data
         return new_frame
-
+    
     @classmethod
     def from_av_frame_with_timing(cls, av_frame: 'av.VideoFrame', original_frame: 'VideoFrame') -> 'VideoFrame':
         """Create a VideoFrame from an av.VideoFrame while preserving original timing."""
@@ -144,20 +144,22 @@ class AudioFrame(InputFrame):
         """Create AudioFrame from av audio frame."""
         return cls(av_frame)
     
-    @classmethod
-    def _from_existing_with_timestamp(cls, existing_frame: 'AudioFrame', new_timestamp: int) -> 'AudioFrame':
-        """Create a new AudioFrame with the same properties but a different timestamp."""
-        # Create a new frame object with corrected timestamp
-        new_frame = cls.__new__(cls)
-        new_frame.samples = existing_frame.samples
-        new_frame.nb_samples = existing_frame.nb_samples
-        new_frame.format = existing_frame.format
-        new_frame.rate = existing_frame.rate
-        new_frame.layout = existing_frame.layout
-        new_frame.timestamp = new_timestamp  # Use the corrected timestamp
-        new_frame.time_base = existing_frame.time_base
-        new_frame.log_timestamps = existing_frame.log_timestamps.copy()
-        new_frame.side_data = existing_frame.side_data
+    def replace_samples(self, samples: np.ndarray) -> 'AudioFrame':
+        """Create a new AudioFrame with different samples but same metadata."""
+        return self.from_audio_frame(samples=samples)
+    
+    def from_audio_frame(self, samples: Optional[np.ndarray] = None, timestamp: Optional[int] = None) -> 'AudioFrame':
+        """Create a new AudioFrame with optionally different samples and/or timestamp."""
+        new_frame = AudioFrame.__new__(AudioFrame)
+        new_frame.samples = samples if samples is not None else self.samples
+        new_frame.nb_samples = (samples.shape[-1] if samples.ndim > 1 else len(samples)) if samples is not None else self.nb_samples
+        new_frame.format = self.format
+        new_frame.rate = self.rate
+        new_frame.layout = self.layout
+        new_frame.timestamp = timestamp if timestamp is not None else self.timestamp
+        new_frame.time_base = self.time_base
+        new_frame.log_timestamps = self.log_timestamps.copy()
+        new_frame.side_data = self.side_data
         return new_frame
 
     @classmethod
@@ -288,23 +290,6 @@ class AudioOutput(OutputFrame):
         if self.frames:
             return self.frames[0].timestamp
         return 0
-    
-    @classmethod
-    def with_monotonic_timestamps(cls, frames: List[AudioFrame], request_id: str, start_timestamp: int, frame_duration: int) -> 'AudioOutput':
-        """
-        Create AudioOutput with corrected monotonic timestamps in individual frames.
-        
-        The encoder uses individual AudioFrame.timestamp values, so we need to fix
-        the actual frame timestamps, not just add a wrapper property.
-        """
-        corrected_frames = []
-        for i, frame in enumerate(frames):
-            # Create new frame with corrected timestamp
-            corrected_timestamp = start_timestamp + (i * frame_duration)
-            corrected_frame = AudioFrame._from_existing_with_timestamp(frame, corrected_timestamp)
-            corrected_frames.append(corrected_frame)
-        
-        return cls(corrected_frames, request_id)
 
 
 # Frame Processing Utilities

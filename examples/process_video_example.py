@@ -10,7 +10,7 @@ import cv2
 import numpy as np
 from pytrickle import StreamProcessor
 from pytrickle.frames import VideoFrame
-import time
+import asyncio
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -101,7 +101,9 @@ async def process_video(frame: VideoFrame) -> VideoFrame:
     start_background_task()
     
     # Simulated processing time
-    time.sleep(delay)
+    if delay > 0:
+        await asyncio.sleep(delay)
+        
 
     frame_tensor = frame.tensor
     
@@ -150,7 +152,6 @@ async def process_video(frame: VideoFrame) -> VideoFrame:
     
     # Enhance green hue (hue value around 60 degrees for green in OpenCV HSV)
     # Adjust the hue towards green and increase saturation
-    green_hue = 60  # Green hue in HSV
     hue_shift = intensity * 30  # Maximum hue shift of 30 degrees towards green
     
     # Shift hue towards green
@@ -207,7 +208,10 @@ if __name__ == "__main__":
         param_updater=update_params,
         on_stream_stop=on_stream_stop,
         name="green-processor",
-        port=8000,
-        version="0.0.1"
+        port=8001,
+        # Frame skipping configuration (optional)
+        enable_frame_skipping=True,    # Enable intelligent frame skipping (default: True)
+        target_fps=30.0,               # Target FPS for output (default: None = auto-detect)
+        auto_target_fps=False,         # Don't auto-detect FPS (default: True)
     )
     processor.run()

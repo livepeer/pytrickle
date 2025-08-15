@@ -1,8 +1,7 @@
 import asyncio
+import inspect
 import logging
 from typing import Optional, Callable, Dict, Any, List, Union, Awaitable, Coroutine
-
-from pytrickle.state import PipelineState
 
 from .frames import VideoFrame, AudioFrame
 from .frame_processor import FrameProcessor
@@ -28,10 +27,13 @@ class StreamProcessor:
         send_data_interval: Optional[float] = 0.333,
         name: str = "stream-processor",
         port: int = 8000,
+        enable_frame_skipping: bool = True,
+        target_fps: Optional[float] = None,
+        auto_target_fps: bool = True,
         **server_kwargs
     ):
         """
-        Initialize StreamProcessor with processing functions.
+        Initialize StreamProcessor with async processing functions.
         
         Args:
             video_processor: Async function that processes VideoFrame objects
@@ -41,8 +43,17 @@ class StreamProcessor:
             send_data_interval: Interval for sending data
             name: Processor name
             port: Server port
+            enable_frame_skipping: Whether to enable intelligent frame skipping
+            target_fps: Target FPS for frame skipping (None = auto-detect)
+            auto_target_fps: Whether to automatically detect target FPS
             **server_kwargs: Additional arguments passed to StreamServer
         """
+        # Validate that processors are async functions
+        if video_processor is not None and not inspect.iscoroutinefunction(video_processor):
+            raise ValueError("video_processor must be an async function")
+        if audio_processor is not None and not inspect.iscoroutinefunction(audio_processor):
+            raise ValueError("audio_processor must be an async function")
+            
         self.video_processor = video_processor
         self.audio_processor = audio_processor
         self.model_loader = model_loader
@@ -51,6 +62,9 @@ class StreamProcessor:
         self.send_data_interval = send_data_interval
         self.name = name
         self.port = port
+        self.enable_frame_skipping = enable_frame_skipping
+        self.target_fps = target_fps
+        self.auto_target_fps = auto_target_fps
         self.server_kwargs = server_kwargs
         
         # Create internal frame processor
@@ -67,6 +81,9 @@ class StreamProcessor:
         self.server = StreamServer(
             frame_processor=self._frame_processor,
             port=port,
+            enable_frame_skipping=enable_frame_skipping,
+            target_fps=target_fps,
+            auto_target_fps=auto_target_fps,
             **server_kwargs
         )
     
@@ -118,7 +135,12 @@ class _InternalFrameProcessor(FrameProcessor):
         self.on_stream_stop = on_stream_stop
         self.name = name
         
-        # Initialize parent with error_callback=None
+        # Frame skipping is handled at the TrickleClient level
+        # Having multiple frame skippers causes interference and double-counting
+        self.enable_frame_skipping = False  # Always False to prevent conflicts
+        self.frame_skipper = None
+        
+        # Initialize parent with error_callback=None, which will call load_model
         super().__init__(error_callback=None)
     
     async def load_model(self, **kwargs):
@@ -137,6 +159,11 @@ class _InternalFrameProcessor(FrameProcessor):
             logger.debug("No video processor defined, passing frame unchanged")
             return frame
         
+        
+        # NOTE: Frame skipping is handled at the client level (TrickleClient)
+        # Do NOT apply additional frame skipping here as it causes double-skipping
+        # and FPS measurement interference
+            
         try:
             result = await self.video_processor(frame)
             return result if isinstance(result, VideoFrame) else frame
