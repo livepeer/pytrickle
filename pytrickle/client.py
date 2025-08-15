@@ -138,7 +138,7 @@ class TrickleClient:
                         # Direct async processing
                         processed_frame = await self.frame_processor.process_video_async(frame)
                         if processed_frame:
-                            output = VideoOutput(frame, self.request_id)
+                            output = VideoOutput(processed_frame, self.request_id)
                             await self._send_output(output)
                             logger.debug(f"Sent async processed video frame to egress")
                         else:
