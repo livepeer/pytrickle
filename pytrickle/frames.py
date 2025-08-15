@@ -160,43 +160,6 @@ class AudioFrame(InputFrame):
         new_frame.side_data = existing_frame.side_data
         return new_frame
 
-    def replace_samples(self, new_samples: np.ndarray) -> 'AudioFrame':
-        """Create a new AudioFrame with different samples."""
-        new_frame = AudioFrame.__new__(AudioFrame)
-        new_frame.samples = new_samples
-        new_frame.nb_samples = new_samples.shape[-1] if new_samples.ndim > 1 else len(new_samples)
-        new_frame.format = self.format
-        new_frame.rate = self.rate
-        new_frame.layout = self.layout
-        new_frame.timestamp = self.timestamp
-        new_frame.time_base = self.time_base
-        new_frame.log_timestamps = self.log_timestamps.copy()
-        new_frame.side_data = self.side_data
-        return new_frame
-
-    def to_tensor(self) -> torch.Tensor:
-        """Convert audio samples to torch tensor."""
-        # Convert to float32 and normalize if needed
-        samples = self.samples
-        if samples.dtype != np.float32:
-            if samples.dtype == np.int16:
-                samples = samples.astype(np.float32) / 32768.0
-            elif samples.dtype == np.int32:
-                samples = samples.astype(np.float32) / 2147483648.0
-            else:
-                samples = samples.astype(np.float32)
-        
-        # Convert to torch tensor
-        tensor = torch.from_numpy(samples)
-        
-        # Ensure proper shape: [channels, samples]
-        if tensor.dim() == 1:
-            tensor = tensor.unsqueeze(0)  # Add channel dimension for mono
-        elif tensor.dim() == 2 and tensor.shape[1] < tensor.shape[0]:
-            tensor = tensor.T  # Transpose if samples are in first dimension
-        
-        return tensor
-
     @classmethod
     def from_tensor(cls, tensor: torch.Tensor, format: str = 's16', layout: str = 'mono', 
                    sample_rate: int = 48000, timestamp: int = 0, time_base = None) -> 'AudioFrame':
