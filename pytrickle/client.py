@@ -77,6 +77,13 @@ class TrickleClient:
         self.request_id = request_id
         self.stop_event.clear()
         self.error_event.clear()
+        # Drain any stale frames (including sentinel) from previous stream
+        try:
+            while not self.output_queue.empty():
+                self.output_queue.get_nowait()
+                self.output_queue.task_done()
+        except Exception:
+            pass
         
         logger.info(f"Starting trickle client with request_id={request_id}")
         
