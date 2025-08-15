@@ -75,7 +75,7 @@ class TrickleClient:
         
         logger.info(f"Starting trickle client with request_id={request_id}")
         
-        # If the frame processor supports queue mode, start its queue workers
+        # If the frame processor is in queue mode, start its queue workers
         try:
             if self.frame_processor.queue_mode:
                 await self.frame_processor.start_queue_workers()
