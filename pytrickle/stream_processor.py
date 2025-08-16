@@ -110,7 +110,7 @@ class _InternalFrameProcessor(FrameProcessor):
         
         try:
             result = await self.video_processor(frame)
-            return result
+            return result if isinstance(result, VideoFrame) else frame
         except Exception as e:
             logger.error(f"Error in video processing: {e}")
             return frame
