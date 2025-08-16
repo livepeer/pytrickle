@@ -145,6 +145,7 @@ if __name__ == "__main__":
         model_loader=load_model,
         param_updater=update_params,
         name="green-processor",
-        port=8000
+        port=8000,
+        enable_frame_caching=True
     )
     processor.run()

@@ -6,7 +6,6 @@ to ensure all components stop when subscription ends.
 """
 
 import asyncio
-import queue
 import logging
 from typing import Callable, Optional, Union
 
@@ -51,7 +50,7 @@ class TrickleClient:
         self.error_event = asyncio.Event()
         
         # Output queue for processed frames
-        self.output_queue = queue.Queue()
+        self.output_queue = asyncio.Queue()
         
     def process_frame(self, frame: Union[VideoFrame, AudioFrame]) -> Optional[Union[VideoOutput, AudioOutput]]:
         """Process a single frame and return the output."""
@@ -72,6 +71,9 @@ class TrickleClient:
         self.error_event.clear()
         
         logger.info(f"Starting trickle client with request_id={request_id}")
+        
+        # Reset frame cache for clean start
+        self.frame_processor.reset_frame_cache()
         
         # Start the protocol
         await self.protocol.start()
@@ -113,10 +115,10 @@ class TrickleClient:
         
         # Send sentinel value to stop egress loop
         try:
-            self.output_queue.put_nowait(None)
-        except queue.Full:
+            await self.output_queue.put(None)
+        except asyncio.QueueFull:
             pass
-    
+
     async def publish_data(self, data: str):
         """Publish data via the protocol's data publisher."""
         return await self.protocol.publish_data(data)
@@ -133,28 +135,26 @@ class TrickleClient:
                 # Process frames directly in ingress loop
                 try:
                     if isinstance(frame, VideoFrame):
-                        logger.debug(f"Processing video frame with frame processor: {frame.tensor.shape}")
-                        
-                        # Direct async processing
-                        processed_frame = await self.frame_processor.process_video_async(frame)
+                        processed_frame = await self.frame_processor.process_video_with_fallback(frame)
                         if processed_frame:
                             output = VideoOutput(processed_frame, self.request_id)
                             await self._send_output(output)
-                            logger.debug(f"Sent async processed video frame to egress")
+                            logger.debug(f"Sent processed video frame to egress")
                         else:
-                            logger.warning(f"Frame processor returned None for video frame")
+                            logger.debug(f"No processed/cached frame available - using original frame as fallback")
+                            fallback_output = VideoOutput(frame, self.request_id)
+                            await self._send_output(fallback_output)
                             
                     elif isinstance(frame, AudioFrame):
-                        logger.debug(f"Processing audio frame with frame processor: {frame.samples.shape}")
-                        
-                        # Direct async processing for audio
-                        processed_frames = await self.frame_processor.process_audio_async(frame)
+                        processed_frames = await self.frame_processor.process_audio(frame)
                         if processed_frames:
                             output = AudioOutput(processed_frames, self.request_id)
                             await self._send_output(output)
-                            logger.debug(f"Sent async processed audio frame to egress")
+                            logger.debug(f"Sent processed audio frames to egress")
                         else:
-                            logger.warning(f"Frame processor returned None for audio frame")
+                            logger.debug(f"No processed/cached audio frames available - using original frame as fallback")
+                            fallback_output = AudioOutput([frame], self.request_id)
+                            await self._send_output(fallback_output)
                     else:
                         logger.debug(f"Received unknown frame type: {type(frame)}")
                         
@@ -197,6 +197,7 @@ class TrickleClient:
                         self.error_callback("ingress_loop_error", e)
                 except Exception as cb_error:
                     logger.error(f"Error in error callback: {cb_error}")
+    
     async def _egress_loop(self):
         """Handle outgoing frames."""
         try:
@@ -205,13 +206,13 @@ class TrickleClient:
                 while not self.stop_event.is_set() and not self.error_event.is_set():
                     try:
                         # Try to get a frame from the queue with timeout
-                        frame = await asyncio.to_thread(self.output_queue.get, timeout=0.1)
+                        frame = await asyncio.wait_for(self.output_queue.get(), timeout=0.1)
                         if frame is not None:
                             yield frame
                         else:
                             # None frame indicates shutdown
                             break
-                    except queue.Empty:
+                    except asyncio.TimeoutError:
                         continue  # No frame available, continue loop
                     except Exception as e:
                         logger.error(f"Error getting frame from output queue: {e}")
@@ -259,7 +260,7 @@ class TrickleClient:
                     logger.error(f"Error in error callback: {cb_error}")
     
     async def _handle_control_message(self, control_data: dict):
-        """Handle a control message."""
+        """Handle a control message for user-provided control handler."""
         if self.control_handler:
             try:
                 if asyncio.iscoroutinefunction(self.control_handler):
@@ -272,8 +273,8 @@ class TrickleClient:
     async def _send_output(self, output):
         """Send output to the egress queue."""
         try:
-            await asyncio.to_thread(self.output_queue.put, output, timeout=1.0)
-        except queue.Full:
+            await self.output_queue.put(output)
+        except asyncio.QueueFull:
             logger.warning("Output queue is full, dropping frame")
         except Exception as e:
             logger.error(f"Error sending output: {e}")

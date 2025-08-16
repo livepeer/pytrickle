@@ -1,8 +1,7 @@
 import asyncio
 import logging
-from typing import Optional, Callable, Dict, Any, List, Union, Awaitable
+from typing import Optional, Callable, Dict, Any, List, Awaitable
 
-from pytrickle.state import PipelineState
 
 from .frames import VideoFrame, AudioFrame
 from .frame_processor import FrameProcessor
@@ -21,6 +20,7 @@ class StreamProcessor:
         audio_processor: Optional[AudioProcessor] = None,
         model_loader: Optional[Callable[[], None]] = None,
         param_updater: Optional[Callable[[Dict[str, Any]], None]] = None,
+        enable_frame_caching: bool = True,
         name: str = "stream-processor",
         port: int = 8000,
         **server_kwargs
@@ -30,13 +30,18 @@ class StreamProcessor:
         
         Args:
             video_processor: Function that processes VideoFrame objects
-            audio_processor: Function that processes AudioFrame objects  
+            audio_processor: Function that processes AudioFrame objects
             model_loader: Optional function called during load_model phase
             param_updater: Optional function called when parameters update
+            enable_frame_caching: Enable frame caching for better fallback behavior
             name: Processor name
             port: Server port
             **server_kwargs: Additional arguments passed to StreamServer
         """
+        
+        # Validate that at least one processor is provided
+        if video_processor is None and audio_processor is None:
+            raise ValueError("At least one of video or audio processor must be provided")
         self.video_processor = video_processor
         self.audio_processor = audio_processor
         self.model_loader = model_loader
@@ -45,12 +50,13 @@ class StreamProcessor:
         self.port = port
         self.server_kwargs = server_kwargs
         
-        # Create internal frame processor
+        # Create internal frame processor with resolved parameters
         self._frame_processor = _InternalFrameProcessor(
             video_processor=video_processor,
             audio_processor=audio_processor,
             model_loader=model_loader,
             param_updater=param_updater,
+            enable_frame_caching=enable_frame_caching,
             name=name
         )
         
@@ -78,7 +84,9 @@ class _InternalFrameProcessor(FrameProcessor):
         audio_processor: Optional[AudioProcessor] = None,
         model_loader: Optional[Callable[[], None]] = None,
         param_updater: Optional[Callable[[Dict[str, Any]], None]] = None,
-        name: str = "internal-processor"
+        name: str = "internal-processor",
+        enable_frame_caching: bool = True,
+        **kwargs
     ):
         # Set attributes first before calling parent
         self.video_processor = video_processor
@@ -89,7 +97,11 @@ class _InternalFrameProcessor(FrameProcessor):
         self.name = name
         
         # Initialize parent with error_callback=None, which will call load_model
-        super().__init__(error_callback=None)
+        super().__init__(
+            error_callback=None, 
+            enable_frame_caching=enable_frame_caching,
+            **kwargs
+        )
     
     def load_model(self, **kwargs):
         """Load model using provided function."""
@@ -109,10 +121,10 @@ class _InternalFrameProcessor(FrameProcessor):
         
         try:
             result = await self.video_processor(frame)
-            return result if isinstance(result, VideoFrame) else frame
+            return result if isinstance(result, VideoFrame) else None
         except Exception as e:
             logger.error(f"Error in video processing: {e}")
-            return frame
+            return None
     
     async def process_audio_async(self, frame: AudioFrame) -> Optional[List[AudioFrame]]:
         """Process audio frame using provided function."""
