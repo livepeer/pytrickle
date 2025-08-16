@@ -160,6 +160,49 @@ class AudioFrame(InputFrame):
         new_frame.side_data = existing_frame.side_data
         return new_frame
 
+    @classmethod
+    def from_tensor(cls, tensor: torch.Tensor, format: str = 's16', layout: str = 'mono', 
+                   sample_rate: int = 48000, timestamp: int = 0, time_base = None) -> 'AudioFrame':
+        """Create AudioFrame from torch tensor."""
+        from fractions import Fraction
+        if time_base is None:
+            time_base = Fraction(1, sample_rate)
+            
+        # Convert tensor to numpy samples
+        samples = tensor.detach().cpu().numpy()
+        
+        # Convert to target format
+        if format == 's16':
+            samples = np.clip(samples * 32768.0, -32768, 32767).astype(np.int16)
+        elif format == 's32':
+            samples = np.clip(samples * 2147483648.0, -2147483648, 2147483647).astype(np.int32)
+        else:
+            samples = samples.astype(np.float32)
+        
+        # Handle format layout
+        if format.endswith('p'):
+            # Planar format - keep as [channels, samples]
+            pass
+        else:
+            # Packed format - convert to interleaved if multi-channel
+            if samples.shape[0] > 1:
+                samples = samples.T
+            else:
+                samples = samples.squeeze(0)
+        
+        # Create new frame manually
+        new_frame = cls.__new__(cls)
+        new_frame.samples = samples
+        new_frame.nb_samples = samples.shape[-1] if samples.ndim > 1 else len(samples)
+        new_frame.format = format
+        new_frame.rate = sample_rate
+        new_frame.layout = layout
+        new_frame.timestamp = timestamp
+        new_frame.time_base = time_base
+        new_frame.log_timestamps = {}
+        new_frame.side_data = SideData()
+        return new_frame
+
     def to_av_frame(self) -> av.AudioFrame:
         """Convert this AudioFrame to av.AudioFrame."""
         try:

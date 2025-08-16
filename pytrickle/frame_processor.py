@@ -52,19 +52,18 @@ class FrameProcessor(ABC):
             **init_kwargs: Additional kwargs passed to initialize() method
         """
         self.error_callback = error_callback
-        self.initialize(**init_kwargs)
+        self.load_model(**init_kwargs)
 
-    # Abstract methods to implement in subclasses
     @abstractmethod
-    def initialize(self, **kwargs):
+    def load_model(self, *kwargs):
         """
-        Initialization hook called during __init__().
+        Load the model.
 
-        Override this method to perform any setup, model loading,
-        warmup, or other initialization tasks.
+        This method should be implemented to load any required models or resources.
+        It is called automatically during initialization.
         
         Args:
-            **kwargs: Additional initialization parameters passed from constructor
+            *kwargs: Additional parameters for model loading
         """
         pass
 
