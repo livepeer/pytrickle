@@ -126,12 +126,17 @@ async def process_video(frame: VideoFrame) -> VideoFrame:
 
 def update_params(params: dict):
     """Update green hue intensity (0.0 to 1.0)."""
-    global intensity
+    global intensity, delay
     if "intensity" in params:
         old = intensity
         intensity = max(0.0, min(1.0, float(params["intensity"])))
         if old != intensity:
             logger.info(f"Green hue intensity: {old:.2f} → {intensity:.2f}")
+    if "delay" in params:
+        old = delay
+        delay = max(0.0, float(params["delay"]))
+        if old != delay:
+            logger.info(f"Processing delay: {old:.2f} → {delay:.2f}")
 
 # Create and run StreamProcessor
 if __name__ == "__main__":
