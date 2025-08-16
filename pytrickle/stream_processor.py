@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from typing import Optional, Callable, Dict, Any, List, Union, Awaitable
+from dataclasses import dataclass
 
 from .frames import VideoFrame, AudioFrame
 from .frame_processor import FrameProcessor
@@ -12,6 +13,16 @@ logger = logging.getLogger(__name__)
 VideoProcessor = Callable[[VideoFrame], Awaitable[Optional[VideoFrame]]]
 AudioProcessor = Callable[[AudioFrame], Awaitable[Optional[List[AudioFrame]]]]
 
+# Default configuration constants
+class ProcessorDefaults:
+    """Default configuration values for processors."""
+    
+    # Server defaults
+    DEFAULT_PORT = 8000
+    DEFAULT_NAME = "stream-processor"
+    INTERNAL_PROCESSOR_NAME = "internal-processor"
+
+
 class StreamProcessor:
     def __init__(
         self,
@@ -19,8 +30,9 @@ class StreamProcessor:
         audio_processor: Optional[AudioProcessor] = None,
         model_loader: Optional[Callable[[], None]] = None,
         param_updater: Optional[Callable[[Dict[str, Any]], None]] = None,
-        name: str = "stream-processor",
-        port: int = 8000,
+        enable_frame_caching: bool = True,
+        name: str = ProcessorDefaults.DEFAULT_NAME,
+        port: int = ProcessorDefaults.DEFAULT_PORT,
         **server_kwargs
     ):
         """
@@ -28,28 +40,45 @@ class StreamProcessor:
         
         Args:
             video_processor: Function that processes VideoFrame objects
-            audio_processor: Function that processes AudioFrame objects  
+            audio_processor: Function that processes AudioFrame objects
             model_loader: Optional function called during load_model phase
             param_updater: Optional function called when parameters update
+            enable_frame_caching: Enable frame caching for better fallback behavior
             name: Processor name
             port: Server port
             **server_kwargs: Additional arguments passed to StreamServer
+        
+        Examples:
+            # Video processing only (audio passthrough)
+            StreamProcessor(video_processor=process_video_func)
+            
+            # Both video and audio processing
+            StreamProcessor(
+                video_processor=process_video_func,
+                audio_processor=process_audio_func
+            )
+            
+            # Audio processing only
+            StreamProcessor(video_processor=None, audio_processor=process_audio_func)
         """
-        self.video_processor = video_processor
-        self.audio_processor = audio_processor
+        # Validate that at least one processor is provided
+        if video_processor is None and audio_processor is None:
+            raise ValueError("At least one of video or audio processor must be provided")
+
         self.model_loader = model_loader
         self.param_updater = param_updater
         self.name = name
         self.port = port
         self.server_kwargs = server_kwargs
         
-        # Create internal frame processor
+        # Create internal frame processor with resolved parameters
         self._frame_processor = _InternalFrameProcessor(
             video_processor=video_processor,
             audio_processor=audio_processor,
             model_loader=model_loader,
             param_updater=param_updater,
-            name=name
+            name=name,
+            enable_frame_caching=enable_frame_caching,
         )
         
         # Create and start server
@@ -76,7 +105,9 @@ class _InternalFrameProcessor(FrameProcessor):
         audio_processor: Optional[AudioProcessor] = None,
         model_loader: Optional[Callable[[], None]] = None,
         param_updater: Optional[Callable[[Dict[str, Any]], None]] = None,
-        name: str = "internal-processor"
+        name: str = ProcessorDefaults.INTERNAL_PROCESSOR_NAME,
+        enable_frame_caching: bool = True,
+        **kwargs
     ):
         # Set attributes first
         self.video_processor = video_processor
@@ -86,14 +117,19 @@ class _InternalFrameProcessor(FrameProcessor):
         self._ready = False
         self.name = name
         
-        # Set error_callback like parent constructor but skip load_model call
-        self.error_callback = None
+        # Log errors via a simple callback
+        def log_error(error_type: str, exception: Optional[Exception] = None):
+            logger.warning(f"Processing error: {error_type} - {exception}")
         
-        # Call load_model manually after attributes are set
-        self.load_model()
+        # Call parent constructor with frame caching enabled
+        super().__init__(
+            error_callback=log_error,
+            enable_frame_caching=enable_frame_caching,
+            **kwargs
+        )
     
-    def load_model(self, **kwargs):
-        """Load model using provided function."""
+    def initialize(self, **kwargs):
+        """Initialize processor using provided model_loader function."""
         if self.model_loader:
             try:
                 self.model_loader(**kwargs)
@@ -103,6 +139,10 @@ class _InternalFrameProcessor(FrameProcessor):
                 raise
         self._ready = True
     
+    def load_model(self, **kwargs):
+        """Load model using provided function - required by FrameProcessor ABC."""
+        self.initialize(**kwargs)
+    
     async def process_video_async(self, frame: VideoFrame) -> Optional[VideoFrame]:
         """Process video frame using provided function."""
         if not self._ready or not self.video_processor:
@@ -110,10 +150,10 @@ class _InternalFrameProcessor(FrameProcessor):
         
         try:
             result = await self.video_processor(frame)
-            return result if isinstance(result, VideoFrame) else frame
+            return result if isinstance(result, VideoFrame) else None
         except Exception as e:
             logger.error(f"Error in video processing: {e}")
-            return frame
+            return None
     
     async def process_audio_async(self, frame: AudioFrame) -> Optional[List[AudioFrame]]:
         """Process audio frame using provided function."""

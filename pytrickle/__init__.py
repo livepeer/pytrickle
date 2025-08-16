@@ -40,6 +40,8 @@ __all__ = [
     "TrickleClient",
     "StreamServer",
 	"StreamProcessor",
+    "VideoProcessorConfig",
+    "AudioProcessorConfig", 
     "TrickleProtocol",
     "VideoFrame",
     "AudioFrame", 
