@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Optional, Callable, Dict, Any, List, Union
+from typing import Optional, Callable, Dict, Any, List, Union, Awaitable
 
 from .frames import VideoFrame, AudioFrame
 from .frame_processor import FrameProcessor
@@ -9,8 +9,8 @@ from .server import StreamServer
 logger = logging.getLogger(__name__)
 
 # Type aliases for processing functions
-VideoProcessor = Callable[[VideoFrame], Optional[VideoFrame]]
-AudioProcessor = Callable[[AudioFrame], Optional[List[AudioFrame]]]
+VideoProcessor = Callable[[VideoFrame], Awaitable[Optional[VideoFrame]]]
+AudioProcessor = Callable[[AudioFrame], Awaitable[Optional[List[AudioFrame]]]]
 
 class StreamProcessor:
     def __init__(
@@ -107,10 +107,10 @@ class _InternalFrameProcessor(FrameProcessor):
         """Process video frame using provided function."""
         if not self._ready or not self.video_processor:
             return frame
-            
+        
         try:
             result = await self.video_processor(frame)
-            return result if isinstance(result, VideoFrame) else frame
+            return result
         except Exception as e:
             logger.error(f"Error in video processing: {e}")
             return frame

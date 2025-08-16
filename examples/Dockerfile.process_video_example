@@ -30,14 +30,14 @@ RUN pip install --upgrade pip
 # Install torch with CUDA support first (before requirements.txt to avoid conflicts)
 RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
 
+# Install pytrickle dependencies (excluding torch which we already installed)
+RUN pip install aiohttp>=3.8.0 asyncio-mqtt>=0.11.0 numpy>=1.21.0 Pillow>=9.0.0 pydantic>=1.10.0 av pytest>=7.0.0 pytest-asyncio>=0.21.0 pytest-mock>=3.10.0 pynvml opencv-python
+
 # Set working directory for pytrickle installation
 WORKDIR /tmp/pytrickle
 
 # Copy the entire pytrickle project
 COPY . .
-
-# Install pytrickle dependencies (excluding torch which we already installed)
-RUN pip install aiohttp>=3.8.0 asyncio-mqtt>=0.11.0 numpy>=1.21.0 Pillow>=9.0.0 pydantic>=1.10.0 av pytest>=7.0.0 pytest-asyncio>=0.21.0 pytest-mock>=3.10.0 pynvml
 
 # Install pytrickle in development mode
 RUN pip install -e .
