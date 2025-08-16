@@ -49,7 +49,6 @@ class FrameProcessor(ABC):
     def __init__(
         self,
         error_callback: Optional[ErrorCallback] = None,
-        # Queue/Buffer mode (default enabled)
         queue_mode: bool = True,
         video_queue_size: int = 8,
         audio_queue_size: int = 32,

@@ -30,7 +30,7 @@ from .utils.register import RegisterCapability
 
 # Processing utilities
 from .frame_processor import FrameProcessor
-from .stream_processor import StreamProcessor
+from .stream_processor import StreamProcessor, VideoProcessorConfig, AudioProcessorConfig, AudioPassthrough
 from .fps_meter import FPSMeter
 
 from . import api
@@ -41,6 +41,9 @@ __all__ = [
     "TrickleClient",
     "StreamServer",
 	"StreamProcessor",
+    "VideoProcessorConfig",
+    "AudioProcessorConfig", 
+    "AudioPassthrough",
     "TrickleProtocol",
     "VideoFrame",
     "AudioFrame", 
