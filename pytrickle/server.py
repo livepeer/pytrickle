@@ -313,54 +313,44 @@ class StreamServer:
             
             # Reuse existing client or create new one if none exists
             if self.current_client is not None:
-                logger.info("Reusing existing TrickleClient with new protocol")
                 # If client is currently running, stop the current stream cleanly first
                 if self.current_client.running:
                     logger.info("Client already running - stopping current stream before restart")
                     await self._stop_current_stream()
-                    # After stop, recreate client holder if needed
-                    if self.current_client is None:
-                        self.current_client = TrickleClient(
-                            protocol=new_protocol,
-                            frame_processor=self.frame_processor,
-                            control_handler=self._handle_control_message,
-                        )
-                        self.current_client.reset_timing_state()
-                        logger.info("Client timing state reset for new stream")
-                        # Start the client in background
-                        self._client_task = asyncio.create_task(self._run_client(params.gateway_request_id))
-                        return web.json_response({
-                            "status": "success",
-                            "message": "Stream started successfully",
-                            "request_id": params.gateway_request_id
-                        })
-                
-                # Stop current protocol before swapping to avoid stopping an unstarted protocol later
-                try:
-                    if self.current_client.protocol:
-                        await self.current_client.protocol.stop()
-                        logger.info("Stopped previous protocol")
-                except Exception as e:
-                    logger.warning(f"Error stopping previous protocol (continuing): {e}")
+                    
+                    # Stop current protocol before swapping to avoid stopping an unstarted protocol later
+                    try:
+                        if self.current_client.protocol:
+                            await self.current_client.protocol.stop()
+                            logger.info("Stopped previous protocol")
+                    except Exception as e:
+                        logger.warning(f"Error stopping previous protocol (continuing): {e}")
 
-                # Replace protocol and reset timing only after previous is stopped
-                self.current_client.protocol = new_protocol
-            else:
-                logger.info("Creating new TrickleClient with native async processor")
+            # After stop, recreate client holder if needed
+            if self.current_client is None:
                 self.current_client = TrickleClient(
                     protocol=new_protocol,
                     frame_processor=self.frame_processor,
                     control_handler=self._handle_control_message,
                 )
-
-            # Reset timing state for new stream
-            if self.current_client.reset_timing_state:
-                self.current_client.reset_timing_state()
                 logger.info("Client timing state reset for new stream")
-    
+                # Start the client in background
+                self._client_task = asyncio.create_task(self._run_client(params.gateway_request_id))
+                return web.json_response({
+                    "status": "success",
+                    "message": "Stream started successfully",
+                    "request_id": params.gateway_request_id
+                })
+            else:
+                self.current_client = TrickleClient(
+                    protocol=new_protocol,
+                    frame_processor=self.frame_processor,
+                    control_handler=self._handle_control_message,
+                )
+                logger.info("Client timing state reset for new stream")
+
             # Update current params
             self.current_params = params
-
             
             # Track active client and start health monitoring
             self.state.set_active_client(True)
@@ -612,7 +602,9 @@ class StreamServer:
              # Stop the client and wait for cleanup
             if self.current_client.protocol:
                 await self.current_client.protocol.stop()
-                logger.info("Protocol stopped, client preserved")
+                logger.info("Protocol stopped")
+                
+            await self.current_client.stop()
             
             logger.info("FrameProcessor returned to idle state")
 
