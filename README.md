@@ -294,17 +294,6 @@ PyTrickle consists of several key components:
 - **FrameProcessor**: Base class for async AI processors
 - **TrickleClient**: Direct client for custom applications
 - **TrickleProtocol**: High-level protocol implementation
-- **StreamHandler & Manager Classes**: For applications requiring multiple concurrent streams with sophisticated lifecycle management
-
-### Stream Management Approaches
-
-PyTrickle provides different approaches for different use cases:
-
-- **StreamServer** (in `server.py`): Focused on providing HTTP endpoints for single-stream management with REST API control
-- **StreamHandler & Manager Classes** (in `manager.py`): Designed for applications that need to manage multiple concurrent streams with more sophisticated lifecycle management
-- **TrickleStreamHandler** (in `stream_handler.py`): Complete self-contained stream handler abstraction for applications that don't need HTTP APIs
-
-Each approach serves different architectural needs and can be used independently based on your application requirements.
 
 ### Data Flow
 
