@@ -8,10 +8,11 @@ to ensure all components stop when subscription ends.
 import asyncio
 import queue
 import logging
-from typing import Callable, Optional, Union
+from typing import Callable, Optional, Union, List
+from collections import deque
 
 from .protocol import TrickleProtocol
-from .frames import VideoFrame, AudioFrame, VideoOutput, AudioOutput
+from .frames import VideoFrame, AudioFrame, VideoOutput, AudioOutput, TextOutput
 from . import ErrorCallback
 from .frame_processor import FrameProcessor
 
@@ -26,7 +27,8 @@ class TrickleClient:
         protocol: TrickleProtocol,
         frame_processor: 'FrameProcessor',
         control_handler: Optional[Callable] = None,
-        error_callback: Optional[ErrorCallback] = None
+        error_callback: Optional[ErrorCallback] = None,
+        text_queue: Optional[deque] = None
     ):
         """Initialize TrickleClient.
         
@@ -35,12 +37,14 @@ class TrickleClient:
             frame_processor: FrameProcessor for native async processing
             control_handler: Optional control message handler
             error_callback: Optional error callback (if None, uses frame_processor.error_callback)
+            text_queue: Optional deque of strings to publish as text data
         """
         self.protocol = protocol
         self.frame_processor = frame_processor
         self.control_handler = control_handler
         # Use provided error_callback, or fall back to frame_processor's error_callback
         self.error_callback = error_callback or frame_processor.error_callback
+        self.text_queue = text_queue  # Optional text queue for apps to use
         
         # Client state
         self.running = False
@@ -52,6 +56,10 @@ class TrickleClient:
         
         # Output queue for processed frames
         self.output_queue = queue.Queue()
+        
+        # Frame caching for video fallback behavior
+        self._last_processed_video_frame: Optional[VideoFrame] = None
+        
         
     def process_frame(self, frame: Union[VideoFrame, AudioFrame]) -> Optional[Union[VideoOutput, AudioOutput]]:
         """Process a single frame and return the output."""
@@ -72,6 +80,9 @@ class TrickleClient:
         self.error_event.clear()
         
         logger.info(f"Starting trickle client with request_id={request_id}")
+        
+        # Reset frame cache for clean start
+        self.reset_frame_cache()
         
         # Start the protocol
         await self.protocol.start()
@@ -121,6 +132,78 @@ class TrickleClient:
         """Publish data via the protocol's data publisher."""
         return await self.protocol.publish_data(data)
     
+    def reset_frame_cache(self) -> None:
+        """Reset cached frames - useful when starting new streams or workflows."""
+        self._last_processed_video_frame = None
+        logger.debug("Frame cache reset")
+
+    async def process_video_frame(self, frame: VideoFrame) -> Optional[VideoFrame]:
+        """Process video frame with smart fallback to cached frame."""
+        try:
+            result = await self.frame_processor.process_video_async(frame)
+            
+            if isinstance(result, VideoFrame):
+                # Cache successful result
+                self._last_processed_video_frame = result
+                return result
+            else:
+                # Processing returned None - try fallback
+                if self._last_processed_video_frame is not None:
+                    # Create fallback frame with current timing
+                    fallback_frame = VideoFrame.from_av_video(
+                        tensor=self._last_processed_video_frame.tensor,
+                        timestamp=frame.timestamp,
+                        time_base=frame.time_base
+                    )
+                    logger.debug("Using cached video frame as fallback")
+                    return fallback_frame
+                else:
+                    logger.debug("No cached video frame available, returning None")
+                    return None
+                    
+        except Exception as e:
+            logger.error(f"Error in video processing: {e}")
+            if self.error_callback:
+                try:
+                    if asyncio.iscoroutinefunction(self.error_callback):
+                        await self.error_callback("video_processing_error", e)
+                    else:
+                        self.error_callback("video_processing_error", e)
+                except Exception:
+                    pass
+            
+            # Try fallback on exception
+            if self._last_processed_video_frame is not None:
+                # Create fallback frame with current timing
+                fallback_frame = VideoFrame.from_av_video(
+                    tensor=self._last_processed_video_frame.tensor,
+                    timestamp=frame.timestamp,
+                    time_base=frame.time_base
+                )
+                logger.debug("Using cached video frame as fallback after error")
+                return fallback_frame
+            else:
+                logger.debug("No cached video frame available after error, returning None")
+                return None
+    
+    async def process_audio_frame(self, frame: AudioFrame) -> Optional[List[AudioFrame]]:
+        """Process audio frame without fallback - returns processing result or None."""
+        try:
+            result = await self.frame_processor.process_audio_async(frame)
+            return result if isinstance(result, list) and len(result) > 0 else None
+                    
+        except Exception as e:
+            logger.error(f"Error in audio processing: {e}")
+            if self.error_callback:
+                try:
+                    if asyncio.iscoroutinefunction(self.error_callback):
+                        await self.error_callback("audio_processing_error", e)
+                    else:
+                        self.error_callback("audio_processing_error", e)
+                except Exception:
+                    pass
+            return None
+    
     async def _ingress_loop(self):
         """Process incoming frames with native async support."""
         try:
@@ -133,10 +216,14 @@ class TrickleClient:
                 # Process frames directly in ingress loop
                 try:
                     if isinstance(frame, VideoFrame):
-                        logger.debug(f"Processing video frame with frame processor: {frame.tensor.shape}")
-                        
+                        logger.debug(
+                            f"Processing video frame with frame processor: {frame.tensor.shape}"
+                        )
+
                         # Direct async processing
-                        processed_frame = await self.frame_processor.process_video_async(frame)
+                        processed_frame = (
+                            await self.frame_processor.process_video_async(frame)
+                        )
                         if processed_frame:
                             output = VideoOutput(processed_frame, self.request_id)
                             await self._send_output(output)
@@ -144,17 +231,30 @@ class TrickleClient:
                         else:
                             logger.warning(f"Frame processor returned None for video frame")
                             
+                        # Check for text outputs from app text queue
+                        await self._process_app_text_queue()
+                            
                     elif isinstance(frame, AudioFrame):
-                        logger.debug(f"Processing audio frame with frame processor: {frame.samples.shape}")
-                        
+                        logger.debug(
+                            f"Processing audio frame with frame processor: {frame.samples.shape}"
+                        )
+
                         # Direct async processing for audio
-                        processed_frames = await self.frame_processor.process_audio_async(frame)
+                        processed_frames = (
+                            await self.frame_processor.process_audio_async(frame)
+                        )
                         if processed_frames:
                             output = AudioOutput(processed_frames, self.request_id)
                             await self._send_output(output)
                             logger.debug(f"Sent async processed audio frame to egress")
                         else:
-                            logger.warning(f"Frame processor returned None for audio frame")
+                            logger.warning(
+                                f"Frame processor returned None for audio frame"
+                            )
+                            
+                        # Check for text outputs from app text queue
+                        await self._process_app_text_queue()
+
                     else:
                         logger.debug(f"Received unknown frame type: {type(frame)}")
                         
@@ -178,7 +278,7 @@ class TrickleClient:
                     elif isinstance(frame, AudioFrame):
                         fallback_output = AudioOutput([frame], self.request_id)
                         await self._send_output(fallback_output)
-            
+                    
             # Send sentinel to signal egress loop to complete
             logger.info("Ingress loop completed, sending sentinel to egress loop")
             await self._send_output(None)
@@ -201,16 +301,20 @@ class TrickleClient:
         """Handle outgoing frames."""
         try:
             async def output_generator():
-                """Generate output frames from the queue."""
+                """Generate output frames from the queue, filtering out TextOutput frames."""
                 while not self.stop_event.is_set() and not self.error_event.is_set():
                     try:
                         # Try to get a frame from the queue with timeout
                         frame = await asyncio.to_thread(self.output_queue.get, timeout=0.1)
-                        if frame is not None:
-                            yield frame
-                        else:
+                        if frame is None:
                             # None frame indicates shutdown
                             break
+                        elif isinstance(frame, TextOutput):
+                            # Handle TextOutput frames separately
+                            await self._handle_text_output(frame)
+                        else:
+                            # Yield video/audio frames to protocol egress
+                            yield frame
                     except queue.Empty:
                         continue  # No frame available, continue loop
                     except Exception as e:
@@ -233,7 +337,7 @@ class TrickleClient:
                         self.error_callback("egress_loop_error", e)
                 except Exception as cb_error:
                     logger.error(f"Error in error callback: {cb_error}")
-    
+
     async def _control_loop(self):
         """Handle control messages."""
         try:
@@ -277,5 +381,41 @@ class TrickleClient:
             logger.warning("Output queue is full, dropping frame")
         except Exception as e:
             logger.error(f"Error sending output: {e}")
-
- 
+    
+    async def _process_app_text_queue(self):
+        """Process any queued text strings from the app's text queue and send to egress."""
+        if not self.text_queue:
+            return
+            
+        try:
+            # Process all available text strings from the app's queue
+            texts_processed = 0
+            while self.text_queue:
+                try:
+                    text_string = self.text_queue.popleft()
+                    if text_string and text_string.strip():
+                        # Create TextOutput and send to egress
+                        text_output = TextOutput(text=text_string, request_id=self.request_id)
+                        await self._send_output(text_output)
+                        texts_processed += 1
+                        logger.info(f"📤 Publishing: {text_string[:50]}...")
+                except IndexError:
+                    # Queue is empty
+                    break
+            
+            if texts_processed > 0:
+                logger.debug(f"Processed {texts_processed} text outputs from app queue")
+                
+        except Exception as e:
+            logger.error(f"Error processing app text queue: {e}")
+    
+    async def _handle_text_output(self, text_output: TextOutput):
+        """Handle TextOutput frame by publishing via protocol."""
+        try:
+            if self.protocol.data_publisher:
+                await self.publish_data(text_output.text)
+                logger.info(f"✅ Published to data URL: {text_output.text[:50]}...")
+            else:
+                logger.warning(f"❌ No data URL configured - cannot publish: {text_output.text[:50]}...")
+        except Exception as e:
+            logger.error(f"Error handling text output: {e}")

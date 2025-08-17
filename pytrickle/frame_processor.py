@@ -4,10 +4,11 @@ This module provides base classes and utilities for async frame processing,
 making it easy to integrate AI models and async pipelines with PyTrickle.
 """
 
+import asyncio
 import logging
 from abc import ABC, abstractmethod
 from typing import Optional, Any, Dict, List
-from .frames import VideoFrame, AudioFrame
+from .frames import VideoFrame, AudioFrame, TextOutput
 from . import ErrorCallback
 from .state import StreamState, PipelineState
 
@@ -21,6 +22,7 @@ class FrameProcessor(ABC):
     This class provides native async frame processing for PyTrickle. It handles:
     - initialization and warmup
     - async processing video and audio frames
+    - text output publishing
 
     Lifecycle:
     1. Processing begins automatically when streams start
@@ -56,6 +58,7 @@ class FrameProcessor(ABC):
         self.error_callback = error_callback
         self.state: Optional[StreamState] = None
         self.model_loaded: bool = False
+        
         try:
             self.load_model(**init_kwargs)
             self.model_loaded = True
@@ -73,6 +76,12 @@ class FrameProcessor(ABC):
         self.state = state
         if self.model_loaded:
             self.state.set_state(PipelineState.IDLE)
+
+
+    # ===== Optional lifecycle hooks; subclasses may override =====
+    async def reset_timing(self) -> None:
+        """Optional hook to reset timing state (e.g., frame counters) between streams."""
+        return
 
     @abstractmethod
     def load_model(self, *kwargs):

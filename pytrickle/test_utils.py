@@ -7,6 +7,7 @@ Provides simple helpers for creating test doubles that work with the simplified 
 import asyncio
 from typing import Optional, Dict, Any
 from unittest.mock import MagicMock, AsyncMock
+from collections import deque
 
 from .frame_processor import FrameProcessor
 
@@ -16,6 +17,7 @@ class MockFrameProcessor(FrameProcessor):
     
     def __init__(self, **kwargs):
         self.test_params = {}
+        self.text_queue = deque()  # Add text_queue attribute for testing
         super().__init__(**kwargs)
     
     def load_model(self, **kwargs):

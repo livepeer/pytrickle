@@ -10,6 +10,7 @@ import logging
 import torch
 import numpy as np
 import av
+import time
 from typing import Optional, Dict, Union, List, Deque
 from fractions import Fraction
 from collections import deque
@@ -164,7 +165,6 @@ class AudioFrame(InputFrame):
     def from_tensor(cls, tensor: torch.Tensor, format: str = 's16', layout: str = 'mono', 
                    sample_rate: int = 48000, timestamp: int = 0, time_base = None) -> 'AudioFrame':
         """Create AudioFrame from torch tensor."""
-        from fractions import Fraction
         if time_base is None:
             time_base = Fraction(1, sample_rate)
             
@@ -307,6 +307,7 @@ class AudioOutput(OutputFrame):
         return cls(corrected_frames, request_id)
 
 
+
 # Frame Processing Utilities
 # ===========================
 
@@ -314,6 +315,24 @@ class AudioOutput(OutputFrame):
 
 # Streaming Utilities
 # ====================
+
+
+class TextOutput(OutputFrame):
+    """Represents text data output (usually JSONL format)."""
+    
+    text: str
+    request_id: str
+    timestamp_ms: int
+    
+    def __init__(self, text: str, request_id: str = '', timestamp_ms: int = None):
+        self.text = text
+        self.request_id = request_id
+        self.timestamp_ms = timestamp_ms or int(time.time() * 1000)
+    
+    @property
+    def timestamp(self):
+        """Get the timestamp of this text output."""
+        return self.timestamp_ms
 
 class FrameBuffer:
     """Rolling frame buffer that keeps a fixed number of frames."""

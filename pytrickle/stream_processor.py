@@ -1,20 +1,23 @@
 import asyncio
 import logging
+import inspect
 from typing import Optional, Callable, Dict, Any, List, Union, Awaitable
+from threading import Lock
+from collections import deque
 
-from pytrickle.state import PipelineState
-
-from .frames import VideoFrame, AudioFrame
+from .frames import VideoFrame, AudioFrame, TextOutput
 from .frame_processor import FrameProcessor
 from .server import StreamServer
 
 logger = logging.getLogger(__name__)
 
-# Type aliases for processing functions
+# Type aliases for processing functions (simple signatures)
 VideoProcessor = Callable[[VideoFrame], Awaitable[Optional[VideoFrame]]]
 AudioProcessor = Callable[[AudioFrame], Awaitable[Optional[List[AudioFrame]]]]
 
 class StreamProcessor:
+    """StreamProcessor that wraps user-provided functions and provides a text queue for apps."""
+    
     def __init__(
         self,
         video_processor: Optional[VideoProcessor] = None,
@@ -30,36 +33,57 @@ class StreamProcessor:
         
         Args:
             video_processor: Function that processes VideoFrame objects
-            audio_processor: Function that processes AudioFrame objects  
+            audio_processor: Function that processes AudioFrame objects
             model_loader: Optional function called during load_model phase
             param_updater: Optional function called when parameters update
             name: Processor name
             port: Server port
             **server_kwargs: Additional arguments passed to StreamServer
+            
+        Note on text publishing:
+            Apps can call processor.publish_data_output(text) and the client will
+            automatically publish them to the data URL.
         """
-        self.video_processor = video_processor
-        self.audio_processor = audio_processor
+        # Validate that at least one processor is provided
+        if video_processor is None and audio_processor is None:
+            raise ValueError("At least one of video or audio processor must be provided")
+
         self.model_loader = model_loader
         self.param_updater = param_updater
         self.name = name
         self.port = port
         self.server_kwargs = server_kwargs
         
-        # Create internal frame processor
+        # Text queue that apps can use to publish text data
+        self.text_queue = deque()
+        
+        # Create internal frame processor that wraps the user functions
         self._frame_processor = _InternalFrameProcessor(
             video_processor=video_processor,
             audio_processor=audio_processor,
             model_loader=model_loader,
             param_updater=param_updater,
+            text_queue=self.text_queue,  # Pass text queue to frame processor
             name=name
         )
         
-        # Create and start server
+        # Create and start server with the internal frame processor
         self.server = StreamServer(
             frame_processor=self._frame_processor,
             port=port,
             **server_kwargs
         )
+    
+    @property
+    def frame_processor(self):
+        """Access to the internal frame processor for advanced usage."""
+        return self._frame_processor
+    
+    async def publish_data_output(self, text: str) -> None:
+        """Add text to the queue for publishing (simple interface for apps)."""
+        if text and text.strip():
+            self.text_queue.append(text)
+            logger.debug(f"📤 Queued text for publishing: {text[:50]}...")
     
     async def run_forever(self):
         """Run the stream processor server forever."""
@@ -70,7 +94,7 @@ class StreamProcessor:
         asyncio.run(self.run_forever())
 
 class _InternalFrameProcessor(FrameProcessor):
-    """Internal frame processor that wraps user-provided functions."""
+    """Internal frame processor that wraps user-provided functions and implements FrameProcessor interface."""
     
     def __init__(
         self,
@@ -78,6 +102,7 @@ class _InternalFrameProcessor(FrameProcessor):
         audio_processor: Optional[AudioProcessor] = None,
         model_loader: Optional[Callable[[], None]] = None,
         param_updater: Optional[Callable[[Dict[str, Any]], None]] = None,
+        text_queue: Optional[deque] = None,
         name: str = "internal-processor"
     ):
         # Set attributes first before calling parent
@@ -85,6 +110,7 @@ class _InternalFrameProcessor(FrameProcessor):
         self.audio_processor = audio_processor
         self.model_loader = model_loader
         self.param_updater = param_updater
+        self.text_queue = text_queue  # Reference to StreamProcessor's text queue
         self._ready = False
         self.name = name
         

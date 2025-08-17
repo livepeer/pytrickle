@@ -16,7 +16,7 @@ from .client import TrickleClient
 from .server import StreamServer
 from .protocol import TrickleProtocol
 from .frames import (
-    VideoFrame, AudioFrame, VideoOutput, AudioOutput,
+    VideoFrame, AudioFrame, VideoOutput, AudioOutput, TextOutput,
     FrameBuffer,
 )
 from .state import StreamState
@@ -45,6 +45,7 @@ __all__ = [
     "AudioFrame", 
     "VideoOutput",
     "AudioOutput",
+    "TextOutput",
     "TricklePublisher",
     "TrickleSubscriber",
     "BaseStreamManager", 
