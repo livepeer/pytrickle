@@ -13,7 +13,7 @@ import logging
 import asyncio
 from abc import ABC, abstractmethod
 from typing import Optional, Any, Dict, List
-from .frames import VideoFrame, AudioFrame
+from .frames import VideoFrame, AudioFrame, TextFrame
 from . import ErrorCallback
 
 logger = logging.getLogger(__name__)
@@ -65,6 +65,7 @@ class FrameProcessor(ABC):
         self.enable_frame_caching = enable_frame_caching
         self._last_processed_video_frame: Optional[VideoFrame] = None
         self._last_processed_audio_frames: Optional[List[AudioFrame]] = None
+        # Note: Text frames don't use caching - they're for immediate publishing
 
         self.load_model(**init_kwargs)
 
@@ -90,12 +91,10 @@ class FrameProcessor(ABC):
         # Update timing for each cached frame
         fallback_frames = []
         for cached_frame in self._last_processed_audio_frames:
-            fallback_frame = AudioFrame.from_av_audio(
-                samples=cached_frame.samples,
-                timestamp=current_frame.timestamp,
-                time_base=current_frame.time_base,
-                sample_rate=cached_frame.sample_rate,
-                layout=cached_frame.layout
+            # Use _from_existing_with_timestamp to create frame with updated timing
+            fallback_frame = AudioFrame._from_existing_with_timestamp(
+                cached_frame, 
+                current_frame.timestamp
             )
             fallback_frames.append(fallback_frame)
         return fallback_frames
@@ -186,6 +185,35 @@ class FrameProcessor(ABC):
                 logger.debug("No cached audio frames available after error, returning None")
                 return None
 
+    async def process_text_with_fallback(self, frame: TextFrame) -> Optional[TextFrame]:
+        """Process text frame - no caching needed, just process and publish if not empty."""
+        try:
+            # Skip processing if the frame is empty
+            if frame.is_empty():
+                logger.debug("Skipping empty text frame")
+                return None
+                
+            result = await self.process_text_async(frame)
+            
+            # Return result if it's a valid TextFrame and not empty
+            if isinstance(result, TextFrame) and not result.is_empty():
+                return result
+            else:
+                logger.debug("Text processing returned empty or invalid result")
+                return None
+                    
+        except Exception as e:
+            logger.error(f"Error in text processing: {e}")
+            if self.error_callback:
+                try:
+                    if asyncio.iscoroutinefunction(self.error_callback):
+                        await self.error_callback("text_processing_error", e)
+                    else:
+                        self.error_callback("text_processing_error", e)
+                except Exception:
+                    pass
+            return None
+
     # ===== Optional lifecycle hooks; subclasses may override =====
     async def reset_timing(self) -> None:
         """Optional hook to reset timing state (e.g., frame counters) between streams."""
@@ -229,6 +257,19 @@ class FrameProcessor(ABC):
             List of processed audio frames or None if processing failed
         """
         pass
+
+    async def process_text_async(self, frame: TextFrame) -> Optional[TextFrame]:
+        """
+        Process a text frame asynchronously (optional override).
+
+        Args:
+            frame: Input text frame
+
+        Returns:
+            Processed text frame or None if processing failed
+        """
+        # Default implementation: return the frame unchanged (passthrough)
+        return frame
 
     @abstractmethod
     def update_params(self, params: Dict[str, Any]):

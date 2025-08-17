@@ -3,7 +3,7 @@ import logging
 from typing import Optional, Callable, Dict, Any, List, Union, Awaitable
 from dataclasses import dataclass
 
-from .frames import VideoFrame, AudioFrame
+from .frames import VideoFrame, AudioFrame, TextFrame
 from .frame_processor import FrameProcessor
 from .server import StreamServer
 
@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 # Type aliases for processing functions
 VideoProcessor = Callable[[VideoFrame], Awaitable[Optional[VideoFrame]]]
 AudioProcessor = Callable[[AudioFrame], Awaitable[Optional[List[AudioFrame]]]]
+TextProcessor = Callable[[TextFrame], Awaitable[Optional[TextFrame]]]
 
 # Default configuration constants
 class ProcessorDefaults:
@@ -28,6 +29,7 @@ class StreamProcessor:
         self,
         video_processor: Optional[VideoProcessor] = None,
         audio_processor: Optional[AudioProcessor] = None,
+        text_processor: Optional[TextProcessor] = None,
         model_loader: Optional[Callable[[], None]] = None,
         param_updater: Optional[Callable[[Dict[str, Any]], None]] = None,
         enable_frame_caching: bool = True,
@@ -41,6 +43,7 @@ class StreamProcessor:
         Args:
             video_processor: Function that processes VideoFrame objects
             audio_processor: Function that processes AudioFrame objects
+            text_processor: Function that processes TextFrame objects
             model_loader: Optional function called during load_model phase
             param_updater: Optional function called when parameters update
             enable_frame_caching: Enable frame caching for better fallback behavior
@@ -60,10 +63,13 @@ class StreamProcessor:
             
             # Audio processing only
             StreamProcessor(video_processor=None, audio_processor=process_audio_func)
+            
+            # Text processing only (for transcription workflows)
+            StreamProcessor(video_processor=None, audio_processor=None, text_processor=process_text_func)
         """
         # Validate that at least one processor is provided
-        if video_processor is None and audio_processor is None:
-            raise ValueError("At least one of video or audio processor must be provided")
+        if video_processor is None and audio_processor is None and text_processor is None:
+            raise ValueError("At least one of video, audio, or text processor must be provided")
 
         self.model_loader = model_loader
         self.param_updater = param_updater
@@ -75,6 +81,7 @@ class StreamProcessor:
         self._frame_processor = _InternalFrameProcessor(
             video_processor=video_processor,
             audio_processor=audio_processor,
+            text_processor=text_processor,
             model_loader=model_loader,
             param_updater=param_updater,
             name=name,
@@ -103,6 +110,7 @@ class _InternalFrameProcessor(FrameProcessor):
         self,
         video_processor: Optional[VideoProcessor] = None,
         audio_processor: Optional[AudioProcessor] = None,
+        text_processor: Optional[TextProcessor] = None,
         model_loader: Optional[Callable[[], None]] = None,
         param_updater: Optional[Callable[[Dict[str, Any]], None]] = None,
         name: str = ProcessorDefaults.INTERNAL_PROCESSOR_NAME,
@@ -112,6 +120,7 @@ class _InternalFrameProcessor(FrameProcessor):
         # Set attributes first
         self.video_processor = video_processor
         self.audio_processor = audio_processor
+        self.text_processor = text_processor
         self.model_loader = model_loader
         self.param_updater = param_updater
         self._ready = False
@@ -172,6 +181,18 @@ class _InternalFrameProcessor(FrameProcessor):
         except Exception as e:
             logger.error(f"Error in audio processing: {e}")
             return [frame]
+    
+    async def process_text_async(self, frame: TextFrame) -> Optional[TextFrame]:
+        """Process text frame using provided function."""
+        if not self._ready or not self.text_processor:
+            return frame  # Passthrough if no processor
+            
+        try:
+            result = await self.text_processor(frame)
+            return result if isinstance(result, TextFrame) else frame
+        except Exception as e:
+            logger.error(f"Error in text processing: {e}")
+            return frame  # Return original frame on error
     
     def update_params(self, params: Dict[str, Any]):
         """Update parameters using provided function."""

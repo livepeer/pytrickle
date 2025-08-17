@@ -10,7 +10,7 @@ import logging
 from typing import Callable, Optional, Union
 
 from .protocol import TrickleProtocol
-from .frames import VideoFrame, AudioFrame, VideoOutput, AudioOutput
+from .frames import VideoFrame, AudioFrame, TextFrame, VideoOutput, AudioOutput, TextOutput
 from . import ErrorCallback
 from .frame_processor import FrameProcessor
 
@@ -130,6 +130,19 @@ class TrickleClient:
         """Publish data via the protocol's data publisher."""
         return await self.protocol.publish_data(data)
     
+    async def _publish_text_output(self, text_frame: TextFrame):
+        """Publish text frame content via the data publisher."""
+        try:
+            # Skip if text frame is empty (already cleaned in TextFrame constructor)
+            if text_frame.is_empty():
+                return
+            
+            # Publish the text directly (usually JSON from transcription workflows)
+            await self.publish_data(text_frame.text)
+                
+        except Exception as e:
+            logger.error(f"Error publishing text output: {e}")
+    
     async def _ingress_loop(self):
         """Process incoming frames with native async support."""
         try:
@@ -164,6 +177,21 @@ class TrickleClient:
                             logger.debug(f"No processed/cached audio frames available - using original frame as fallback")
                             fallback_output = AudioOutput([frame], self.request_id)
                             await self._send_output(fallback_output)
+                    elif isinstance(frame, TextFrame):
+                        # Skip empty text frames entirely
+                        if frame.is_empty():
+                            continue
+                            
+                        processed_frame = await self.frame_processor.process_text_with_fallback(frame)
+                        if processed_frame and not processed_frame.is_empty():
+                            output = TextOutput(processed_frame, self.request_id)
+                            await self._send_output(output)
+                            logger.debug(f"Sent processed text frame to egress")
+                            
+                            # Publish text data
+                            await self._publish_text_output(processed_frame)
+                        else:
+                            logger.debug("Text processing returned empty result, skipping")
                     else:
                         logger.debug(f"Received unknown frame type: {type(frame)}")
                         
@@ -187,6 +215,7 @@ class TrickleClient:
                     elif isinstance(frame, AudioFrame):
                         fallback_output = AudioOutput([frame], self.request_id)
                         await self._send_output(fallback_output)
+                    # Note: TextFrames are not sent as fallback - they're only published if non-empty
             
             # Send sentinel to signal egress loop to complete
             logger.info("Ingress loop completed, sending sentinel to egress loop")

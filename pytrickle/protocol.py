@@ -15,7 +15,7 @@ from .base import TrickleComponent, ComponentState
 from .subscriber import TrickleSubscriber
 from .publisher import TricklePublisher
 from .media import run_subscribe, run_publish
-from .frames import InputFrame, OutputFrame, AudioFrame, VideoFrame, AudioOutput, VideoOutput, DEFAULT_WIDTH, DEFAULT_HEIGHT
+from .frames import InputFrame, OutputFrame, AudioFrame, VideoFrame, TextFrame, AudioOutput, VideoOutput, TextOutput, DEFAULT_WIDTH, DEFAULT_HEIGHT
 from .decoder import DEFAULT_MAX_FRAMERATE
 from .cache import LastValueCache
 from .fps_meter import FPSMeter
@@ -277,6 +277,9 @@ class TrickleProtocol(TrickleComponent):
                 self.fps_meter.record_ingress_video_frame()
             elif isinstance(frame, AudioFrame):
                 self.fps_meter.record_ingress_audio_frame()
+            elif isinstance(frame, TextFrame):
+                # Text frames don't affect FPS but we can log them
+                logger.debug(f"Received text frame: {frame.text[:50] if frame.text else 'empty'}...")
             
             # Send all frames to frame processor
             yield frame
@@ -298,6 +301,9 @@ class TrickleProtocol(TrickleComponent):
                     self.fps_meter.record_egress_video_frame()
                 elif isinstance(frame, AudioOutput):
                     self.fps_meter.record_egress_audio_frame()
+                elif isinstance(frame, TextOutput):
+                    # Text outputs don't affect FPS but we can log them
+                    logger.debug(f"Sending text output: {frame.text[:50] if frame.text else 'empty'}...")
                     
                 await asyncio.to_thread(enqueue_frame, frame)
         except Exception as e:

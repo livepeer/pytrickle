@@ -234,6 +234,24 @@ class AudioFrame(InputFrame):
             av_frame.time_base = self.time_base
             return av_frame
 
+class TextFrame:
+    """Represents a text frame for publishing text data (usually JSON from transcription workflows)."""
+    
+    text: str
+
+    def __init__(self, text: str):
+        # Clean text: remove line breaks and leading/trailing whitespace
+        self.text = text.replace('\n', ' ').replace('\r', ' ').strip() if text else ""
+    
+    @classmethod
+    def from_text(cls, text: str) -> 'TextFrame':
+        """Create TextFrame from text."""
+        return cls(text)
+    
+    def is_empty(self) -> bool:
+        """Check if the text frame is empty or contains only whitespace."""
+        return not self.text or not self.text.strip()
+
 class OutputFrame(ABC):
     """Base class for output frames."""
     
@@ -305,6 +323,35 @@ class AudioOutput(OutputFrame):
             corrected_frames.append(corrected_frame)
         
         return cls(corrected_frames, request_id)
+
+class TextOutput(OutputFrame):
+    """Represents processed text output for publishing."""
+    
+    frame: TextFrame
+    request_id: str
+    
+    def __init__(self, frame: TextFrame, request_id: str = ''):
+        self.frame = frame
+        self.request_id = request_id
+    
+    @property
+    def text(self):
+        return self.frame.text
+    
+    @property
+    def timestamp(self):
+        # TextOutput needs timestamp property for OutputFrame compatibility
+        return 0
+    
+    def is_empty(self) -> bool:
+        """Check if the text output is empty."""
+        return self.frame.is_empty()
+    
+    @classmethod
+    def from_text(cls, text: str, request_id: str = '') -> 'TextOutput':
+        """Create TextOutput from text."""
+        text_frame = TextFrame.from_text(text)
+        return cls(text_frame, request_id)
 
 
 # Frame Processing Utilities
