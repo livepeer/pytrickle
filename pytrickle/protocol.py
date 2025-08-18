@@ -203,12 +203,14 @@ class TrickleProtocol(TrickleComponent):
         try:
             if self.subscribe_queue is not None:
                 self.subscribe_queue.put(None)
-        except Exception:
+        except Exception as e:
+            logger.error(f"Error in subscribe queue shutdown: {e}")
             pass
         try:
             if self.publish_queue is not None:
                 self.publish_queue.put(None)
-        except Exception:
+        except Exception as e:
+            logger.error(f"Error in publish queue shutdown: {e}")
             pass
 
         # Close control and events components

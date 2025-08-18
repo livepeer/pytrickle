@@ -46,7 +46,8 @@ class TricklePublisher(TrickleComponent):
         if self.session:
             try:
                 await self.session.close()
-            except Exception:
+            except Exception as e:
+                logger.error(f"Error closing session: {e}")
                 pass
             finally:
                 self.session = None
