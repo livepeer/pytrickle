@@ -298,78 +298,78 @@ class StreamServer:
             height = params_dict.get("height", 512)
             max_framerate = params_dict.get("max_framerate", None)  # None will use default
             
-            #TODO: Consider adding lifecycle_lock here
-            # Create new protocol for the stream
-            new_protocol = TrickleProtocol(
-                subscribe_url=params.subscribe_url,
-                publish_url=params.publish_url,
-                control_url=params.control_url or "",
-                events_url=params.events_url or "",
-                data_url=params.data_url,
-                width=width,
-                height=height,
-                max_framerate=max_framerate,
-            )
-            
-            # Reuse existing client or create new one if none exists
-            if self.current_client is not None:
-                logger.info("Reusing existing TrickleClient with new protocol")
-                # If client is currently running, stop the current stream cleanly first
-                if self.current_client.running:
-                    logger.info("Client already running - stopping current stream before restart")
-                    await self._stop_current_stream()
-                
-                # Stop current protocol before swapping to avoid stopping an unstarted protocol later
-                try:
-                    if self.current_client.protocol:
-                        await self.current_client.protocol.stop()
-                        logger.info("Stopped previous protocol")
-                except Exception as e:
-                    logger.warning(f"Error stopping previous protocol (continuing): {e}")
-
-                # Replace protocol and reset client state for new stream
-                self.current_client.protocol = new_protocol
-                
-                # Reset client coordination events for clean start
-                self.current_client.stop_event.clear()
-                self.current_client.error_event.clear()
-                self.current_client.running = False
-                
-                # Clear output queue of any stale data from previous stream
-                while not self.current_client.output_queue.empty():
-                    try:
-                        self.current_client.output_queue.get_nowait()
-                    except asyncio.QueueEmpty:
-                        break
-                
-                # Reset frame processor cache for clean start
-                try:
-                    self.frame_processor.reset_frame_cache()
-                    logger.info("Reset frame processor cache for new stream")
-                except Exception as e:
-                    logger.warning(f"Unable to reset frame processor cache: {e}")
-                
-                logger.info("Client state reset for new stream")
-            else:
-                logger.info("Creating new TrickleClient with native async processor")
-                self.current_client = TrickleClient(
-                    protocol=new_protocol,
-                    frame_processor=self.frame_processor,
-                    control_handler=self._handle_control_message,
+            async with self._lifecycle_lock:
+                # Create new protocol for the stream
+                new_protocol = TrickleProtocol(
+                    subscribe_url=params.subscribe_url,
+                    publish_url=params.publish_url,
+                    control_url=params.control_url or "",
+                    events_url=params.events_url or "",
+                    data_url=params.data_url,
+                    width=width,
+                    height=height,
+                    max_framerate=max_framerate,
                 )
-    
-            # Update current params
-            self.current_params = params
-            
-            # Track active client and start health monitoring
-            self.state.set_active_client(True)
-            # Update unified state for active streams
-            self.state.update_active_streams(1)
-            self.state.set_state(PipelineState.READY)
-            self._start_health_monitoring()
-            
-            # Start the client in background
-            self._client_task = asyncio.create_task(self._run_client(params.gateway_request_id))
+                
+                # Reuse existing client or create new one if none exists
+                if self.current_client is not None:
+                    logger.info("Reusing existing TrickleClient with new protocol")
+                    # If client is currently running, stop the current stream cleanly first
+                    if self.current_client.running:
+                        logger.info("Client already running - stopping current stream before restart")
+                        await self._stop_current_stream()
+                    
+                    # Stop current protocol before swapping to avoid stopping an unstarted protocol later
+                    try:
+                        if self.current_client.protocol:
+                            await self.current_client.protocol.stop()
+                            logger.info("Stopped previous protocol")
+                    except Exception as e:
+                        logger.warning(f"Error stopping previous protocol (continuing): {e}")
+
+                    # Replace protocol and reset client state for new stream
+                    self.current_client.protocol = new_protocol
+                    
+                    # Reset client coordination events for clean start
+                    self.current_client.stop_event.clear()
+                    self.current_client.error_event.clear()
+                    self.current_client.running = False
+                    
+                    # Clear output queue of any stale data from previous stream
+                    while not self.current_client.output_queue.empty():
+                        try:
+                            self.current_client.output_queue.get_nowait()
+                        except asyncio.QueueEmpty:
+                            break
+                    
+                    # Reset frame processor cache for clean start
+                    try:
+                        self.frame_processor.reset_frame_cache()
+                        logger.info("Reset frame processor cache for new stream")
+                    except Exception as e:
+                        logger.warning(f"Unable to reset frame processor cache: {e}")
+                    
+                    logger.info("Client state reset for new stream")
+                else:
+                    logger.info("Creating new TrickleClient with native async processor")
+                    self.current_client = TrickleClient(
+                        protocol=new_protocol,
+                        frame_processor=self.frame_processor,
+                        control_handler=self._handle_control_message,
+                    )
+        
+                # Update current params
+                self.current_params = params
+                
+                # Track active client and start health monitoring
+                self.state.set_active_client(True)
+                # Update unified state for active streams
+                self.state.update_active_streams(1)
+                self.state.set_state(PipelineState.READY)
+                self._start_health_monitoring()
+                
+                # Start the client in background
+                self._client_task = asyncio.create_task(self._run_client(params.gateway_request_id))
             
             # Set params via update_params if provided in start request
             try:
