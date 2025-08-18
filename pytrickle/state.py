@@ -14,16 +14,6 @@ from enum import Enum
 
 logger = logging.getLogger(__name__)
 
-class PipelineVersion:
-    """Version information for the pipeline."""
-    
-    def __init__(self, version: str):
-        self.version = version
-    
-    @property
-    def state(self) -> str:
-        return self.version
-
 class PipelineState(Enum):
     """Lifecycle states for a stream/pipeline.
 
@@ -54,12 +44,22 @@ class StreamState:
         self.running_event = asyncio.Event()
         self.shutdown_event = asyncio.Event()
         self.error_event = asyncio.Event()
-        self.pipeline_ready_event = asyncio.Event()
         
         # Client tracking
         self.active_client: bool = False
         self.active_streams: int = 0
         self.startup_complete: bool = False
+
+        # State transition mapping for maintainability
+        self._state_transitions = {
+            PipelineState.WARMING_PIPELINE: self._set_pipeline_warming,
+            PipelineState.READY: self._set_pipeline_ready,
+            PipelineState.LOADING: self._set_loading,
+            PipelineState.ERROR: lambda: self._initiate_shutdown(due_to_error=True),
+            PipelineState.SHUTTING_DOWN: self._initiate_shutdown,
+            PipelineState.STOPPED: self._finalize,
+            PipelineState.INIT: self._reset_to_init,
+        }
 
     # State and derived flags
     @property
@@ -67,22 +67,9 @@ class StreamState:
         return self._state
 
     @property
-    def is_active(self) -> bool:
-        """Whether processing loops should keep running.
-
-        Active in LOADING, WARMING_PIPELINE, READY. Inactive otherwise.
-        """
-        return self._state in {
-            PipelineState.LOADING,
-            PipelineState.WARMING_PIPELINE,
-            PipelineState.READY,
-        } and not self.shutdown_event.is_set() and not self.error_event.is_set()
-
-    # Backwards-compat shorthand properties (read-only)
-    @property
     def running(self) -> bool:
         """Compatibility: True when the stream is in an active state."""
-        return self.is_active
+        return self.running_event.is_set() and not self.shutdown_event.is_set() and not self.error_event.is_set()
 
     @property
     def pipeline_ready(self) -> bool:
@@ -114,21 +101,13 @@ class StreamState:
             "shutdown_initiated": self.shutdown_event.is_set(),
             "error": self.error_event.is_set(),
         }
-
-    def get_stream_state(self) -> dict:
-        """Get current state (alias for get_state)."""
-        return self.get_state()
     
     # Internal state transition methods
-    def _start(self) -> None:
-        """Begin stream startup; transitions to LOADING."""
+    def _set_loading(self) -> None:
+        """Explicitly set LOADING state."""
         if self._state is PipelineState.INIT:
             self._state = PipelineState.LOADING
             self.running_event.set()
-
-    def _set_loading(self) -> None:
-        """Explicitly set LOADING state."""
-        self._start()
 
     def _set_pipeline_warming(self) -> None:
         """Transition to WARMING_PIPELINE."""
@@ -140,7 +119,6 @@ class StreamState:
         """Set pipeline state to READY and signal waiting tasks."""
         self._state = PipelineState.READY
         self.running_event.set()
-        self.pipeline_ready_event.set()
 
     def _initiate_shutdown(self, *, due_to_error: bool = False) -> None:
         """Begin coordinated shutdown. Optionally mark as error."""
@@ -158,7 +136,6 @@ class StreamState:
         """Reset to initial state - clear events and set to INIT."""
         self._state = PipelineState.INIT
         self.running_event.clear()
-        self.pipeline_ready_event.clear()
         self.shutdown_event.clear()
         self.error_event.clear()
 
@@ -171,24 +148,12 @@ class StreamState:
         Example:
             set_state(PipelineState.READY)
         """
-        if state == PipelineState.WARMING_PIPELINE:
-            self._set_pipeline_warming()
-        elif state == PipelineState.READY:
-            self._set_pipeline_ready()
-        elif state == PipelineState.LOADING:
-            self._set_loading()
-        elif state == PipelineState.ERROR:
-            self._initiate_shutdown(due_to_error=True)
-        elif state == PipelineState.SHUTTING_DOWN:
-            self._initiate_shutdown()
-        elif state == PipelineState.STOPPED:
-            self._finalize()
-        elif state == PipelineState.INIT:
-            self._reset_to_init()
+        transition_handler = self._state_transitions.get(state)
+        if transition_handler:
+            transition_handler()
         else:
             logger.warning(f"Unknown PipelineState enum: {state}")
 
-    # ---- Unified health-style API (to replace StreamHealthManager)
     def set_startup_complete(self) -> None:
         """Mark startup as complete for health/status reporting."""
         self.startup_complete = True
@@ -214,13 +179,9 @@ class StreamState:
         if self.is_error():
             # Clear the error event first
             self.error_event.clear()
-            # Return to a sensible default state
+            # Return to default LOADING state
             self.set_state(PipelineState.LOADING)
             logger.info("Stream state: ERROR cleared, returning to LOADING")
-
-    @property
-    def pipeline_warming(self) -> bool:
-        return self._state is PipelineState.WARMING_PIPELINE
 
     def get_pipeline_state(self) -> dict:
         """Return health-like payload used by /health endpoint."""
