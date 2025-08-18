@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 # Default timeouts (seconds)
 CONNECT_TIMEOUT_SECONDS = 30
+KEEPALIVE_TIMEOUT_SECONDS = 5
 
 # Backoff for immediate retry when preconnect returns None
 RETRY_DELAY_SECONDS = 0.05
@@ -34,6 +35,7 @@ class TricklePublisher(TrickleComponent):
         self._background_tasks: List[asyncio.Task] = []  # Track background tasks
         self.session: Optional[aiohttp.ClientSession] = None
         self.connect_timeout_seconds = CONNECT_TIMEOUT_SECONDS
+        self.keepalive_timeout_seconds = KEEPALIVE_TIMEOUT_SECONDS
 
     async def __aenter__(self):
         """Enter context manager."""
@@ -58,6 +60,7 @@ class TricklePublisher(TrickleComponent):
         connector = aiohttp.TCPConnector(
             verify_ssl=False,
             limit=0,
+            keepalive_timeout=self.keepalive_timeout_seconds,
         )
         timeout = aiohttp.ClientTimeout(total=self.connect_timeout_seconds)
         self.session = aiohttp.ClientSession(connector=connector, timeout=timeout)
