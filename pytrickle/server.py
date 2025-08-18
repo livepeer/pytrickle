@@ -342,13 +342,6 @@ class StreamServer:
                         except asyncio.QueueEmpty:
                             break
                     
-                    # Reset frame processor cache for clean start
-                    try:
-                        self.frame_processor.reset_frame_cache()
-                        logger.info("Reset frame processor cache for new stream")
-                    except Exception as e:
-                        logger.warning(f"Unable to reset frame processor cache: {e}")
-                    
                     logger.info("Client state reset for new stream")
                 else:
                     logger.info("Creating new TrickleClient with native async processor")
