@@ -50,9 +50,10 @@ class TrickleClient:
         self.stop_event = asyncio.Event()
         self.error_event = asyncio.Event()
         
-        # Output queue for processed frames
+        # Output queues
         self.output_queue = queue.Queue()
-        
+        self.data_queue = asyncio.Queue(maxsize=250)
+
     def process_frame(self, frame: Union[VideoFrame, AudioFrame]) -> Optional[Union[VideoOutput, AudioOutput]]:
         """Process a single frame and return the output."""
         if not frame:
@@ -85,6 +86,7 @@ class TrickleClient:
                 self._ingress_loop(),
                 self._egress_loop(),
                 self._control_loop(),
+                self._send_data_loop(),
                 return_exceptions=True
             )
             
@@ -119,8 +121,11 @@ class TrickleClient:
     
     async def publish_data(self, data: str):
         """Publish data via the protocol's data publisher."""
-        return await self.protocol.publish_data(data)
-    
+        try:
+            await self.data_queue.put_nowait(data)
+        except asyncio.QueueFull:
+            logger.warning("Could not send data, queue is full. Reduce velocity of data publishing.")
+
     async def _ingress_loop(self):
         """Process incoming frames with native async support."""
         try:
@@ -258,6 +263,46 @@ class TrickleClient:
                 except Exception as cb_error:
                     logger.error(f"Error in error callback: {cb_error}")
     
+    async def _send_data_loop(self):
+        """Send data to the server every 250ms, batching all available items."""
+        try:
+            while not self.stop_event.is_set():
+                # Wait for 250ms or until stop event is set
+                try:
+                    await asyncio.wait_for(self.stop_event.wait(), timeout=0.25)
+                    break  # Stop event was set, exit loop
+                except asyncio.TimeoutError:
+                    pass  # Timeout is expected, continue to process data
+                
+                # Pull all available items from the data_queue
+                data_items = []
+                while True:
+                    try:
+                        data = self.data_queue.get_nowait()
+                        if data is None:
+                            # Sentinel value to stop loop
+                            if data_items:
+                                # Send any remaining items before stopping
+                                break
+                            else:
+                                return  # No items to send, just stop
+                        data_items.append(data)
+                    except asyncio.QueueEmpty:
+                        break  # No more items in queue
+                
+                # Send all collected data items
+                for data in data_items:
+                    # Ensure data ends with newline character
+                    if not data.endswith('\n'):
+                        data += '\n'
+                    
+                    # Send data using protocol
+                    await self.protocol.publish_data(data)
+                
+        except Exception as e:
+            logger.error(f"Error in data sending loop: {e}")
+            
+
     async def _handle_control_message(self, control_data: dict):
         """Handle a control message."""
         if self.control_handler:

@@ -59,6 +59,10 @@ class StreamProcessor:
             **server_kwargs
         )
     
+    async def send_data(self, data: str):
+        """Send data to the server."""
+        await self.server.current_client.publish_data(data)
+
     async def run_forever(self):
         """Run the stream processor server forever."""
         await self.server.run_forever()

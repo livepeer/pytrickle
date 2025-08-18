@@ -154,7 +154,7 @@ class TrickleProtocol(TrickleComponent):
             
         # Initialize data publisher if URL provided
         if self.data_url and self.data_url.strip():
-            self.data_publisher = TricklePublisher(self.data_url, "application/octet-stream", error_callback=self._on_component_error)
+            self.data_publisher = TricklePublisher(self.data_url, "application/jsonl", error_callback=self._on_component_error)
             await self.data_publisher.start()
         
         # Start monitoring subscription end for immediate cleanup
