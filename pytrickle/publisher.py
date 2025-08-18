@@ -15,8 +15,11 @@ from .base import TrickleComponent
 
 logger = logging.getLogger(__name__)
 
-# Reduce preconnect retries for faster shutdown
-MAX_PRECONNECT_RETRIES = 2
+# Default timeouts (seconds)
+CONNECT_TIMEOUT_SECONDS = 30
+
+# Backoff for immediate retry when preconnect returns None
+RETRY_DELAY_SECONDS = 0.05
 
 class TricklePublisher(TrickleComponent):
     """Trickle publisher for sending data to a URL."""
@@ -30,6 +33,7 @@ class TricklePublisher(TrickleComponent):
         self.lock = asyncio.Lock()
         self._background_tasks: List[asyncio.Task] = []  # Track background tasks
         self.session: Optional[aiohttp.ClientSession] = None
+        self.connect_timeout_seconds = CONNECT_TIMEOUT_SECONDS
 
     async def __aenter__(self):
         """Enter context manager."""
@@ -51,8 +55,11 @@ class TricklePublisher(TrickleComponent):
                 pass
             finally:
                 self.session = None
-        connector = aiohttp.TCPConnector(verify_ssl=False, limit=0, keepalive_timeout=5)
-        timeout = aiohttp.ClientTimeout(total=30)  # Reduced timeout for faster shutdown
+        connector = aiohttp.TCPConnector(
+            verify_ssl=False,
+            limit=0,
+        )
+        timeout = aiohttp.ClientTimeout(total=self.connect_timeout_seconds)
         self.session = aiohttp.ClientSession(connector=connector, timeout=timeout)
 
     def stream_idx(self):
@@ -159,7 +166,7 @@ class TricklePublisher(TrickleComponent):
                 # If preconnect failed due to connection reuse issues, retry once immediately
                 if self.next_writer is None and not self._should_stop():
                     logger.info("Preconnect returned None, retrying once immediately")
-                    await asyncio.sleep(0.05)
+                    await asyncio.sleep(RETRY_DELAY_SECONDS)
                     self.next_writer = await self.preconnect()
 
             writer = self.next_writer

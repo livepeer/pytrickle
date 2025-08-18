@@ -33,7 +33,8 @@ async def run_subscribe(
     monitoring_callback: Optional[Callable] = None,
     target_width: Optional[int] = DEFAULT_WIDTH,
     target_height: Optional[int] = DEFAULT_HEIGHT,
-    max_framerate: Optional[int] = DEFAULT_MAX_FRAMERATE
+    max_framerate: Optional[int] = DEFAULT_MAX_FRAMERATE,
+    subscriber_timeout: Optional[float] = None,
 ):
     """
     Run subscription loop to receive and decode video streams.
@@ -62,7 +63,7 @@ async def run_subscribe(
             _decode_in(in_pipe, frame_callback, put_metadata, write_fd, target_width, target_height, max_framerate)
         )
         subscribe_task = asyncio.create_task(
-            _subscribe(subscribe_url, write_fd, monitoring_callback)
+            _subscribe(subscribe_url, write_fd, monitoring_callback, subscriber_timeout)
         )
         await asyncio.gather(subscribe_task, parse_task)
         logger.info("run_subscribe complete")
@@ -72,11 +73,20 @@ async def run_subscribe(
         put_metadata(None)  # in case decoder quit without writing anything
         frame_callback(None)  # stops inference if this function exits early
 
-async def _subscribe(subscribe_url: str, out_pipe, monitoring_callback: Optional[Callable]):
+async def _subscribe(
+    subscribe_url: str,
+    out_pipe,
+    monitoring_callback: Optional[Callable] = None,
+    subscriber_timeout: Optional[float] = None,
+):
     """Subscribe to trickle stream and write data to pipe."""
     first_segment = True
 
-    async with TrickleSubscriber(url=subscribe_url) as subscriber:
+    if subscriber_timeout is not None:
+        subscriber_ctx = TrickleSubscriber(url=subscribe_url, connect_timeout_seconds=subscriber_timeout)
+    else:
+        subscriber_ctx = TrickleSubscriber(url=subscribe_url)
+    async with subscriber_ctx as subscriber:
         logger.info(f"Launching subscribe loop for {subscribe_url}")
         while True:
             segment = None
@@ -177,7 +187,8 @@ async def run_publish(
     publish_url: str, 
     frame_generator: Callable,
     get_metadata: Callable,
-    monitoring_callback: Optional[Callable] = None
+    monitoring_callback: Optional[Callable] = None,
+    publisher_timeout: Optional[float] = None,
 ):
     """
     Run publishing loop to encode and publish video streams.
@@ -193,6 +204,8 @@ async def run_publish(
     
     try:
         publisher = TricklePublisher(url=publish_url, mime_type="video/mp2t")
+        if publisher_timeout is not None:
+            publisher.connect_timeout_seconds = publisher_timeout
 
         loop = asyncio.get_running_loop()
         

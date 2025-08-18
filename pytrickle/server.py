@@ -56,6 +56,8 @@ class StreamServer:
         on_startup: Optional[List[Callable]] = None,
         on_shutdown: Optional[List[Callable]] = None,
         # Additional aiohttp app configuration
+        publisher_timeout: Optional[float] = None,
+        subscriber_timeout: Optional[float] = None,
         app_kwargs: Optional[Dict[str, Any]] = None
     ):
         """Initialize StreamServer.
@@ -99,6 +101,8 @@ class StreamServer:
         self.hardware_info = HardwareInfo()
         self.pipeline = pipeline or os.getenv("PIPELINE", "byoc")
         self.capability_name = capability_name or os.getenv("CAPABILITY_NAME", os.getenv("MODEL_ID",""))
+        self.publisher_timeout = publisher_timeout
+        self.subscriber_timeout = subscriber_timeout
 
         # Store app context
         if app_context:
@@ -309,6 +313,8 @@ class StreamServer:
                     width=width,
                     height=height,
                     max_framerate=max_framerate,
+                    publisher_timeout=self.publisher_timeout,
+                    subscriber_timeout=self.subscriber_timeout,
                 )
                 
                 # Reuse existing client or create new one if none exists
