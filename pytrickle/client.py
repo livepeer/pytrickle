@@ -8,6 +8,7 @@ to ensure all components stop when subscription ends.
 import asyncio
 import queue
 import logging
+import json
 from typing import Callable, Optional, Union
 
 from .protocol import TrickleProtocol
@@ -291,13 +292,8 @@ class TrickleClient:
                         break  # No more items in queue
                 
                 # Send all collected data items
-                for data in data_items:
-                    # Ensure data ends with newline character
-                    if not data.endswith('\n'):
-                        data += '\n'
-                    
-                    # Send data using protocol
-                    await self.protocol.publish_data(data)
+                data_str = json.dumps(data_items) + "\n"
+                await self.protocol.publish_data(data_str)
                 
         except Exception as e:
             logger.error(f"Error in data sending loop: {e}")
