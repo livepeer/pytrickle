@@ -1,1 +1,2 @@
+# Optional: Additional video processing libraries for examples
 opencv-python
