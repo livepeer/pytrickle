@@ -1,11 +1,12 @@
 name: Run Python Tests
 
 on:
-  push:
-    branches: [ "**" ]
   pull_request:
-    branches: [ "**" ]
-  workflow_dispatch:
+    branches:
+      - "main"
+  push:
+    branches:
+      - "main"
 
 jobs:
   test:
