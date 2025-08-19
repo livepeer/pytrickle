@@ -7,6 +7,7 @@ starting streams, updating parameters, and monitoring status.
 
 import asyncio
 import logging
+import time
 from typing import Optional, Dict, Any, Callable, Union, List
 from dataclasses import dataclass
 import os
@@ -18,7 +19,8 @@ from .api import StreamParamsUpdateRequest, StreamStartRequest, Version, Hardwar
 from .state import StreamState, PipelineState
 from .utils.hardware import HardwareInfo
 from .frame_processor import FrameProcessor
-from .lifecycle import StreamLifecycleManager, DefaultProtocolFactory, DefaultClientFactory, ProtocolFactory, ClientFactory
+from .client import TrickleClient
+from .protocol import TrickleProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -58,9 +60,7 @@ class StreamServer:
         publisher_timeout: Optional[float] = None,
         subscriber_timeout: Optional[float] = None,
         app_kwargs: Optional[Dict[str, Any]] = None,
-        # Testability options
-        protocol_factory: Optional[ProtocolFactory] = None,
-        client_factory: Optional[ClientFactory] = None
+
     ):
         """Initialize StreamServer.
         
@@ -102,15 +102,10 @@ class StreamServer:
         self.publisher_timeout = publisher_timeout
         self.subscriber_timeout = subscriber_timeout
         
-        # Create lifecycle manager with dependency injection
-        self.lifecycle_manager = StreamLifecycleManager(
-            frame_processor=frame_processor,
-            state=self.state,
-            protocol_factory=protocol_factory or DefaultProtocolFactory(),
-            client_factory=client_factory or DefaultClientFactory(),
-            publisher_timeout=publisher_timeout,
-            subscriber_timeout=subscriber_timeout,
-        )
+        # Stream management - simple and direct
+        self.current_client: Optional[TrickleClient] = None
+        self.current_params: Optional[StreamStartRequest] = None
+        self._client_task: Optional[asyncio.Task] = None
         
         # Health monitoring
         self._health_monitor_task: Optional[asyncio.Task] = None
@@ -306,26 +301,64 @@ class StreamServer:
             
             logger.info(f"Starting stream: {params.subscribe_url} -> {params.publish_url}")
             
-            # Delegate to lifecycle manager
-            result = await self.lifecycle_manager.start_stream(params)
+            # Stop existing client if running
+            if self.current_client and self.current_client.running:
+                await self.current_client.stop()
             
-            if result.success:
-                # Start health monitoring
-                self._start_health_monitoring()
-                
-                return web.json_response({
-                    "status": "success",
-                    "message": result.message,
-                    "request_id": result.request_id
-                })
-            else:
-                return web.json_response({
-                    "status": "error",
-                    "message": result.message
-                }, status=400)
+            # Extract dimensions from params
+            params_dict = params.params or {}
+            width = params_dict.get("width", 512)
+            height = params_dict.get("height", 512)
+            max_framerate = params_dict.get("max_framerate", None)
+            
+            # Create protocol
+            protocol = TrickleProtocol(
+                subscribe_url=params.subscribe_url,
+                publish_url=params.publish_url,
+                control_url=params.control_url or "",
+                events_url=params.events_url or "",
+                data_url=params.data_url,
+                width=width,
+                height=height,
+                max_framerate=max_framerate,
+                publisher_timeout=self.publisher_timeout,
+                subscriber_timeout=self.subscriber_timeout,
+            )
+            
+            # Create client
+            self.current_client = TrickleClient(
+                protocol=protocol,
+                frame_processor=self.frame_processor,
+                control_handler=self._handle_control_message,
+            )
+            
+            # Update state
+            self.current_params = params
+            self.state.set_active_client(True)
+            self.state.update_active_streams(1)
+            
+            # Set params if provided
+            if params.params:
+                try:
+                    self.frame_processor.update_params(params.params)
+                except Exception as e:
+                    logger.warning(f"Failed to set params: {e}")
+            
+            # Start client in background
+            self._client_task = asyncio.create_task(self._run_client(params.gateway_request_id))
+            
+            # Start health monitoring
+            self._start_health_monitoring()
+            
+            return web.json_response({
+                "status": "success",
+                "message": "Stream started successfully",
+                "request_id": params.gateway_request_id
+            })
             
         except Exception as e:
             logger.error(f"Error in start stream handler: {e}")
+            self.state.set_error(f"Stream start failed: {str(e)}")
             return web.json_response({
                 "status": "error",
                 "message": f"Error starting stream: {str(e)}"
@@ -334,19 +367,41 @@ class StreamServer:
     async def _handle_stop_stream(self, request: web.Request) -> web.Response:
         """Handle stream stop requests."""
         try:
-            # Delegate to lifecycle manager
-            result = await self.lifecycle_manager.stop_stream()
-            
-            if result.success:
-                return web.json_response({
-                    "status": "success",
-                    "message": result.message
-                })
-            else:
+            if not self.current_client:
                 return web.json_response({
                     "status": "error",
-                    "message": result.message
+                    "message": "No active stream to stop"
                 }, status=400)
+            
+            # Emit stop event before stopping
+            if self.current_client.protocol:
+                await self.current_client.protocol.emit_monitoring_event({
+                    "type": "stream_stopped",
+                    "timestamp": int(time.time() * 1000)
+                })
+            
+            # Stop client
+            await self.current_client.stop()
+            
+            # Cancel background task
+            if self._client_task:
+                self._client_task.cancel()
+                try:
+                    await self._client_task
+                except asyncio.CancelledError:
+                    pass
+                self._client_task = None
+            
+            # Update state
+            self.current_client = None
+            self.current_params = None
+            self.state.set_active_client(False)
+            self.state.update_active_streams(0)
+            
+            return web.json_response({
+                "status": "success",
+                "message": "Stream stopped successfully"
+            })
             
         except Exception as e:
             logger.error(f"Error in stop stream handler: {e}")
@@ -373,32 +428,60 @@ class StreamServer:
             validated_params = await self._parse_and_validate_request(request, StreamParamsUpdateRequest)
             data = validated_params.model_dump()
             
-            # Delegate to lifecycle manager
-            result = await self.lifecycle_manager.update_params(data)
-            
-            if result.success:
-                return web.json_response({
-                    "status": "success",
-                    "message": result.message
-                })
-            else:
+            if not self.current_client:
                 return web.json_response({
                     "status": "error",
-                    "message": result.message
-                }, status=400 if "No active stream" in result.message else 500)
+                    "message": "No active stream to update"
+                }, status=400)
+            
+            # Update frame processor parameters
+            self.frame_processor.update_params(data)
+            logger.info(f"Parameters updated: {data}")
+            
+            # Emit monitoring event
+            if self.current_client.protocol:
+                await self.current_client.protocol.emit_monitoring_event({
+                    "type": "params_updated",
+                    "timestamp": int(time.time() * 1000),
+                    "params": data
+                })
+            
+            return web.json_response({
+                "status": "success",
+                "message": "Parameters updated successfully"
+            })
             
         except Exception as e:
             logger.error(f"Error in update params handler: {e}")
             return web.json_response({
                 "status": "error",
-                "message": f"Error updating parameters: {str(e)}"
+                "message": f"Parameter update failed: {str(e)}"
             }, status=500)
     
     async def _handle_get_status(self, request: web.Request) -> web.Response:
         """Handle status requests with detailed state and frame processing statistics."""
         try:
-            # Delegate to lifecycle manager
-            status_data = self.lifecycle_manager.get_status()
+            # Get base state
+            status_data = self.state.get_pipeline_state()
+            
+            # Add client information
+            if self.current_client:
+                status_data["client_active"] = True
+                status_data["client_running"] = self.current_client.running
+                # Add FPS information from protocol
+                if self.current_client.protocol:
+                    status_data["fps"] = self.current_client.protocol.fps_meter.get_fps_stats()
+            else:
+                status_data["client_active"] = False
+            
+            # Add current parameters if available
+            if self.current_params:
+                status_data["current_params"] = {
+                    "subscribe_url": self.current_params.subscribe_url,
+                    "publish_url": self.current_params.publish_url,
+                    "gateway_request_id": self.current_params.gateway_request_id
+                }
+            
             return web.json_response(status_data)
             
         except Exception as e:
@@ -475,12 +558,11 @@ class StreamServer:
     async def _health_monitoring_loop(self):
         """Background task to monitor component health."""
         try:
-            while self.lifecycle_manager.current_client:
+            while self.current_client:
                 await asyncio.sleep(self.health_check_interval)
                 
-                client = self.lifecycle_manager.current_client
-                if client and client.protocol:
-                    protocol = client.protocol
+                if self.current_client and self.current_client.protocol:
+                    protocol = self.current_client.protocol
                     self.state.update_component_health(
                         protocol.component_name,
                         protocol.get_component_health()
@@ -490,10 +572,33 @@ class StreamServer:
         except Exception as e:
             logger.error(f"Health monitoring error: {e}")
     
+    async def _run_client(self, request_id: str):
+        """Run the trickle client in background."""
+        try:
+            if self.current_client:
+                await self.current_client.start(request_id)
+                logger.info("Client started successfully")
+        except Exception as e:
+            logger.error(f"Error running client: {e}")
+            self.state.set_error(f"Client execution failed: {str(e)}")
+        finally:
+            # Clean up when client ends
+            self.state.set_active_client(False)
+            self.state.update_active_streams(0)
+    
     async def stop(self):
         """Stop the server and clean up resources."""
-        # Delegate to lifecycle manager for proper cleanup
-        await self.lifecycle_manager.stop_stream()
+        # Stop current client if running
+        if self.current_client:
+            await self.current_client.stop()
+        
+        # Cancel client task
+        if self._client_task:
+            self._client_task.cancel()
+            try:
+                await self._client_task
+            except asyncio.CancelledError:
+                pass
         
         # Cancel health monitoring task  
         if self._health_monitor_task:
