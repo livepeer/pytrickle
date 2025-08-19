@@ -122,7 +122,7 @@ class TrickleClient:
     async def publish_data(self, data: str):
         """Publish data via the protocol's data publisher."""
         try:
-            await self.data_queue.put_nowait(data)
+            self.data_queue.put_nowait(data)
         except asyncio.QueueFull:
             logger.warning("Could not send data, queue is full. Reduce velocity of data publishing.")
 
