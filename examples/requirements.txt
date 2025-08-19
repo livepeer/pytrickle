@@ -1,2 +1,3 @@
-# Optional: Additional video processing libraries for examples
+# Optional: Additional processing libraries for examples
 opencv-python
+scipy
