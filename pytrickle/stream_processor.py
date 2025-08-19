@@ -61,6 +61,9 @@ class StreamProcessor:
     
     async def send_data(self, data: str):
         """Send data to the server."""
+        if self.server.current_client is None:
+            logger.warning("No active client connection, cannot send data")
+            return
         await self.server.current_client.publish_data(data)
 
     async def run_forever(self):

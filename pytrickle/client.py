@@ -93,7 +93,7 @@ class TrickleClient:
             # Check if any loop had an exception that is not a cancelled error
             for i, result in enumerate(results):
                 if isinstance(result, Exception) and not isinstance(result, asyncio.CancelledError):
-                    loop_names = ["ingress", "egress", "control"]
+                    loop_names = ["ingress", "egress", "control", "send_data"]
                     logger.error(f"{loop_names[i]} loop failed: {result}")
                     
         except asyncio.CancelledError:
