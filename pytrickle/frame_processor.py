@@ -9,6 +9,7 @@ from abc import ABC, abstractmethod
 from typing import Optional, Any, Dict, List
 from .frames import VideoFrame, AudioFrame
 from . import ErrorCallback
+from .state import StreamState, PipelineState
 
 logger = logging.getLogger(__name__)
 
@@ -48,11 +49,30 @@ class FrameProcessor(ABC):
         """Initialize the frame processor.
         
         Args:
-            error_callback: Optional error callback for processing errors
-            **init_kwargs: Additional kwargs passed to initialize() method
+            error_callback: Optional error callback for processing errors.
+                           If None, errors will be logged but not propagated.
+            **init_kwargs: Additional kwargs passed to load_model() method
         """
         self.error_callback = error_callback
-        self.load_model(**init_kwargs)
+        self.state: Optional[StreamState] = None
+        self.model_loaded: bool = False
+        try:
+            self.load_model(**init_kwargs)
+            self.model_loaded = True
+            # If a state manager is already attached, mark ready automatically
+            if self.state is not None:
+                self.state.set_state(PipelineState.IDLE)
+        except Exception:
+            # If load fails and we have a state manager, mark ERROR
+            if self.state is not None:
+                self.state.set_state(PipelineState.ERROR)
+            raise
+
+    def attach_state(self, state: StreamState) -> None:
+        """Attach a pipeline state manager and set IDLE if model already loaded."""
+        self.state = state
+        if self.model_loaded:
+            self.state.set_state(PipelineState.IDLE)
 
     @abstractmethod
     def load_model(self, *kwargs):
