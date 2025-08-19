@@ -8,7 +8,7 @@
             "name": "PyTrickle Demo App",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/examples/async_processor_example.py",
+            "program": "${workspaceFolder}/examples/process_video_example.py",
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}/examples",
             "env": {

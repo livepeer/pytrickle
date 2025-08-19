@@ -1,0 +1,17 @@
+# Include requirements files for dynamic dependencies
+include requirements.txt
+include requirements-dev.txt
+include examples/requirements.txt
+
+# Include README and other documentation
+include README.md
+include LICENSE*
+
+# Include configuration files
+include pyproject.toml
+
+# Exclude test files and build artifacts
+exclude tests/*
+recursive-exclude * __pycache__
+recursive-exclude * *.py[co]
+recursive-exclude * .DS_Store

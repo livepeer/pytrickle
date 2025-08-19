@@ -10,7 +10,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, Callable
 
-from .health import StreamHealthManager
+from .state import StreamState
 
 logger = logging.getLogger(__name__)
 
@@ -60,10 +60,10 @@ class StreamHandler:
 class BaseStreamManager(ABC):
     """Base stream manager that provides core stream management functionality."""
     
-    def __init__(self, health_manager: Optional[StreamHealthManager] = None):
+    def __init__(self, stream_state: Optional[StreamState] = None):
         self.handlers: Dict[str, StreamHandler] = {}
         self.lock = asyncio.Lock()
-        self.health_manager = health_manager
+        self.stream_state = stream_state
     
     @abstractmethod
     async def create_stream_handler(self, request_id: str, **kwargs) -> Optional[StreamHandler]:
@@ -79,9 +79,9 @@ class BaseStreamManager(ABC):
             
             try:
                 # Clear error state if this is the first stream after error
-                if self.health_manager and self.health_manager.is_error():
+                if self.stream_state and self.stream_state.is_error():
                     if len(self.handlers) == 0:
-                        self.health_manager.clear_error()
+                        self.stream_state.clear_error()
                 
                 handler = await self.create_stream_handler(request_id, **kwargs)
                 if not handler:
@@ -91,7 +91,7 @@ class BaseStreamManager(ABC):
                 success = await handler.start()
                 if success:
                     self.handlers[request_id] = handler
-                    self._update_health_manager()
+                    self._update_stream_state()
                     logger.info(f"Stream {request_id} started successfully")
                     return True
                 else:
@@ -100,8 +100,8 @@ class BaseStreamManager(ABC):
                     
             except Exception as e:
                 logger.error(f"Error creating stream {request_id}: {e}")
-                if self.health_manager:
-                    self.health_manager.set_error(f"Error creating stream: {str(e)}")
+                if self.stream_state:
+                    self.stream_state.set_error(f"Error creating stream: {str(e)}")
                 return False
     
     async def stop_stream(self, request_id: str) -> bool:
@@ -115,23 +115,23 @@ class BaseStreamManager(ABC):
             try:
                 success = await handler.stop(called_by_manager=True)
                 del self.handlers[request_id]
-                self._update_health_manager()
+                self._update_stream_state()
                 logger.info(f"Stream {request_id} stopped, success: {success}")
                 return success
             except Exception as e:
                 logger.error(f"Error stopping stream {request_id}: {e}")
                 # Remove from handlers even if stop failed
                 del self.handlers[request_id]
-                self._update_health_manager()
+                self._update_stream_state()
                 return False
     
-    def _update_health_manager(self):
-        """Update the health manager with current stream count."""
-        if self.health_manager:
+    def _update_stream_state(self):
+        """Update the stream state with current stream count."""
+        if self.stream_state:
             stream_count = len(self.handlers)
-            self.health_manager.update_active_streams(stream_count)
-            if stream_count == 0 and self.health_manager.is_error():
-                self.health_manager.clear_error()
+            self.stream_state.update_active_streams(stream_count)
+            if stream_count == 0 and self.stream_state.is_error():
+                self.stream_state.clear_error()
     
     def build_stream_status(self, request_id: str, handler: StreamHandler) -> Dict[str, Any]:
         """Compose a status dictionary for a given handler.
@@ -196,7 +196,7 @@ class BaseStreamManager(ABC):
                 logger.error(f"Error during cleanup: {e}")
             
             self.handlers.clear()
-            self._update_health_manager()
+            self._update_stream_state()
     
     async def _stop_stream_with_timeout(self, request_id: str) -> bool:
         """Stop a stream with timeout protection."""
@@ -211,12 +211,12 @@ class BaseStreamManager(ABC):
 class TrickleStreamManager(BaseStreamManager):
     """Basic trickle stream manager implementation."""
     
-    def __init__(self, app_context: Optional[Dict] = None, health_manager: Optional[StreamHealthManager] = None):
-        # Extract health manager from app_context if provided
-        if app_context and not health_manager:
-            health_manager = app_context.get('health_manager')
+    def __init__(self, app_context: Optional[Dict] = None, stream_state: Optional[StreamState] = None):
+        # Extract stream state from app_context if provided
+        if app_context and not stream_state:
+            stream_state = app_context.get('stream_state')
         
-        super().__init__(health_manager)
+        super().__init__(stream_state)
         self.app_context = app_context or {}
         self.stream_handler_factory: Optional[Callable] = None
     

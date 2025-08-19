@@ -15,8 +15,12 @@ from .base import TrickleComponent
 
 logger = logging.getLogger(__name__)
 
-# Reduce preconnect retries for faster shutdown
-MAX_PRECONNECT_RETRIES = 2
+# Default timeouts (seconds)
+CONNECT_TIMEOUT_SECONDS = 30
+KEEPALIVE_TIMEOUT_SECONDS = 5
+
+# Backoff for immediate retry when preconnect returns None
+RETRY_DELAY_SECONDS = 0.05
 
 class TricklePublisher(TrickleComponent):
     """Trickle publisher for sending data to a URL."""
@@ -30,6 +34,8 @@ class TricklePublisher(TrickleComponent):
         self.lock = asyncio.Lock()
         self._background_tasks: List[asyncio.Task] = []  # Track background tasks
         self.session: Optional[aiohttp.ClientSession] = None
+        self.connect_timeout_seconds = CONNECT_TIMEOUT_SECONDS
+        self.keepalive_timeout_seconds = KEEPALIVE_TIMEOUT_SECONDS
 
     async def __aenter__(self):
         """Enter context manager."""
@@ -42,10 +48,22 @@ class TricklePublisher(TrickleComponent):
 
     async def start(self):
         """Start the publisher session."""
-        if not self.session:
-            connector = aiohttp.TCPConnector(verify_ssl=False)
-            timeout = aiohttp.ClientTimeout(total=30)  # Reduced timeout for faster shutdown
-            self.session = aiohttp.ClientSession(connector=connector, timeout=timeout)
+        # Always create a fresh session on start to avoid stale keep-alives across streams
+        if self.session:
+            try:
+                await self.session.close()
+            except Exception as e:
+                logger.error(f"Error closing session: {e}")
+                pass
+            finally:
+                self.session = None
+        connector = aiohttp.TCPConnector(
+            verify_ssl=False,
+            limit=0,
+            keepalive_timeout=self.keepalive_timeout_seconds,
+        )
+        timeout = aiohttp.ClientTimeout(total=self.connect_timeout_seconds)
+        self.session = aiohttp.ClientSession(connector=connector, timeout=timeout)
 
     def stream_idx(self):
         """Return the current stream index."""
@@ -132,6 +150,15 @@ class TricklePublisher(TrickleComponent):
     async def next(self):
         """Start or retrieve a pending POST request and preconnect for the next segment."""
         async with self.lock:
+            # Allow recovery from transient error state between encoder retries
+            # Note: This allows for encoder restarts without losing data
+            if self.error_event.is_set() and not self.shutdown_event.is_set():
+                logger.info("Publisher recovering from error state for next segment")
+                # Clear error and resume running state
+                self.error_event.clear()
+                self.component_state = self.component_state.RUNNING
+                self.last_error = None
+
             if self._should_stop():
                 logger.info(f"Publisher is in error or shutdown state, cannot get next segment")
                 return SegmentWriter(None)
@@ -139,6 +166,11 @@ class TricklePublisher(TrickleComponent):
             if self.next_writer is None:
                 logger.info(f"No pending connection, preconnecting {self.stream_idx()}...")
                 self.next_writer = await self.preconnect()
+                # If preconnect failed due to connection reuse issues, retry once immediately
+                if self.next_writer is None and not self._should_stop():
+                    logger.info("Preconnect returned None, retrying once immediately")
+                    await asyncio.sleep(RETRY_DELAY_SECONDS)
+                    self.next_writer = await self.preconnect()
 
             writer = self.next_writer
             self.next_writer = None
