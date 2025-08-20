@@ -57,9 +57,6 @@ class TrickleClient:
         # Output queue for processed frames
         self.output_queue = queue.Queue()
         
-        # Frame caching for video fallback behavior
-        self._last_processed_video_frame: Optional[VideoFrame] = None
-        
         
     def process_frame(self, frame: Union[VideoFrame, AudioFrame]) -> Optional[Union[VideoOutput, AudioOutput]]:
         """Process a single frame and return the output."""
@@ -80,9 +77,6 @@ class TrickleClient:
         self.error_event.clear()
         
         logger.info(f"Starting trickle client with request_id={request_id}")
-        
-        # Reset frame cache for clean start
-        self.reset_frame_cache()
         
         # Start the protocol
         await self.protocol.start()
@@ -131,78 +125,6 @@ class TrickleClient:
     async def publish_data(self, data: str):
         """Publish data via the protocol's data publisher."""
         return await self.protocol.publish_data(data)
-    
-    def reset_frame_cache(self) -> None:
-        """Reset cached frames - useful when starting new streams or workflows."""
-        self._last_processed_video_frame = None
-        logger.debug("Frame cache reset")
-
-    async def process_video_frame(self, frame: VideoFrame) -> Optional[VideoFrame]:
-        """Process video frame with smart fallback to cached frame."""
-        try:
-            result = await self.frame_processor.process_video_async(frame)
-            
-            if isinstance(result, VideoFrame):
-                # Cache successful result
-                self._last_processed_video_frame = result
-                return result
-            else:
-                # Processing returned None - try fallback
-                if self._last_processed_video_frame is not None:
-                    # Create fallback frame with current timing
-                    fallback_frame = VideoFrame.from_av_video(
-                        tensor=self._last_processed_video_frame.tensor,
-                        timestamp=frame.timestamp,
-                        time_base=frame.time_base
-                    )
-                    logger.debug("Using cached video frame as fallback")
-                    return fallback_frame
-                else:
-                    logger.debug("No cached video frame available, returning None")
-                    return None
-                    
-        except Exception as e:
-            logger.error(f"Error in video processing: {e}")
-            if self.error_callback:
-                try:
-                    if asyncio.iscoroutinefunction(self.error_callback):
-                        await self.error_callback("video_processing_error", e)
-                    else:
-                        self.error_callback("video_processing_error", e)
-                except Exception:
-                    pass
-            
-            # Try fallback on exception
-            if self._last_processed_video_frame is not None:
-                # Create fallback frame with current timing
-                fallback_frame = VideoFrame.from_av_video(
-                    tensor=self._last_processed_video_frame.tensor,
-                    timestamp=frame.timestamp,
-                    time_base=frame.time_base
-                )
-                logger.debug("Using cached video frame as fallback after error")
-                return fallback_frame
-            else:
-                logger.debug("No cached video frame available after error, returning None")
-                return None
-    
-    async def process_audio_frame(self, frame: AudioFrame) -> Optional[List[AudioFrame]]:
-        """Process audio frame without fallback - returns processing result or None."""
-        try:
-            result = await self.frame_processor.process_audio_async(frame)
-            return result if isinstance(result, list) and len(result) > 0 else None
-                    
-        except Exception as e:
-            logger.error(f"Error in audio processing: {e}")
-            if self.error_callback:
-                try:
-                    if asyncio.iscoroutinefunction(self.error_callback):
-                        await self.error_callback("audio_processing_error", e)
-                    else:
-                        self.error_callback("audio_processing_error", e)
-                except Exception:
-                    pass
-            return None
     
     async def _ingress_loop(self):
         """Process incoming frames with native async support."""

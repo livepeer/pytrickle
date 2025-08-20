@@ -307,7 +307,6 @@ class AudioOutput(OutputFrame):
         return cls(corrected_frames, request_id)
 
 
-
 # Frame Processing Utilities
 # ===========================
 

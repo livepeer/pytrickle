@@ -77,12 +77,6 @@ class FrameProcessor(ABC):
         if self.model_loaded:
             self.state.set_state(PipelineState.IDLE)
 
-
-    # ===== Optional lifecycle hooks; subclasses may override =====
-    async def reset_timing(self) -> None:
-        """Optional hook to reset timing state (e.g., frame counters) between streams."""
-        return
-
     @abstractmethod
     def load_model(self, *kwargs):
         """
