@@ -27,6 +27,7 @@ class TrickleClient:
         protocol: TrickleProtocol,
         frame_processor: 'FrameProcessor',
         control_handler: Optional[Callable] = None,
+        send_data_interval: Optional[float] = 0.333,
         error_callback: Optional[ErrorCallback] = None
     ):
         """Initialize TrickleClient.
@@ -40,6 +41,8 @@ class TrickleClient:
         self.protocol = protocol
         self.frame_processor = frame_processor
         self.control_handler = control_handler
+        self.send_data_interval = send_data_interval
+
         # Use provided error_callback, or fall back to frame_processor's error_callback
         self.error_callback = error_callback or frame_processor.error_callback
         
@@ -269,9 +272,9 @@ class TrickleClient:
         """Send data to the server every 333ms, batching all available items."""
         try:
             while not self.stop_event.is_set():
-                # Wait for 333ms or until stop event is set
+                # Wait for send_data_interval or until stop event is set
                 try:
-                    await asyncio.wait_for(self.stop_event.wait(), timeout=0.333)
+                    await asyncio.wait_for(self.stop_event.wait(), timeout=self.send_data_interval)
                     break  # Stop event was set, exit loop
                 except asyncio.TimeoutError:
                     pass  # Timeout is expected, continue to process data
@@ -294,7 +297,12 @@ class TrickleClient:
                 
                 # Send all collected data items
                 if len(data_items) > 0:
-                    data_str = json.dumps(data_items) + "\n"
+                    try:
+                        data_str = json.dumps(data_items) + "\n"
+                    except Exception as e:
+                        logger.error(f"Error serializing data items: {e}")
+                        continue
+
                     await self.protocol.publish_data(data_str)
                 
         except Exception as e:

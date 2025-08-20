@@ -19,6 +19,7 @@ class StreamProcessor:
         audio_processor: Optional[AudioProcessor] = None,
         model_loader: Optional[Callable[[], None]] = None,
         param_updater: Optional[Callable[[Dict[str, Any]], None]] = None,
+        send_data_interval: Optional[float] = 0.333,
         name: str = "stream-processor",
         port: int = 8000,
         **server_kwargs
@@ -39,6 +40,7 @@ class StreamProcessor:
         self.audio_processor = audio_processor
         self.model_loader = model_loader
         self.param_updater = param_updater
+        self.send_data_interval = send_data_interval
         self.name = name
         self.port = port
         self.server_kwargs = server_kwargs
