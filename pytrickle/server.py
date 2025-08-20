@@ -328,9 +328,9 @@ class StreamServer:
             # Get text queue from frame processor if it has one
             text_queue = self.frame_processor.text_queue
             if params.data_url:
-                logger.info(f"📤 Text publishing enabled - data URL: {params.data_url}")
+                logger.info(f"Text publishing enabled - data URL: {params.data_url}")
             else:
-                logger.warning("📤 Text queue available but no data_url provided - text won't be published")
+                logger.warning("Text queue available but no data_url provided - text won't be published")
         
             # Create client with optional text queue
             self.current_client = TrickleClient(

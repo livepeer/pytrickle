@@ -82,7 +82,7 @@ async def process_audio(frame: AudioFrame) -> List[AudioFrame]:
         if _stream_processor:
             await _stream_processor.publish_data_output(jsonl_line)
         
-        logger.info(f"📊 Published stats: {audio_frame_count} frames, {elapsed_time:.2f}s elapsed")
+        logger.info(f"Published stats: {audio_frame_count} frames, {elapsed_time:.2f}s elapsed")
     
     # Pass through the audio frame unchanged
     return [frame]
@@ -101,7 +101,7 @@ def update_params(params: dict):
         global audio_frame_count, start_time
         audio_frame_count = 0
         start_time = time.time()
-        logger.info("🔄 Reset audio frame counter and timer")
+        logger.info("Reset audio frame counter and timer")
 
 
 # Create and run StreamProcessor
@@ -118,9 +118,9 @@ if __name__ == "__main__":
     # Set reference for text publishing
     _stream_processor = processor
     
-    logger.info("🚀 Starting passthrough processor with text publishing...")
-    logger.info(f"📝 Will publish JSONL stats every {text_publish_interval} audio frames")
-    logger.info("🔧 Update parameters via /api/update_params:")
+    logger.info("Starting passthrough processor with text publishing...")
+    logger.info(f"Will publish JSONL stats every {text_publish_interval} audio frames")
+    logger.info("Update parameters via /api/update_params:")
     logger.info("   - text_publish_interval: number of frames between text publications")
     logger.info("   - reset_counter: true to reset frame counter and timer")
     

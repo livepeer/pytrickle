@@ -320,7 +320,7 @@ class TrickleClient:
                         text_output = TextOutput(text=text_string, request_id=self.request_id)
                         await self._send_output(text_output)
                         texts_processed += 1
-                        logger.info(f"📤 Publishing: {text_string[:50]}...")
+                        logger.debug(f"Publishing: {text_string[:50]}...")
                 except IndexError:
                     # Queue is empty
                     break

@@ -82,7 +82,7 @@ class StreamProcessor:
         """Add text to the queue for publishing (simple interface for apps)."""
         if text and text.strip():
             self.text_queue.append(text)
-            logger.debug(f"📤 Queued text for publishing: {text[:50]}...")
+            logger.debug(f"Queued text for publishing: {text[:50]}...")
     
     async def run_forever(self):
         """Run the stream processor server forever."""
