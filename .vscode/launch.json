@@ -28,7 +28,7 @@
             "name": "PyTrickle Demo with Text Publishing",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/examples/process_video_with_text.py",
+            "program": "${workspaceFolder}/examples/text_output_example.py",
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}/examples",
             "env": {
