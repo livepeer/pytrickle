@@ -268,9 +268,9 @@ class TrickleClient:
         """Send data to the server every 250ms, batching all available items."""
         try:
             while not self.stop_event.is_set():
-                # Wait for 250ms or until stop event is set
+                # Wait for 333ms or until stop event is set
                 try:
-                    await asyncio.wait_for(self.stop_event.wait(), timeout=0.25)
+                    await asyncio.wait_for(self.stop_event.wait(), timeout=0.333)
                     break  # Stop event was set, exit loop
                 except asyncio.TimeoutError:
                     pass  # Timeout is expected, continue to process data
@@ -292,8 +292,9 @@ class TrickleClient:
                         break  # No more items in queue
                 
                 # Send all collected data items
-                data_str = json.dumps(data_items) + "\n"
-                await self.protocol.publish_data(data_str)
+                if len(data_items) > 0:
+                    data_str = json.dumps(data_items) + "\n"
+                    await self.protocol.publish_data(data_str)
                 
         except Exception as e:
             logger.error(f"Error in data sending loop: {e}")
