@@ -83,7 +83,6 @@ class TrickleStreamHandler(StreamHandler):
         self._task: Optional[asyncio.Task] = None
         self._control_task: Optional[asyncio.Task] = None
         self._monitoring_task: Optional[asyncio.Task] = None
-        self._send_data_task: Optional[asyncio.Task] = None
 
         # Error handling
         self._error_callback = error_callback
@@ -334,11 +333,6 @@ class TrickleStreamHandler(StreamHandler):
             except Exception as e:
                 logger.warning(f"Failed to start monitoring task: {e}")
 
-            try:
-                self._send_data_task = asyncio.create_task(self._send_data_loop())
-            except Exception as e:
-                logger.warning(f"Failed to start send data task: {e}")
-
             logger.info("TrickleStreamHandler started successfully")
             return True
             
@@ -364,7 +358,6 @@ class TrickleStreamHandler(StreamHandler):
                 await self._cancel_task_with_timeout(self._task, "Main task")
                 await self._cancel_task_with_timeout(self._control_task, "Control task")
                 await self._cancel_task_with_timeout(self._monitoring_task, "Monitoring task")
-                await self._cancel_task_with_timeout(self._send_data_task, "Send data task")
 
                 # Close control subscriber
                 if self.control_subscriber:
