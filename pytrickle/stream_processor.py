@@ -2,6 +2,8 @@ import asyncio
 import logging
 from typing import Optional, Callable, Dict, Any, List, Union, Awaitable
 
+from pytrickle.state import PipelineState
+
 from .frames import VideoFrame, AudioFrame
 from .frame_processor import FrameProcessor
 from .server import StreamServer
@@ -88,7 +90,7 @@ class _InternalFrameProcessor(FrameProcessor):
         param_updater: Optional[Callable[[Dict[str, Any]], None]] = None,
         name: str = "internal-processor"
     ):
-        # Set attributes first
+        # Set attributes first before calling parent
         self.video_processor = video_processor
         self.audio_processor = audio_processor
         self.model_loader = model_loader
@@ -96,11 +98,8 @@ class _InternalFrameProcessor(FrameProcessor):
         self._ready = False
         self.name = name
         
-        # Set error_callback like parent constructor but skip load_model call
-        self.error_callback = None
-        
-        # Call load_model manually after attributes are set
-        self.load_model()
+        # Initialize parent with error_callback=None, which will call load_model
+        super().__init__(error_callback=None)
     
     def load_model(self, **kwargs):
         """Load model using provided function."""

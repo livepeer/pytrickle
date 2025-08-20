@@ -14,30 +14,17 @@ from enum import Enum
 
 logger = logging.getLogger(__name__)
 
-class PipelineVersion:
-    """Version information for the pipeline."""
-    
-    def __init__(self, version: str):
-        self.version = version
-    
-    @property
-    def state(self) -> str:
-        return self.version
-
 class PipelineState(Enum):
     """Lifecycle states for a stream/pipeline.
 
-    Using a single enum avoids overlapping booleans. Only one state
-    should be active at a time. Values map directly to external state strings.
+    These states match the external API status responses exactly.
+    Only one state should be active at a time.
     """
 
-    INIT = "LOADING"              # initial state maps to loading externally
-    LOADING = "LOADING"           # setting up resources
-    WARMING_PIPELINE = "LOADING"  # warming the inference pipeline
-    READY = "IDLE"               # pipeline warmed and ready (idle until streams)
-    SHUTTING_DOWN = "IDLE"       # coordinated shutdown
-    ERROR = "ERROR"              # error state
-    STOPPED = "IDLE"             # stopped state
+    LOADING = "LOADING"          # initial state, setting up resources, warming pipeline
+    IDLE = "IDLE"               # pipeline ready but no active streams  
+    OK = "OK"                   # pipeline ready with active streams
+    ERROR = "ERROR"             # error state
 
 class StreamState:
     """Unified state management for stream lifecycle using enums and events.
@@ -48,16 +35,25 @@ class StreamState:
     """
 
     def __init__(self) -> None:
-        self._state: PipelineState = PipelineState.INIT
+        self._state: PipelineState = PipelineState.LOADING
 
         # Coordination events
         self.running_event = asyncio.Event()
         self.shutdown_event = asyncio.Event()
         self.error_event = asyncio.Event()
-        self.pipeline_ready_event = asyncio.Event()
         
         # Client tracking
         self.active_client: bool = False
+        self.active_streams: int = 0
+        self.startup_complete: bool = False
+
+        # State transition mapping for maintainability
+        self._state_transitions = {
+            PipelineState.LOADING: self._set_loading,
+            PipelineState.IDLE: self._set_idle,
+            PipelineState.OK: self._set_ok,
+            PipelineState.ERROR: self._set_error,
+        }
 
     # State and derived flags
     @property
@@ -65,91 +61,150 @@ class StreamState:
         return self._state
 
     @property
-    def is_active(self) -> bool:
-        """Whether processing loops should keep running.
-
-        Active in LOADING, WARMING_PIPELINE, READY. Inactive otherwise.
-        """
-        return self._state in {
-            PipelineState.LOADING,
-            PipelineState.WARMING_PIPELINE,
-            PipelineState.READY,
-        } and not self.shutdown_event.is_set() and not self.error_event.is_set()
-
-    # Backwards-compat shorthand properties (read-only)
-    @property
     def running(self) -> bool:
         """Compatibility: True when the stream is in an active state."""
-        return self.is_active
+        return self.running_event.is_set() and not self.shutdown_event.is_set() and not self.error_event.is_set()
 
     @property
     def pipeline_ready(self) -> bool:
         """Compatibility: True when the pipeline is warmed/ready."""
-        return self._state is PipelineState.READY
+        return self._state in (PipelineState.IDLE, PipelineState.OK)
 
     def set_active_client(self, active: bool):
         """Track whether there's an active streaming client."""
         self.active_client = active
 
     def update_component_health(self, component_name: str, health_data: dict):
-        """Update component health and propagate errors to main state."""
-        # If component has error, set main error event
+        """Update component health and log errors without persisting them.
+        
+        Trickle protocol errors (subscriber/publisher connection issues) are normal
+        operational events and should not persist as system-level ERROR states.
+        """
         if health_data.get("error"):
-            self.error_event.set()
+            # Log component errors for debugging but don't change system state
+            logger.debug(f"Component {component_name} reported error (normal): {health_data.get('error')}")
+            # Component errors are transient and don't affect overall pipeline health
 
     def get_state(self) -> dict:
         """Get a dict representation of the current state."""
-        # Determine status: prioritize ERROR, then "OK" if actively streaming, otherwise pipeline state
-        if self.error_event.is_set():
-            status = "ERROR"
-        elif self._state is PipelineState.READY and self.active_client:
-            status = "OK"
-        else:
-            status = self._state.value
-            
         return {
-            "status": status,
+            "status": self._get_current_status(),
             "pipeline_ready": self.pipeline_ready,
             "shutdown_initiated": self.shutdown_event.is_set(),
             "error": self.error_event.is_set(),
         }
-
-    def get_stream_state(self) -> dict:
-        """Get current state (alias for get_state)."""
-        return self.get_state()
     
-    # State transitions
-    def start(self) -> None:
-        """Begin stream startup; transitions to LOADING."""
-        if self._state is PipelineState.INIT:
-            self._state = PipelineState.LOADING
-            self.running_event.set()
-
-    def set_loading(self) -> None:
-        """Explicitly set LOADING state (alias for start)."""
-        self.start()
-
-    def set_pipeline_warming(self) -> None:
-        """Transition to WARMING_PIPELINE."""
-        if self._state in {PipelineState.INIT, PipelineState.LOADING}:
-            self._state = PipelineState.WARMING_PIPELINE
-            self.running_event.set()
-
-    def set_pipeline_ready(self) -> None:
-        """Set pipeline state to READY and signal waiting tasks."""
-        self._state = PipelineState.READY
+    def _get_current_status(self) -> str:
+        """Get current status based on state and activity."""
+        # Determine status based on actual activity, but don't auto-transition internal state
+        if self.error_event.is_set():
+            return "ERROR"
+        elif self.active_streams > 0 or self.active_client:
+            return "OK"
+        elif self.startup_complete:
+            return "IDLE"
+        else:
+            return "LOADING"
+    
+    # Internal state transition methods
+    def _set_loading(self) -> None:
+        """Set LOADING state."""
+        self._state = PipelineState.LOADING
         self.running_event.set()
-        self.pipeline_ready_event.set()
 
-    def initiate_shutdown(self, *, due_to_error: bool = False) -> None:
-        """Begin coordinated shutdown. Optionally mark as error."""
-        self._state = PipelineState.ERROR if due_to_error else PipelineState.SHUTTING_DOWN
+    def _set_idle(self) -> None:
+        """Set pipeline state to IDLE and signal waiting tasks."""
+        self._state = PipelineState.IDLE
+        self.running_event.set()
+
+    def _set_ok(self) -> None:
+        """Set pipeline state to OK (active streams)."""
+        self._state = PipelineState.OK
+        self.running_event.set()
+
+    def _set_error(self) -> None:
+        """Set ERROR state and trigger shutdown."""
+        logger.error(f"State transition: {self._state.name} → ERROR")
+        self._state = PipelineState.ERROR
         self.shutdown_event.set()
-        if due_to_error:
-            self.error_event.set()
+        self.error_event.set()
 
-    def finalize(self) -> None:
-        """Finalize and mark as STOPPED; clear running event."""
-        self._state = PipelineState.STOPPED
-        self.running_event.clear()
+    def set_state(self, state: PipelineState) -> None:
+        """Primary interface for setting pipeline state.
+        
+        Args:
+            state: PipelineState enum value
+        
+        Example:
+            set_state(PipelineState.IDLE)
+        """
+        transition_handler = self._state_transitions.get(state)
+        if transition_handler:
+            transition_handler()
+        else:
+            logger.warning(f"Unknown PipelineState enum: {state}")
 
+    def set_startup_complete(self) -> None:
+        """Mark startup as complete for health/status reporting."""
+        self.startup_complete = True
+        # When startup completes, transition to IDLE (ready state)
+        if self._state == PipelineState.LOADING:
+            self.set_state(PipelineState.IDLE)
+
+    def update_active_streams(self, count: int) -> None:
+        """Update number of active streams for health/status reporting."""
+        self.active_streams = max(0, int(count))
+
+    def is_error(self) -> bool:
+        return self.error_event.is_set()
+
+    def set_error(self, message: str) -> None:
+        """Enter ERROR phase with an error message."""
+        import traceback
+        logger.error(f"Stream state: ERROR - {message}")
+        logger.error(f"Error occurred from state {self._state.name}, call stack:")
+        logger.error(traceback.format_stack()[-3:-1])  # Show calling context
+        self.set_state(PipelineState.ERROR)
+
+    def clear_error(self) -> None:
+        """Clear error state and return to appropriate state."""
+        if self.is_error():
+            # Clear the error events first
+            self.error_event.clear()
+            self.shutdown_event.clear()
+            # Return to default LOADING state
+            self.set_state(PipelineState.LOADING)
+            logger.info("Stream state: ERROR cleared, returning to LOADING")
+
+    def get_pipeline_state(self) -> dict:
+        """Return health-like payload used by /health endpoint.
+        
+        Maps detailed pipeline state to simplified health status like ai-runner:
+        - LOADING → "LOADING" (only during actual startup)
+        - IDLE → "IDLE" (ready but no active streams)
+        - OK → "OK" (ready with active streams)
+        - ERROR → "ERROR" (error state)
+        """
+        # Determine status based on actual state and activity, not just startup_complete
+        if self.error_event.is_set():
+            status = "ERROR"
+        elif self.active_streams > 0 or self.active_client:
+            # If we have active streams/client, we're definitely OK regardless of startup_complete
+            status = "OK"
+        elif self.pipeline_ready and self.startup_complete:
+            # Pipeline ready and startup complete but no streams = IDLE
+            status = "IDLE"
+        else:
+            # Still loading/starting up
+            status = "LOADING"
+            
+        return {
+            "status": status,  # Primary health status
+            "state": status,   # Backward compatibility 
+            "error_message": None,  # Keep compatibility with previous health payload
+            "pipeline_ready": self.pipeline_ready,
+            "active_streams": self.active_streams,
+            "startup_complete": self.startup_complete,
+            "pipeline_state": self._state.name,  # Internal state name for debugging
+            "additional_info": {},
+        }

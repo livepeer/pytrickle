@@ -15,10 +15,14 @@ from .base import TrickleComponent
 
 logger = logging.getLogger(__name__)
 
+CONNECT_TIMEOUT_SECONDS = 30
+MAX_RETRIES = 5
+RETRY_DELAY_SECONDS = 0.5
+
 class TrickleSubscriber(TrickleComponent):
     """Trickle subscriber for receiving data from a URL."""
     
-    def __init__(self, url: str, start_seq: int = -2, max_retries: int = 5, error_callback: Optional[ErrorCallback] = None):
+    def __init__(self, url: str, start_seq: int = -2, max_retries: int = MAX_RETRIES, connect_timeout_seconds: float = CONNECT_TIMEOUT_SECONDS, error_callback: Optional[ErrorCallback] = None):
         super().__init__(error_callback)
         self.base_url = url
         self.idx = start_seq
@@ -27,6 +31,7 @@ class TrickleSubscriber(TrickleComponent):
         self.lock = asyncio.Lock()
         self._background_tasks: List[asyncio.Task] = []  # Track background tasks
         self.session: Optional[aiohttp.ClientSession] = None
+        self.connect_timeout_seconds = connect_timeout_seconds
 
     async def __aenter__(self):
         """Enter context manager."""
@@ -41,7 +46,8 @@ class TrickleSubscriber(TrickleComponent):
         """Start the subscriber session."""
         if not self.session:
             connector = aiohttp.TCPConnector(verify_ssl=False)
-            self.session = aiohttp.ClientSession(connector=connector)
+            timeout = aiohttp.ClientTimeout(total=self.connect_timeout_seconds)
+            self.session = aiohttp.ClientSession(connector=connector, timeout=timeout)
 
     async def preconnect(self) -> Optional[aiohttp.ClientResponse]:
         """
@@ -88,7 +94,7 @@ class TrickleSubscriber(TrickleComponent):
                 logger.exception(f"Trickle sub failed to complete GET {url}", stack_info=True)
 
             if attempt < self.max_retries - 1:
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(RETRY_DELAY_SECONDS)
 
         # Max retries hit, so bail out
         logger.error(f"Trickle sub hit max retries, exiting {url}")

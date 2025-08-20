@@ -23,7 +23,6 @@ from .state import StreamState
 from .base import TrickleComponent, ComponentState
 from .publisher import TricklePublisher
 from .subscriber import TrickleSubscriber
-from .health import StreamHealthManager
 from .manager import BaseStreamManager, TrickleStreamManager, StreamHandler
 from .stream_handler import TrickleStreamHandler
 from .utils.register import RegisterCapability
@@ -40,7 +39,7 @@ __version__ = "0.1.1"
 __all__ = [
     "TrickleClient",
     "StreamServer",
-	"StreamProcessor",
+    "StreamProcessor",
     "TrickleProtocol",
     "VideoFrame",
     "AudioFrame", 
@@ -48,7 +47,6 @@ __all__ = [
     "AudioOutput",
     "TricklePublisher",
     "TrickleSubscriber",
-    "StreamHealthManager",
     "BaseStreamManager", 
     "TrickleStreamManager",
     "StreamHandler",

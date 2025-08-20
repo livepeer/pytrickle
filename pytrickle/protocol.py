@@ -36,8 +36,10 @@ class TrickleProtocol(TrickleComponent):
         width: Optional[int] = None,
         height: Optional[int] = None,
         max_framerate: Optional[int] = None,
-        error_callback: Optional[ErrorCallback] = None,
         heartbeat_interval: float = 10.0,
+        publisher_timeout: Optional[float] = None,
+        subscriber_timeout: Optional[float] = None,
+        error_callback: Optional[ErrorCallback] = None,
     ):
         super().__init__(error_callback, component_name="protocol")
         self.subscribe_url = subscribe_url
@@ -49,6 +51,8 @@ class TrickleProtocol(TrickleComponent):
         self.height = height
         self.max_framerate = max_framerate
         self.heartbeat_interval = heartbeat_interval
+        self.publisher_timeout = publisher_timeout
+        self.subscriber_timeout = subscriber_timeout
         
         # Tasks and components
         self.subscribe_task: Optional[asyncio.Task] = None
@@ -56,6 +60,10 @@ class TrickleProtocol(TrickleComponent):
         self.control_subscriber: Optional[TrickleSubscriber] = None
         self.events_publisher: Optional[TricklePublisher] = None
         self.data_publisher: Optional[TricklePublisher] = None
+        
+        # Queues are initialized during start(), but attributes must always exist
+        self.subscribe_queue = None
+        self.publish_queue = None
 
         # Background tasks
         self.subscribe_task: Optional[asyncio.Task] = None
@@ -127,7 +135,8 @@ class TrickleProtocol(TrickleComponent):
                 self.emit_monitoring_event, 
                 self.width or DEFAULT_WIDTH, 
                 self.height or DEFAULT_HEIGHT,
-                self.max_framerate or DEFAULT_MAX_FRAMERATE
+                self.max_framerate or DEFAULT_MAX_FRAMERATE,
+                self.subscriber_timeout,
             )
         )
         
@@ -136,17 +145,24 @@ class TrickleProtocol(TrickleComponent):
                 self.publish_url, 
                 self.publish_queue.get, 
                 metadata_cache.get, 
-                self.emit_monitoring_event
+                self.emit_monitoring_event,
+                self.publisher_timeout,
             )
         )
         
         # Initialize control subscriber if URL provided
         if self.control_url and self.control_url.strip():
-            self.control_subscriber = TrickleSubscriber(self.control_url, error_callback=self._on_component_error)
+            self.control_subscriber = TrickleSubscriber(
+                self.control_url,
+                error_callback=self._on_component_error,
+                connect_timeout_seconds=self.subscriber_timeout,
+            )
             
         # Initialize events publisher if URL provided
         if self.events_url and self.events_url.strip():
             self.events_publisher = TricklePublisher(self.events_url, "application/json", error_callback=self._on_component_error)
+            if self.publisher_timeout is not None:
+                self.events_publisher.connect_timeout_seconds = self.publisher_timeout
             await self.events_publisher.start()
             # Start protocol-level heartbeat loop if enabled
             if self.heartbeat_interval and self.heartbeat_interval > 0:
@@ -155,6 +171,8 @@ class TrickleProtocol(TrickleComponent):
         # Initialize data publisher if URL provided
         if self.data_url and self.data_url.strip():
             self.data_publisher = TricklePublisher(self.data_url, "application/jsonl", error_callback=self._on_component_error)
+            if self.publisher_timeout is not None:
+                self.data_publisher.connect_timeout_seconds = self.publisher_timeout
             await self.data_publisher.start()
         
         # Start monitoring subscription end for immediate cleanup
@@ -196,10 +214,18 @@ class TrickleProtocol(TrickleComponent):
             await self.control_subscriber.shutdown()
         
         # Send sentinel None values to stop the trickle tasks gracefully if queues exist
-        if self.subscribe_queue:
-            self.subscribe_queue.put(None)
-        if self.publish_queue:
-            self.publish_queue.put(None)
+        try:
+            if self.subscribe_queue is not None:
+                self.subscribe_queue.put(None)
+        except Exception as e:
+            logger.error(f"Error in subscribe queue shutdown: {e}")
+            pass
+        try:
+            if self.publish_queue is not None:
+                self.publish_queue.put(None)
+        except Exception as e:
+            logger.error(f"Error in publish queue shutdown: {e}")
+            pass
 
         # Close control and events components
         if self.control_subscriber:
