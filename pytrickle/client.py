@@ -117,6 +117,7 @@ class TrickleClient:
         # Send sentinel value to stop egress loop
         try:
             self.output_queue.put_nowait(None)
+            await self.data_queue.put(None)
         except queue.Full:
             pass
     
