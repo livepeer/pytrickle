@@ -312,7 +312,7 @@ class TrickleClient:
         try:
             # Process all available text strings from the app's queue
             texts_processed = 0
-            while self.text_queue:
+            while self.text_queue and not self.stop_event.is_set() and not self.error_event.is_set():
                 try:
                     text_string = self.text_queue.popleft()
                     if text_string and text_string.strip():
