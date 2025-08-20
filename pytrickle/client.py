@@ -265,7 +265,7 @@ class TrickleClient:
                     logger.error(f"Error in error callback: {cb_error}")
     
     async def _send_data_loop(self):
-        """Send data to the server every 250ms, batching all available items."""
+        """Send data to the server every 333ms, batching all available items."""
         try:
             while not self.stop_event.is_set():
                 # Wait for 333ms or until stop event is set
