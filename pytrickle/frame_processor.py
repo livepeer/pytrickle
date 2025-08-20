@@ -4,11 +4,10 @@ This module provides base classes and utilities for async frame processing,
 making it easy to integrate AI models and async pipelines with PyTrickle.
 """
 
-import asyncio
 import logging
 from abc import ABC, abstractmethod
 from typing import Optional, Any, Dict, List
-from .frames import VideoFrame, AudioFrame, TextOutput
+from .frames import VideoFrame, AudioFrame
 from . import ErrorCallback
 from .state import StreamState, PipelineState
 
@@ -22,7 +21,6 @@ class FrameProcessor(ABC):
     This class provides native async frame processing for PyTrickle. It handles:
     - initialization and warmup
     - async processing video and audio frames
-    - text output publishing
 
     Lifecycle:
     1. Processing begins automatically when streams start
