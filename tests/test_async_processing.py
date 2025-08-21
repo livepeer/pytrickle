@@ -49,7 +49,8 @@ class TestProcessor(FrameProcessor):
         end_time = time.time()
         logger.info(f"Completed video processing for frame {self.processed_count} in {end_time - start_time:.3f}s")
         
-        return processed_tensor
+        # Return a VideoFrame with the processed tensor, not just the tensor
+        return frame.replace_tensor(processed_tensor)
     
     async def process_audio_async(self, frame: AudioFrame) -> list[AudioFrame]:
         """Process audio frame with artificial delay."""
@@ -61,13 +62,13 @@ class TestProcessor(FrameProcessor):
         
         # Simple processing: just modify the samples
         processed_samples = frame.samples * 0.8  # Lower volume
-        frame.replace_samples(processed_samples)
+        processed_frame = frame.replace_samples(samples=processed_samples)
         self.processed_count += 1
         
         end_time = time.time()
         logger.info(f"Completed audio processing for frame {self.processed_count} in {end_time - start_time:.3f}s")
         
-        return [frame]
+        return [processed_frame]
     
     def update_params(self, params: dict):
         """Update processing parameters."""
