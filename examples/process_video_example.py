@@ -9,7 +9,6 @@ import cv2
 import numpy as np
 from pytrickle import StreamProcessor
 from pytrickle.frames import VideoFrame
-import time
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -40,7 +39,8 @@ async def process_video(frame: VideoFrame) -> VideoFrame:
     global intensity, ready, delay
     
     # Simulated processing time
-    time.sleep(delay)
+    if delay > 0:
+        await asyncio.sleep(delay)
 
     frame_tensor = frame.tensor
     
@@ -73,29 +73,29 @@ async def process_video(frame: VideoFrame) -> VideoFrame:
         return frame
     
     # Mirror the frame horizontally (flip left to right)
-    mirrored = torch.flip(frame.tensor, dims=[1])
+    mirrored = torch.flip(frame_tensor, dims=[-1])  # Flip width dimension
     
     # Accent Green target color (#18794E: rgb(24,121,78) -> (0.094,0.475,0.306))
     target = torch.tensor([0.094, 0.475, 0.306], device=mirrored.device)
-    
-    #simulate processing time that is adjustable
-    await asyncio.sleep(delay)
+    # Simulate processing time that is adjustable
+    if delay > 0:
+        await asyncio.sleep(delay)
 
-    # Create tinted version
+    # Create tinted version using vectorized operations
     tinted = mirrored.clone()
-    for c in range(3):
-        tinted[:, :, c] = torch.clamp(
-            mirrored[:, :, c] + (target[c] - 0.5) * 0.4, 0, 1
-        )
+    tint_adjustment = (target - 0.5) * intensity * 0.4
     
-    # Add batch dimension back if it was originally present
+    if len(tinted.shape) == 3 and tinted.shape[-1] == 3:  # HWC format
+        tinted = torch.clamp(mirrored + tint_adjustment, 0, 1)
+    elif len(tinted.shape) == 3 and tinted.shape[0] == 3:  # CHW format
+        tinted = torch.clamp(mirrored + tint_adjustment.view(3, 1, 1), 0, 1)
+    
+    # Restore original tensor properties
     if had_batch_dim:
-        result_tensor = result_tensor.unsqueeze(0)
+        tinted = tinted.unsqueeze(0)
+    tinted = tinted.to(frame.tensor.device)
     
-    # Move to same device as original tensor
-    result_tensor = result_tensor.to(frame.tensor.device)
-    
-    return frame.replace_tensor(result_tensor)
+    return frame.replace_tensor(tinted)
 
 def update_params(params: dict):
     """Update tint intensity (0.0 to 1.0)."""
