@@ -27,6 +27,12 @@ class FPSMeter:
         self.egress_video_timestamps = deque(maxlen=max_samples)
         self.egress_audio_timestamps = deque(maxlen=max_samples)
         
+        # Cache for expensive calculations
+        self._last_calculation_time = 0
+        self._cached_ingress_fps = 0.0
+        self._cached_egress_fps = 0.0
+        self._cache_duration = 0.5
+        
     def record_ingress_video_frame(self):
         """Record an ingress video frame timestamp."""
         self.ingress_video_timestamps.append(time.time())
@@ -44,36 +50,60 @@ class FPSMeter:
         self.egress_audio_timestamps.append(time.time())
     
     def get_ingress_video_fps(self) -> float:
-        """Get current ingress video FPS over the time window."""
-        return self._calculate_fps(self.ingress_video_timestamps)
+        """Get cached ingress FPS to avoid expensive recalculation."""
+        now = time.time()
+        if now - self._last_calculation_time > self._cache_duration:
+            self._cached_ingress_fps = self._calculate_fps(self.ingress_video_timestamps)
+            self._cached_egress_fps = self._calculate_fps(self.egress_video_timestamps)
+            self._last_calculation_time = now
+        return self._cached_ingress_fps
     
     def get_ingress_audio_fps(self) -> float:
         """Get current ingress audio FPS over the time window."""
         return self._calculate_fps(self.ingress_audio_timestamps)
         
     def get_egress_video_fps(self) -> float:
-        """Get current egress video FPS over the time window."""
-        return self._calculate_fps(self.egress_video_timestamps)
+        """Get cached egress FPS to avoid expensive recalculation."""
+        now = time.time()
+        if now - self._last_calculation_time > self._cache_duration:
+            self._cached_ingress_fps = self._calculate_fps(self.ingress_video_timestamps)
+            self._cached_egress_fps = self._calculate_fps(self.egress_video_timestamps)
+            self._last_calculation_time = now
+        return self._cached_egress_fps
     
     def get_egress_audio_fps(self) -> float:
         """Get current egress audio FPS over the time window."""
         return self._calculate_fps(self.egress_audio_timestamps)
     
     def _calculate_fps(self, timestamps: deque) -> float:
-        """Calculate FPS from timestamps within the time window."""
+        """Calculate FPS from timestamps within the time window - OPTIMIZED."""
         if len(timestamps) < 2:
             return 0.0
         
-        # Filter to time window
+        # Optimize: Use deque iteration instead of list comprehension
         now = time.time()
         cutoff = now - self.window_seconds
-        recent_timestamps = [ts for ts in timestamps if ts >= cutoff]
         
-        if len(recent_timestamps) < 2:
+        # Count recent timestamps without creating new list
+        recent_count = 0
+        first_recent = None
+        last_recent = None
+        
+        # Iterate from newest to oldest (deque is ordered)
+        for ts in reversed(timestamps):
+            if ts >= cutoff:
+                recent_count += 1
+                if first_recent is None:
+                    first_recent = ts
+                last_recent = ts
+            else:
+                break  # All older timestamps will also be too old
+        
+        if recent_count < 2 or first_recent is None or last_recent is None:
             return 0.0
         
-        time_span = recent_timestamps[-1] - recent_timestamps[0]
-        return (len(recent_timestamps) - 1) / time_span if time_span > 0 else 0.0
+        time_span = first_recent - last_recent
+        return (recent_count - 1) / time_span if time_span > 0 else 0.0
     
     def get_fps_stats(self) -> Dict[str, float]:
         """Get comprehensive FPS statistics."""
@@ -90,3 +120,8 @@ class FPSMeter:
         self.ingress_audio_timestamps.clear()
         self.egress_video_timestamps.clear()
         self.egress_audio_timestamps.clear()
+        
+        # Reset cache
+        self._last_calculation_time = 0
+        self._cached_ingress_fps = 0.0
+        self._cached_egress_fps = 0.0
