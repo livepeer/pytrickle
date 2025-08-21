@@ -16,6 +16,7 @@ from . import ErrorCallback
 from .frame_processor import FrameProcessor
 from .decoder import DEFAULT_MAX_FRAMERATE
 from .frame_skipper import AdaptiveFrameSkipper
+from .monotonic_audio import MonotonicAudioTracker
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,10 @@ class TrickleClient:
             skip_pattern="uniform",  # Use uniform skipping pattern
             adaptation_window=2.0    # 2 second adaptation window
         )
+        
+        # Monotonic audio timeline tracker for automatic A/V sync
+        self.audio_timeline_tracker = MonotonicAudioTracker(frame_duration_ms=20)
+        
     async def start(self, request_id: str = "default"):
         """Start the trickle client."""
         if self.running:
@@ -139,6 +144,7 @@ class TrickleClient:
         """Get comprehensive processing statistics."""
         return {
             "frame_skipper": self.frame_skipper.get_statistics(),
+            "audio_timeline": self.audio_timeline_tracker.get_statistics(),
             "input_queue_size": self.input_queue.qsize(),
             "output_queue_size": self.output_queue.qsize()
         }
@@ -161,7 +167,7 @@ class TrickleClient:
         self.frame_skipper.enable_auto_target_fps()
 
     async def _ingress_loop(self):
-        """Receive incoming frames and queue them for async processing."""
+        """Receive incoming frames and queue them with automatic audio timeline correction."""
         try:
             async for frame in self.protocol.ingress_loop(self.stop_event):
                 # Check for error state or stop signal
@@ -169,10 +175,16 @@ class TrickleClient:
                     logger.info("Stopping ingress loop due to error or stop signal")
                     break
                 
-                # Queue frames for processing with frame skipper handling
+                # Apply automatic monotonic audio timeline correction
+                if isinstance(frame, AudioFrame):
+                    frame = self.audio_timeline_tracker.process_audio_frame(frame)
+                    logger.debug("Queued audio frame with corrected monotonic timestamp")
+                else:
+                    logger.debug(f"Queued {type(frame).__name__} for async processing")
+                
+                # Queue frames for processing - audio frames now have correct timestamps
                 try:
                     await self.input_queue.put(frame)
-                    logger.debug(f"Queued {type(frame).__name__} for async processing")
                 except Exception as e:
                     logger.error(f"Error queueing frame for processing: {e}")
             

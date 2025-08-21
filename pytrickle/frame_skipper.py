@@ -104,26 +104,8 @@ class AdaptiveFrameSkipper:
                         self.fps_meter.record_ingress_video_frame()  # Count as received
                         skipped_count += 1
                     else:
-                        # Put audio frame back at front of queue
-                        temp_queue = asyncio.Queue()
-                        await temp_queue.put(skipped_frame)
-                        
-                        # Move all remaining items to temp queue
-                        while not input_queue.empty():
-                            try:
-                                item = input_queue.get_nowait()
-                                await temp_queue.put(item)
-                            except asyncio.QueueEmpty:
-                                break
-                        
-                        # Put everything back
-                        while not temp_queue.empty():
-                            try:
-                                item = temp_queue.get_nowait()
-                                await input_queue.put(item)
-                            except (asyncio.QueueEmpty, asyncio.QueueFull):
-                                break
-                        break  # Stop skipping since we hit an audio frame
+                        # Audio frames now have corrected timestamps from ingress loop
+                        return skipped_frame
                     
                 except asyncio.TimeoutError:
                     break  # No more frames available quickly
@@ -223,7 +205,7 @@ class AdaptiveFrameSkipper:
         
         # Only update if ingress FPS has stabilized (not changing rapidly)
         if abs(ingress_fps - self.target_fps) > 2.0:  # Significant change
-            logger.info(f"Auto-updating target FPS: {self.target_fps:.1f} -> {ingress_fps:.1f}")
+            logger.debug(f"Auto-updating target FPS: {self.target_fps:.1f} -> {ingress_fps:.1f}")
             self.target_fps = ingress_fps
             self.last_adaptation_time = 0  # Force immediate skip pattern update
         
