@@ -317,21 +317,28 @@ class AudioFrame(InputFrame):
         """Create AudioFrame from av audio frame."""
         return cls(av_frame)
     
+    def replace_samples(self, samples: np.ndarray) -> 'AudioFrame':
+        """Create a new AudioFrame with different samples but same metadata."""
+        return self.from_audio_frame(samples=samples)
+    
+    def from_audio_frame(self, samples: Optional[np.ndarray] = None, timestamp: Optional[int] = None) -> 'AudioFrame':
+        """Create a new AudioFrame with optionally different samples and/or timestamp."""
+        new_frame = AudioFrame.__new__(AudioFrame)
+        new_frame.samples = samples if samples is not None else self.samples
+        new_frame.nb_samples = (samples.shape[-1] if samples.ndim > 1 else len(samples)) if samples is not None else self.nb_samples
+        new_frame.format = self.format
+        new_frame.rate = self.rate
+        new_frame.layout = self.layout
+        new_frame.timestamp = timestamp if timestamp is not None else self.timestamp
+        new_frame.time_base = self.time_base
+        new_frame.log_timestamps = self.log_timestamps.copy()
+        new_frame.side_data = self.side_data
+        return new_frame
+
     @classmethod
     def _from_existing_with_timestamp(cls, existing_frame: 'AudioFrame', new_timestamp: int) -> 'AudioFrame':
         """Create a new AudioFrame with the same properties but a different timestamp."""
-        # Create a new frame object with corrected timestamp
-        new_frame = cls.__new__(cls)
-        new_frame.samples = existing_frame.samples
-        new_frame.nb_samples = existing_frame.nb_samples
-        new_frame.format = existing_frame.format
-        new_frame.rate = existing_frame.rate
-        new_frame.layout = existing_frame.layout
-        new_frame.timestamp = new_timestamp  # Use the corrected timestamp
-        new_frame.time_base = existing_frame.time_base
-        new_frame.log_timestamps = existing_frame.log_timestamps.copy()
-        new_frame.side_data = existing_frame.side_data
-        return new_frame
+        return existing_frame.from_audio_frame(timestamp=new_timestamp)
 
     @classmethod
     def from_tensor(cls, tensor: torch.Tensor, format: str = 's16', layout: str = 'mono', 
