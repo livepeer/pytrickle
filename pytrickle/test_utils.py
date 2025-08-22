@@ -30,7 +30,7 @@ class MockFrameProcessor(FrameProcessor):
         """Test audio processor."""
         return [frame]
     
-    def update_params(self, params: Dict[str, Any]):
+    async def update_params(self, params: Dict[str, Any]):
         """Test parameter updater."""
         if params:
             self.test_params.update(params)
