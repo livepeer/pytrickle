@@ -12,6 +12,10 @@ from collections import deque
 from typing import Optional, Dict, Any, Union
 from .fps_meter import FPSMeter
 from .frames import VideoFrame, AudioFrame
+from .frame_processing_types import (
+    FrameProcessingResult, 
+    FrameOrResult
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,10 +68,8 @@ class AdaptiveFrameSkipper:
         # Target FPS auto-update timing
         self.target_fps_update_interval = 5.0  # Update target FPS every 5 seconds (reduced frequency)
         self.last_target_fps_update = time.time()
-        
 
-
-    async def process_queue_with_skipping(self, input_queue: asyncio.Queue, timeout: float = 5) -> Optional[Union[VideoFrame, AudioFrame]]:
+    async def process_queue_with_skipping(self, input_queue: asyncio.Queue, timeout: float = 5) -> FrameOrResult:
         """
         Get frames from input queue with intelligent skipping to maintain real-time performance.
         Only skips video frames - audio frames are always processed.
@@ -80,7 +82,10 @@ class AdaptiveFrameSkipper:
             timeout: Timeout for queue operations
             
         Returns:
-            Frame to process, or None if queue is empty or timeout occurred
+            - VideoFrame or AudioFrame: Frame to process
+            - FrameProcessingResult.SHUTDOWN: Queue received shutdown sentinel
+            - FrameProcessingResult.FRAME_SKIPPED: Frame was skipped, caller should get next frame
+            - FrameProcessingResult.TIMEOUT: Timeout occurred, no frame available
         """
         try:
             # First check if we need to skip video frames based on queue size
@@ -93,7 +98,7 @@ class AdaptiveFrameSkipper:
                 try:
                     skipped_frame = await asyncio.wait_for(input_queue.get(), timeout=timeout)
                     if skipped_frame is None:
-                        return "SHUTDOWN"  # Hit sentinel, stop processing
+                        return FrameProcessingResult.SHUTDOWN  # Hit sentinel, stop processing
                     
                     # Only skip if it's a video frame
                     if isinstance(skipped_frame, VideoFrame):
@@ -110,10 +115,10 @@ class AdaptiveFrameSkipper:
                 except asyncio.TimeoutError:
                     break  # No more frames available quickly
             
-            # Now get the frame we will actually process
+            # Now get the frame we will process
             frame = await asyncio.wait_for(input_queue.get(), timeout=timeout)
             if frame is None:
-                return "SHUTDOWN"  # Sentinel value for shutdown - use special marker
+                return FrameProcessingResult.SHUTDOWN  # Sentinel value for shutdown
             
             # Apply skip pattern to video frames only
             if isinstance(frame, VideoFrame):
@@ -128,9 +133,9 @@ class AdaptiveFrameSkipper:
                 
                 if should_skip:
                     self.total_frames_skipped += 1
-                    # Return None to indicate this frame should be skipped
+                    # Return FRAME_SKIPPED to indicate this frame should be skipped
                     # The caller should handle getting the next frame
-                    return None
+                    return FrameProcessingResult.FRAME_SKIPPED
                 else:
                     self.total_frames_processed += 1
                     self.fps_meter.record_egress_video_frame()
@@ -139,7 +144,7 @@ class AdaptiveFrameSkipper:
             return frame
             
         except asyncio.TimeoutError:
-            return None
+            return FrameProcessingResult.TIMEOUT
 
     def _calculate_additional_skips(self, queue_size: int) -> int:
         """Simple queue overflow prevention only."""
