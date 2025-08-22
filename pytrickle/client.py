@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 class TrickleClient:
-    """High-level client for trickle stream processing with AdaptiveFrameSkipper."""
+    """High-level client for trickle stream processing with native async support."""
     
     def __init__(
         self,

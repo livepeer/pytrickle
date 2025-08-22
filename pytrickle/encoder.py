@@ -145,8 +145,7 @@ def encode_av(
 
             tensor = avframe.tensor.squeeze(0)
             image_np = (tensor * 255).byte().cpu().numpy()
-            # Explicitly specify RGB mode - decoder produces RGB, encoder expects RGB
-            image = Image.fromarray(image_np, mode='RGB')
+            image = Image.fromarray(image_np)
 
             frame = av.video.frame.VideoFrame.from_image(image)
             
