@@ -354,7 +354,7 @@ class StreamServer:
             # Set params if provided
             if params.params:
                 try:
-                    self.frame_processor.update_params(params.params)
+                    await self.frame_processor.update_params(params.params)
                 except Exception as e:
                     logger.warning(f"Failed to set params: {e}")
             
@@ -430,7 +430,7 @@ class StreamServer:
         Routes control messages to the frame processor's update_params method.
         """
         try:
-            self.frame_processor.update_params(control_data)
+            await self.frame_processor.update_params(control_data)
             logger.debug("Control message routed to frame processor")
         except Exception as e:
             logger.error(f"Error handling control message: {e}")
@@ -449,7 +449,7 @@ class StreamServer:
                 }, status=400)
             
             # Update frame processor parameters
-            self.frame_processor.update_params(data)
+            await self.frame_processor.update_params(data)
             logger.info(f"Parameters updated: {data}")
             
             # Emit monitoring event
@@ -634,7 +634,7 @@ class StreamServer:
         self.state.set_state(PipelineState.IDLE)
         self.state.set_startup_complete()
         
-        logger.info(f"Trickle app server started on {self.host}:{self.port}")
+        logger.info(f"Server started on {self.host}:{self.port}")
         return runner
 
     # Built-in State Management API

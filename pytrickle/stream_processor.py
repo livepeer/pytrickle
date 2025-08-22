@@ -18,8 +18,8 @@ class StreamProcessor:
         self,
         video_processor: Optional[VideoProcessor] = None,
         audio_processor: Optional[AudioProcessor] = None,
-        model_loader: Optional[Callable[[], None]] = None,
-        param_updater: Optional[Callable[[Dict[str, Any]], None]] = None,
+        model_loader: Optional[Union[Callable[[], None], Callable[[], Awaitable[None]]]] = None,
+        param_updater: Optional[Union[Callable[[Dict[str, Any]], None], Callable[[Dict[str, Any]], Awaitable[None]]]] = None,
         on_stream_stop: Optional[Callable[[], None]] = None,
         send_data_interval: Optional[float] = 0.333,
         name: str = "stream-processor",
@@ -35,8 +35,8 @@ class StreamProcessor:
         Args:
             video_processor: Async function that processes VideoFrame objects
             audio_processor: Async function that processes AudioFrame objects  
-            model_loader: Optional function called during load_model phase
-            param_updater: Optional function called when parameters update
+            model_loader: Optional function (sync or async) called during load_model phase
+            param_updater: Optional function (sync or async) called when parameters update
             send_data_interval: Interval for sending data
             on_stream_stop: Optional function called when stream stops/client disconnects
             name: Processor name
@@ -65,6 +65,9 @@ class StreamProcessor:
         self.auto_target_fps = auto_target_fps
         self.server_kwargs = server_kwargs
         
+        # Store pipeline reference if available
+        self._pipeline = None
+        
         # Create internal frame processor
         self._frame_processor = _InternalFrameProcessor(
             video_processor=video_processor,
@@ -74,6 +77,25 @@ class StreamProcessor:
             on_stream_stop=on_stream_stop,
             name=name
         )
+        
+        # Store pipeline reference for passing to model_loader
+        self._frame_processor._pipeline = self._pipeline
+        
+        # Create startup handler to ensure load_model is called
+        async def startup_handler(app):
+            """Ensure load_model is called during server startup."""
+            if not self._frame_processor._load_model_scheduled:
+                logger.info("🔧 Calling load_model during server startup...")
+                await self._frame_processor.load_model()
+                self._frame_processor._load_model_scheduled = True
+                logger.info("✅ load_model completed during server startup")
+        
+        # Add our startup handler to any existing ones
+        existing_startup = server_kwargs.get('on_startup', [])
+        if not isinstance(existing_startup, list):
+            existing_startup = [existing_startup] if existing_startup else []
+        startup_handlers = [startup_handler] + existing_startup
+        server_kwargs['on_startup'] = startup_handlers
         
         # Create and start server
         self.server = StreamServer(
@@ -114,6 +136,11 @@ class StreamProcessor:
         """Run the stream processor server forever."""
         await self.server.run_forever()
     
+    def set_pipeline(self, pipeline):
+        """Set the pipeline reference for passing to model_loader."""
+        self._pipeline = pipeline
+        self._frame_processor._pipeline = pipeline
+    
     def run(self):
         """Run the stream processor server (blocking)."""
         asyncio.run(self.run_forever())
@@ -125,8 +152,8 @@ class _InternalFrameProcessor(FrameProcessor):
         self,
         video_processor: Optional[VideoProcessor] = None,
         audio_processor: Optional[AudioProcessor] = None,
-        model_loader: Optional[Callable[[], None]] = None,
-        param_updater: Optional[Callable[[Dict[str, Any]], None]] = None,
+        model_loader: Optional[Union[Callable[[], None], Callable[[], Awaitable[None]]]] = None,
+        param_updater: Optional[Union[Callable[[Dict[str, Any]], None], Callable[[Dict[str, Any]], Awaitable[None]]]] = None,
         on_stream_stop: Optional[Callable[[], None]] = None,
         name: str = "internal-processor"
     ):
@@ -146,17 +173,38 @@ class _InternalFrameProcessor(FrameProcessor):
         
         # Initialize parent with error_callback=None, which will call load_model
         super().__init__(error_callback=None)
+        
+        # Schedule load_model to be called during server startup
+        # This ensures warmup happens during initialization, not on first request
+        self._load_model_scheduled = False
     
-    def load_model(self, **kwargs):
-        """Load model using provided function."""
+    async def load_model(self, **kwargs):
+        """Load model using provided function (fully async)."""
+        # Prevent duplicate loading
+        if self._load_model_scheduled and self._ready:
+            logger.info("Model already loaded, skipping duplicate load_model call")
+            return
+            
         if self.model_loader:
             try:
-                self.model_loader(self, **kwargs)
+                # Check if model_loader is async
+                if inspect.iscoroutinefunction(self.model_loader):
+                    # Run async model loader
+                    await self.model_loader(**kwargs)
+                else:
+                    # Run synchronous model loader
+                    self.model_loader(**kwargs)
                 logger.info(f"StreamProcessor '{self.name}' model loaded successfully")
             except Exception as e:
                 logger.error(f"Error in model loader: {e}")
                 raise
+        else:
+            # No external model_loader, but we need to ensure that any FrameProcessor
+            # instances that were created get their load_model called
+            logger.info("No external model loader, checking for FrameProcessor initialization")
+        
         self._ready = True
+        self._load_model_scheduled = True
     
     async def process_video_async(self, frame: VideoFrame) -> Optional[VideoFrame]:
         """Process video frame using provided async function."""
@@ -194,11 +242,17 @@ class _InternalFrameProcessor(FrameProcessor):
             logger.error(f"Error in audio processing: {e}")
             return [frame]
     
-    def update_params(self, params: Dict[str, Any]):
-        """Update parameters using provided function."""
+    async def update_params(self, params: Dict[str, Any]):
+        """Update parameters using provided function (supports both sync and async)."""
         if self.param_updater:
             try:
-                self.param_updater(params)
+                # Check if param_updater is async
+                if inspect.iscoroutinefunction(self.param_updater):
+                    # Run async param updater
+                    await self.param_updater(params)
+                else:
+                    # Run synchronous param updater
+                    self.param_updater(params)
                 logger.info(f"Parameters updated: {params}")
             except Exception as e:
                 logger.error(f"Error updating parameters: {e}")

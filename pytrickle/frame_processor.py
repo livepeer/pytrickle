@@ -56,17 +56,9 @@ class FrameProcessor(ABC):
         self.error_callback = error_callback
         self.state: Optional[StreamState] = None
         self.model_loaded: bool = False
-        try:
-            self.load_model(**init_kwargs)
-            self.model_loaded = True
-            # If a state manager is already attached, mark ready automatically
-            if self.state is not None:
-                self.state.set_state(PipelineState.IDLE)
-        except Exception:
-            # If load fails and we have a state manager, mark ERROR
-            if self.state is not None:
-                self.state.set_state(PipelineState.ERROR)
-            raise
+        self.init_kwargs = init_kwargs
+        # Don't call load_model in __init__ anymore - let it be called by the server
+        # when the proper async context is available
 
     def attach_state(self, state: StreamState) -> None:
         """Attach a pipeline state manager and set IDLE if model already loaded."""
@@ -75,15 +67,15 @@ class FrameProcessor(ABC):
             self.state.set_state(PipelineState.IDLE)
 
     @abstractmethod
-    def load_model(self, *kwargs):
+    async def load_model(self, **kwargs):
         """
         Load the model.
 
         This method should be implemented to load any required models or resources.
-        It is called automatically during initialization.
+        It is called automatically during initialization by the server.
         
         Args:
-            *kwargs: Additional parameters for model loading
+            **kwargs: Additional parameters for model loading
         """
         pass
 
@@ -114,7 +106,7 @@ class FrameProcessor(ABC):
         pass
 
     @abstractmethod
-    def update_params(self, params: Dict[str, Any]):
+    async def update_params(self, params: Dict[str, Any]):
         """
         Update processing parameters (optional override).
 
