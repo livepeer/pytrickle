@@ -163,11 +163,6 @@ class AudioFrame(InputFrame):
         return new_frame
 
     @classmethod
-    def _from_existing_with_timestamp(cls, existing_frame: 'AudioFrame', new_timestamp: int) -> 'AudioFrame':
-        """Create a new AudioFrame with the same properties but a different timestamp."""
-        return existing_frame.from_audio_frame(timestamp=new_timestamp)
-
-    @classmethod
     def from_tensor(cls, tensor: torch.Tensor, format: str = 's16', layout: str = 'mono', 
                    sample_rate: int = 48000, timestamp: int = 0, time_base = None) -> 'AudioFrame':
         """Create AudioFrame from torch tensor."""
@@ -295,23 +290,6 @@ class AudioOutput(OutputFrame):
         if self.frames:
             return self.frames[0].timestamp
         return 0
-    
-    @classmethod
-    def with_monotonic_timestamps(cls, frames: List[AudioFrame], request_id: str, start_timestamp: int, frame_duration: int) -> 'AudioOutput':
-        """
-        Create AudioOutput with corrected monotonic timestamps in individual frames.
-        
-        The encoder uses individual AudioFrame.timestamp values, so we need to fix
-        the actual frame timestamps, not just add a wrapper property.
-        """
-        corrected_frames = []
-        for i, frame in enumerate(frames):
-            # Create new frame with corrected timestamp
-            corrected_timestamp = start_timestamp + (i * frame_duration)
-            corrected_frame = AudioFrame._from_existing_with_timestamp(frame, corrected_timestamp)
-            corrected_frames.append(corrected_frame)
-        
-        return cls(corrected_frames, request_id)
 
 
 # Frame Processing Utilities

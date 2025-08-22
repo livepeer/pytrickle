@@ -89,8 +89,9 @@ class MonotonicAudioTracker:
                 logger.info(f"Audio timeline corrections: {self.drift_correction_count}/{self.total_audio_frames} "
                            f"({100.0 * self.drift_correction_count / self.total_audio_frames:.1f}%)")
             
-            # Create corrected frame using existing method
-            corrected_frame = AudioFrame._from_existing_with_timestamp(audio_frame, corrected_timestamp)
+            # Adjust timestamp without creating a new frame
+            audio_frame.timestamp = corrected_timestamp
+            corrected_frame = audio_frame
             logger.debug(f"Audio timestamp corrected: {current_timestamp} -> {corrected_timestamp} (drift: {drift_ms}ms)")
         else:
             corrected_frame = audio_frame
