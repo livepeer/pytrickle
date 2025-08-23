@@ -9,7 +9,8 @@ import asyncio
 import queue
 import logging
 import json
-from typing import Callable, Optional, Union
+from typing import Callable, Optional, Union, Deque, Any
+from collections import deque
 
 from .protocol import TrickleProtocol
 from .frames import VideoFrame, AudioFrame, VideoOutput, AudioOutput
@@ -56,7 +57,7 @@ class TrickleClient:
         
         # Output queues
         self.output_queue = queue.Queue()
-        self.data_queue = asyncio.Queue(maxsize=250)
+        self.data_queue: Deque[Any] = deque(maxlen=1000)
 
     def process_frame(self, frame: Union[VideoFrame, AudioFrame]) -> Optional[Union[VideoOutput, AudioOutput]]:
         """Process a single frame and return the output."""
@@ -120,16 +121,13 @@ class TrickleClient:
         # Send sentinel value to stop egress loop
         try:
             self.output_queue.put_nowait(None)
-            await self.data_queue.put(None)
+            await self.data_queue.append(None)
         except queue.Full:
             pass
     
     async def publish_data(self, data: str):
         """Publish data via the protocol's data publisher."""
-        try:
-            self.data_queue.put_nowait(data)
-        except asyncio.QueueFull:
-            logger.warning("Could not send data, queue is full. Reduce velocity of data publishing.")
+        self.data_queue.append(data)
 
     async def _ingress_loop(self):
         """Process incoming frames with native async support."""
@@ -283,7 +281,7 @@ class TrickleClient:
                 data_items = []
                 while True:
                     try:
-                        data = self.data_queue.get_nowait()
+                        data = self.data_queue.popleft()
                         if data is None:
                             # Sentinel value to stop loop
                             if data_items:
@@ -292,7 +290,7 @@ class TrickleClient:
                             else:
                                 return  # No items to send, just stop
                         data_items.append(data)
-                    except asyncio.QueueEmpty:
+                    except IndexError:
                         break  # No more items in queue
                 
                 # Send all collected data items
