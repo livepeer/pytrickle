@@ -8,7 +8,9 @@ to ensure all components stop when subscription ends.
 import asyncio
 import queue
 import logging
-from typing import Callable, Optional, Union
+import json
+from typing import Callable, Optional, Union, Deque, Any
+from collections import deque
 
 from .protocol import TrickleProtocol
 from .frames import VideoFrame, AudioFrame, VideoOutput, AudioOutput
@@ -26,6 +28,7 @@ class TrickleClient:
         protocol: TrickleProtocol,
         frame_processor: 'FrameProcessor',
         control_handler: Optional[Callable] = None,
+        send_data_interval: Optional[float] = 0.333,
         error_callback: Optional[ErrorCallback] = None
     ):
         """Initialize TrickleClient.
@@ -39,6 +42,8 @@ class TrickleClient:
         self.protocol = protocol
         self.frame_processor = frame_processor
         self.control_handler = control_handler
+        self.send_data_interval = send_data_interval
+
         # Use provided error_callback, or fall back to frame_processor's error_callback
         self.error_callback = error_callback or frame_processor.error_callback
         
@@ -50,9 +55,10 @@ class TrickleClient:
         self.stop_event = asyncio.Event()
         self.error_event = asyncio.Event()
         
-        # Output queue for processed frames
+        # Output queues
         self.output_queue = queue.Queue()
-        
+        self.data_queue: Deque[Any] = deque(maxlen=1000)
+
     def process_frame(self, frame: Union[VideoFrame, AudioFrame]) -> Optional[Union[VideoOutput, AudioOutput]]:
         """Process a single frame and return the output."""
         if not frame:
@@ -85,13 +91,14 @@ class TrickleClient:
                 self._ingress_loop(),
                 self._egress_loop(),
                 self._control_loop(),
+                self._send_data_loop(),
                 return_exceptions=True
             )
             
             # Check if any loop had an exception that is not a cancelled error
             for i, result in enumerate(results):
                 if isinstance(result, Exception) and not isinstance(result, asyncio.CancelledError):
-                    loop_names = ["ingress", "egress", "control"]
+                    loop_names = ["ingress", "egress", "control", "send_data"]
                     logger.error(f"{loop_names[i]} loop failed: {result}")
                     
         except asyncio.CancelledError:
@@ -114,13 +121,14 @@ class TrickleClient:
         # Send sentinel value to stop egress loop
         try:
             self.output_queue.put_nowait(None)
+            await self.data_queue.append(None)
         except queue.Full:
             pass
     
     async def publish_data(self, data: str):
         """Publish data via the protocol's data publisher."""
-        return await self.protocol.publish_data(data)
-    
+        self.data_queue.append(data)
+
     async def _ingress_loop(self):
         """Process incoming frames with native async support."""
         try:
@@ -258,6 +266,47 @@ class TrickleClient:
                 except Exception as cb_error:
                     logger.error(f"Error in error callback: {cb_error}")
     
+    async def _send_data_loop(self):
+        """Send data to the server every 333ms, batching all available items."""
+        try:
+            while not self.stop_event.is_set():
+                # Wait for send_data_interval or until stop event is set
+                try:
+                    await asyncio.wait_for(self.stop_event.wait(), timeout=self.send_data_interval)
+                    break  # Stop event was set, exit loop
+                except asyncio.TimeoutError:
+                    pass  # Timeout is expected, continue to process data
+                
+                # Pull all available items from the data_queue
+                data_items = []
+                while True:
+                    try:
+                        data = self.data_queue.popleft()
+                        if data is None:
+                            # Sentinel value to stop loop
+                            if data_items:
+                                # Send any remaining items before stopping
+                                break
+                            else:
+                                return  # No items to send, just stop
+                        data_items.append(data)
+                    except IndexError:
+                        break  # No more items in queue
+                
+                # Send all collected data items
+                if len(data_items) > 0:
+                    try:
+                        data_str = json.dumps(data_items) + "\n"
+                    except Exception as e:
+                        logger.error(f"Error serializing data items: {e}")
+                        continue
+
+                    await self.protocol.publish_data(data_str)
+                
+        except Exception as e:
+            logger.error(f"Error in data sending loop: {e}")
+            
+
     async def _handle_control_message(self, control_data: dict):
         """Handle a control message."""
         if self.control_handler:
