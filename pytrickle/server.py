@@ -577,7 +577,7 @@ class StreamServer:
         try:
             if self.current_client:
                 await self.current_client.start(request_id)
-                logger.info("Client started successfully")
+                logger.info("Client stream completed successfully")
         except Exception as e:
             logger.error(f"Error running client: {e}")
             self.state.set_error(f"Client execution failed: {str(e)}")
