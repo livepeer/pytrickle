@@ -6,10 +6,11 @@ with integrated state tracking and health monitoring.
 """
 
 import asyncio
+import aiohttp
 import logging
 import time
 from enum import Enum
-from typing import Optional
+from typing import Optional, List
 
 from . import ErrorCallback
 
@@ -41,6 +42,9 @@ class TrickleComponent:
         self.component_state = ComponentState.INIT
         self.last_error: Optional[str] = None
         self.last_activity: Optional[float] = time.time()
+        
+        # Background task tracking
+        self._background_tasks: List[asyncio.Task] = []
 
     def _should_stop(self) -> bool:
         """Check if the component should stop due to error or shutdown signal."""
@@ -81,7 +85,49 @@ class TrickleComponent:
             "should_stop": self._should_stop()
         }
 
+    def _track_background_task(self, task: asyncio.Task, task_type: str = "background"):
+        """Track a background task with unified cleanup handling."""
+        self._background_tasks.append(task)
+        
+        def cleanup_task(completed_task):
+            try:
+                if not completed_task.cancelled():
+                    # Retrieve any exception to prevent "never retrieved" error
+                    completed_task.result()
+            except (asyncio.CancelledError, Exception):
+                # Task was cancelled or had an exception - both are handled appropriately
+                pass
+            finally:
+                try:
+                    if completed_task in self._background_tasks:
+                        self._background_tasks.remove(completed_task)
+                except ValueError:
+                    # Task already removed, that's fine
+                    pass
+        
+        task.add_done_callback(cleanup_task)
+
     async def shutdown(self):
         """Signal shutdown to stop background tasks."""
         self._update_state(ComponentState.SHUTDOWN)
         self.shutdown_event.set()
+
+def setup_asyncio_exception_handler():
+    """Setup global asyncio exception handler to suppress expected aiohttp errors during shutdown."""
+    
+    def handle_exception(loop, context):
+        """Handle uncaught asyncio task exceptions."""
+        exception = context.get('exception')
+        
+        if isinstance(exception, aiohttp.ClientConnectionResetError):
+            logger.debug(f"Suppressed expected aiohttp connection reset during shutdown: {exception}")
+            return
+        
+        loop.default_exception_handler(context)
+    
+    try:
+        loop = asyncio.get_running_loop()
+        loop.set_exception_handler(handle_exception)
+        logger.debug("Global asyncio exception handler installed")
+    except RuntimeError:
+        logger.debug("No running asyncio loop, exception handler will be set later")
