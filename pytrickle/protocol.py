@@ -170,7 +170,7 @@ class TrickleProtocol(TrickleComponent):
             
         # Initialize data publisher if URL provided
         if self.data_url and self.data_url.strip():
-            self.data_publisher = TricklePublisher(self.data_url, "application/octet-stream", error_callback=self._on_component_error)
+            self.data_publisher = TricklePublisher(self.data_url, "application/jsonl", error_callback=self._on_component_error)
             if self.publisher_timeout is not None:
                 self.data_publisher.connect_timeout_seconds = self.publisher_timeout
             await self.data_publisher.start()

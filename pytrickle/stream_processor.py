@@ -21,6 +21,7 @@ class StreamProcessor:
         audio_processor: Optional[AudioProcessor] = None,
         model_loader: Optional[Callable[[], None]] = None,
         param_updater: Optional[Callable[[Dict[str, Any]], None]] = None,
+        send_data_interval: Optional[float] = 0.333,
         name: str = "stream-processor",
         port: int = 8000,
         **server_kwargs
@@ -41,6 +42,7 @@ class StreamProcessor:
         self.audio_processor = audio_processor
         self.model_loader = model_loader
         self.param_updater = param_updater
+        self.send_data_interval = send_data_interval
         self.name = name
         self.port = port
         self.server_kwargs = server_kwargs
@@ -61,6 +63,14 @@ class StreamProcessor:
             **server_kwargs
         )
     
+    async def send_data(self, data: str):
+        """Send data to the server."""
+        if self.server.current_client is None:
+            logger.warning("No active client connection, cannot send data")
+            return False
+        await self.server.current_client.publish_data(data)
+        return True
+
     async def run_forever(self):
         """Run the stream processor server forever."""
         await self.server.run_forever()
