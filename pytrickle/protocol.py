@@ -11,7 +11,7 @@ import queue
 import logging
 from typing import Optional, AsyncGenerator
 
-from .base import TrickleComponent, ComponentState
+from .base import TrickleComponent, ComponentState, setup_asyncio_exception_handler
 from .subscriber import TrickleSubscriber
 from .publisher import TricklePublisher
 from .media import run_subscribe, run_publish
@@ -118,6 +118,9 @@ class TrickleProtocol(TrickleComponent):
         """Start the trickle protocol."""
         self._update_state(ComponentState.STARTING)
         logger.info(f"Starting trickle protocol: subscribe={self.subscribe_url}, publish={self.publish_url}")
+        
+        # Setup global asyncio exception handler to suppress aiohttp connection reset errors
+        setup_asyncio_exception_handler()
         
         # Initialize queues
         self.subscribe_queue = queue.Queue()
