@@ -305,16 +305,6 @@ class AudioOutput(OutputFrame):
             corrected_frames.append(corrected_frame)
         
         return cls(corrected_frames, request_id)
-
-
-# Frame Processing Utilities
-# ===========================
-
-
-
-# Streaming Utilities
-# ====================
-
 class FrameBuffer:
     """Rolling frame buffer that keeps a fixed number of frames."""
     
