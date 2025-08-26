@@ -77,10 +77,25 @@ class TrickleProtocol(TrickleComponent):
         # FPS tracking
         self.fps_meter = FPSMeter()
 
-    async def _on_component_error(self, error_type: str, exception: Optional[Exception] = None):
-        """Handle errors from subscriber/publisher components."""
-        logger.error(f"Component error: {error_type} - {exception}")
-        await self._notify_error(error_type, exception)
+    async def _run_subscribe_with_error_handling(self, *args, **kwargs):
+        """Wrapper for run_subscribe with error handling."""
+        try:
+            await run_subscribe(*args, **kwargs)
+        except Exception as e:
+            logger.error(f"Subscribe task failed: {e}")
+            # Trigger error handling which will propagate to client
+            await self._notify_error("subscribe_task_error", e)
+            raise
+
+    async def _run_publish_with_error_handling(self, *args, **kwargs):
+        """Wrapper for run_publish with error handling."""
+        try:
+            await run_publish(*args, **kwargs)
+        except Exception as e:
+            logger.error(f"Publish task failed: {e}")
+            # Trigger error handling which will propagate to client
+            await self._notify_error("publish_task_error", e)
+            raise
 
     async def _monitor_subscription_end(self):
         """Monitor for subscription task completion and trigger immediate shutdown."""
@@ -129,9 +144,9 @@ class TrickleProtocol(TrickleComponent):
         # Metadata cache to pass video metadata from decoder to encoder
         metadata_cache = LastValueCache()
         
-        # Start subscribe and publish tasks
+        # Start subscribe and publish tasks with error monitoring
         self.subscribe_task = asyncio.create_task(
-            run_subscribe(
+            self._run_subscribe_with_error_handling(
                 self.subscribe_url, 
                 self.subscribe_queue.put, 
                 metadata_cache.put, 
@@ -144,7 +159,7 @@ class TrickleProtocol(TrickleComponent):
         )
         
         self.publish_task = asyncio.create_task(
-            run_publish(
+            self._run_publish_with_error_handling(
                 self.publish_url, 
                 self.publish_queue.get, 
                 metadata_cache.get, 
@@ -157,13 +172,13 @@ class TrickleProtocol(TrickleComponent):
         if self.control_url and self.control_url.strip():
             self.control_subscriber = TrickleSubscriber(
                 self.control_url,
-                error_callback=self._on_component_error,
+                error_callback=self._notify_error,
                 connect_timeout_seconds=self.subscriber_timeout,
             )
             
         # Initialize events publisher if URL provided
         if self.events_url and self.events_url.strip():
-            self.events_publisher = TricklePublisher(self.events_url, "application/json", error_callback=self._on_component_error)
+            self.events_publisher = TricklePublisher(self.events_url, "application/json", error_callback=self._notify_error)
             if self.publisher_timeout is not None:
                 self.events_publisher.connect_timeout_seconds = self.publisher_timeout
             await self.events_publisher.start()
@@ -173,7 +188,7 @@ class TrickleProtocol(TrickleComponent):
             
         # Initialize data publisher if URL provided
         if self.data_url and self.data_url.strip():
-            self.data_publisher = TricklePublisher(self.data_url, "application/jsonl", error_callback=self._on_component_error)
+            self.data_publisher = TricklePublisher(self.data_url, "application/jsonl", error_callback=self._notify_error)
             if self.publisher_timeout is not None:
                 self.data_publisher.connect_timeout_seconds = self.publisher_timeout
             await self.data_publisher.start()
