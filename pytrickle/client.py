@@ -226,6 +226,9 @@ class TrickleClient:
             logger.info("Ingress loop completed, sending sentinel to egress loop")
             await self._send_output(None)
             
+            # Set stop event to signal other loops to complete
+            self.stop_event.set()
+            
         except Exception as e:
             logger.error(f"Error in ingress loop: {e}")
             # Set error state and stop event to trigger other loops to stop
@@ -240,6 +243,7 @@ class TrickleClient:
                         self.error_callback("ingress_loop_error", e)
                 except Exception as cb_error:
                     logger.error(f"Error in error callback: {cb_error}")
+    
     async def _egress_loop(self):
         """Handle outgoing frames."""
         try:

@@ -77,24 +77,14 @@ class TrickleProtocol(TrickleComponent):
         # FPS tracking
         self.fps_meter = FPSMeter()
 
-    async def _run_subscribe_with_error_handling(self, *args, **kwargs):
-        """Wrapper for run_subscribe with error handling."""
+    async def _run_task_with_error_handling(self, task_func, task_name: str, *args, **kwargs):
+        """Generic wrapper for running tasks with error handling."""
         try:
-            await run_subscribe(*args, **kwargs)
+            await task_func(*args, **kwargs)
         except Exception as e:
-            logger.error(f"Subscribe task failed: {e}")
+            logger.error(f"{task_name} task failed: {e}")
             # Trigger error handling which will propagate to client
-            await self._notify_error("subscribe_task_error", e)
-            raise
-
-    async def _run_publish_with_error_handling(self, *args, **kwargs):
-        """Wrapper for run_publish with error handling."""
-        try:
-            await run_publish(*args, **kwargs)
-        except Exception as e:
-            logger.error(f"Publish task failed: {e}")
-            # Trigger error handling which will propagate to client
-            await self._notify_error("publish_task_error", e)
+            await self._notify_error(f"{task_name.lower()}_task_error", e)
             raise
 
     async def _monitor_subscription_end(self):
@@ -146,7 +136,9 @@ class TrickleProtocol(TrickleComponent):
         
         # Start subscribe and publish tasks with error monitoring
         self.subscribe_task = asyncio.create_task(
-            self._run_subscribe_with_error_handling(
+            self._run_task_with_error_handling(
+                run_subscribe,
+                "Subscribe",
                 self.subscribe_url, 
                 self.subscribe_queue.put, 
                 metadata_cache.put, 
@@ -159,7 +151,9 @@ class TrickleProtocol(TrickleComponent):
         )
         
         self.publish_task = asyncio.create_task(
-            self._run_publish_with_error_handling(
+            self._run_task_with_error_handling(
+                run_publish,
+                "Publish",
                 self.publish_url, 
                 self.publish_queue.get, 
                 metadata_cache.get, 
