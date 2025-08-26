@@ -146,6 +146,10 @@ if __name__ == "__main__":
         model_loader=load_model,
         param_updater=update_params,
         name="green-processor",
-        port=8000
+        port=8001,
+        # Frame skipping configuration (optional)
+        enable_frame_skipping=True,    # Enable intelligent frame skipping (default: True)
+        target_fps=30.0,               # Target FPS for output (default: None = auto-detect)
+        auto_target_fps=False,         # Don't auto-detect FPS (default: True)
     )
     processor.run()

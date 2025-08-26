@@ -23,6 +23,9 @@ class StreamProcessor:
         send_data_interval: Optional[float] = 0.333,
         name: str = "stream-processor",
         port: int = 8000,
+        enable_frame_skipping: bool = True,
+        target_fps: Optional[float] = None,
+        auto_target_fps: bool = True,
         **server_kwargs
     ):
         """
@@ -33,8 +36,12 @@ class StreamProcessor:
             audio_processor: Async function that processes AudioFrame objects  
             model_loader: Optional function called during load_model phase
             param_updater: Optional function called when parameters update
+            send_data_interval: Interval for sending data
             name: Processor name
             port: Server port
+            enable_frame_skipping: Whether to enable intelligent frame skipping
+            target_fps: Target FPS for frame skipping (None = auto-detect)
+            auto_target_fps: Whether to automatically detect target FPS
             **server_kwargs: Additional arguments passed to StreamServer
         """
         # Validate that processors are async functions
@@ -50,6 +57,9 @@ class StreamProcessor:
         self.send_data_interval = send_data_interval
         self.name = name
         self.port = port
+        self.enable_frame_skipping = enable_frame_skipping
+        self.target_fps = target_fps
+        self.auto_target_fps = auto_target_fps
         self.server_kwargs = server_kwargs
         
         # Create internal frame processor
@@ -65,6 +75,9 @@ class StreamProcessor:
         self.server = StreamServer(
             frame_processor=self._frame_processor,
             port=port,
+            enable_frame_skipping=enable_frame_skipping,
+            target_fps=target_fps,
+            auto_target_fps=auto_target_fps,
             **server_kwargs
         )
     

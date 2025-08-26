@@ -60,6 +60,10 @@ class StreamServer:
         publisher_timeout: Optional[float] = None,
         subscriber_timeout: Optional[float] = None,
         app_kwargs: Optional[Dict[str, Any]] = None,
+        # Frame skipping configuration
+        enable_frame_skipping: bool = True,
+        target_fps: Optional[float] = None,
+        auto_target_fps: bool = True,
 
     ):
         """Initialize StreamServer.
@@ -81,6 +85,9 @@ class StreamServer:
             on_startup: List of startup handlers
             on_shutdown: List of shutdown handlers
             app_kwargs: Additional kwargs for aiohttp.web.Application
+            enable_frame_skipping: Whether to enable intelligent frame skipping
+            target_fps: Target FPS for frame skipping (None = auto-detect)
+            auto_target_fps: Whether to automatically detect target FPS
         """
         self.frame_processor = frame_processor
         self.port = port
@@ -101,6 +108,11 @@ class StreamServer:
         self.capability_name = capability_name or os.getenv("CAPABILITY_NAME", os.getenv("MODEL_ID",""))
         self.publisher_timeout = publisher_timeout
         self.subscriber_timeout = subscriber_timeout
+        
+        # Frame skipping configuration
+        self.enable_frame_skipping = enable_frame_skipping
+        self.target_fps = target_fps
+        self.auto_target_fps = auto_target_fps
         
         # Stream management - simple and direct
         self.current_client: Optional[TrickleClient] = None
@@ -330,6 +342,8 @@ class StreamServer:
                 protocol=protocol,
                 frame_processor=self.frame_processor,
                 control_handler=self._handle_control_message,
+                target_fps=self.target_fps,
+                auto_target_fps=self.auto_target_fps,
             )
             
             # Update state
