@@ -339,8 +339,14 @@ class TrickleClient:
                             await self.output_queue.put(fallback_output)
             
             # Send sentinel to signal egress loop to complete
-            logger.info("Processing loop completed, sending sentinel to egress loop")
+            logger.info("Processing  loop completed, sending sentinel to egress loop")
             await self.output_queue.put(None)
+            
+            # Set stop event to signal other loops to complete
+            self.stop_event.set()
+            
+            # Set stop event to signal other loops to complete
+            self.stop_event.set()
             
         except Exception as e:
             logger.error(f"Error in processing loop: {e}")
@@ -356,7 +362,7 @@ class TrickleClient:
                         self.error_callback("processing_loop_error", e)
                 except Exception as cb_error:
                     logger.error(f"Error in error callback: {cb_error}")
-
+    
     async def _egress_loop(self):
         """Handle outgoing frames."""
         try:

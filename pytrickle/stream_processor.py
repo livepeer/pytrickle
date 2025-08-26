@@ -91,13 +91,20 @@ class StreamProcessor:
             logger.warning("No active client connection, cannot send data")
             return False
         
-        # Check if client is in error state
-        if self.server.current_client.error_event.is_set():
-            logger.debug("Client is in error state, not sending data")
+        client = self.server.current_client
+        
+        # Check if client is in error state or stopping
+        if client.error_event.is_set() or client.stop_event.is_set():
+            logger.debug("Client is in error/stop state, not sending data")
+            return False
+        
+        # Check if protocol is shutting down
+        if client.protocol and client.protocol.shutdown_event.is_set():
+            logger.debug("Protocol is shutting down, not sending data")
             return False
             
         try:
-            await self.server.current_client.publish_data(data)
+            await client.publish_data(data)
             return True
         except Exception as e:
             logger.error(f"Error sending data: {e}")
