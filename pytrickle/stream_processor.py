@@ -79,11 +79,6 @@ class StreamProcessor:
         if client.error_event.is_set() or client.stop_event.is_set():
             logger.debug("Client is in error/stop state, not sending data")
             return False
-        
-        # Check if protocol is shutting down
-        if client.protocol and client.protocol.shutdown_event.is_set():
-            logger.debug("Protocol is shutting down, not sending data")
-            return False
             
         try:
             await client.publish_data(data)

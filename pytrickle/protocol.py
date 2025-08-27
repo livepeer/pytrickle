@@ -99,6 +99,13 @@ class TrickleProtocol(TrickleComponent):
                 self.shutdown_event.set()
                 self.subscription_ended.set()
                 
+                # Notify client of subscription end via error callback
+                if self.error_callback:
+                    try:
+                        await self.error_callback("subscription_ended", None)
+                    except Exception as e:
+                        logger.error(f"Error in subscription end callback: {e}")
+                
                 # Immediately signal shutdown to events publisher to stop background tasks
                 if self.events_publisher:
                     await self.events_publisher.shutdown()
@@ -199,6 +206,13 @@ class TrickleProtocol(TrickleComponent):
         
         # Signal shutdown immediately to all components
         self.shutdown_event.set()
+        
+        # Notify client of protocol shutdown via error callback
+        if self.error_callback:
+            try:
+                await self.error_callback("protocol_shutdown", None)
+            except Exception as e:
+                logger.error(f"Error in shutdown callback: {e}")
         
         # Stop heartbeat task first
         if self._heartbeat_task and not self._heartbeat_task.done():

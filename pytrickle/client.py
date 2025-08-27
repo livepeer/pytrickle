@@ -143,11 +143,18 @@ class TrickleClient:
         self.data_queue.append(data)
 
     async def _on_protocol_error(self, error_type: str, exception: Optional[Exception] = None):
-        """Handle protocol errors by triggering client shutdown."""
-        logger.error(f"Protocol error received: {error_type} - {exception}")
+        """Handle protocol errors and shutdown events."""
+        logger.info(f"Protocol event received: {error_type} - {exception}")
         
-        # Set error event to trigger shutdown of all loops
-        self.error_event.set()
+        # Set appropriate event based on error type
+        if error_type in ("protocol_shutdown", "subscription_ended"):
+            # Clean shutdown - set stop event
+            self.stop_event.set()
+            logger.debug(f"Set stop_event due to {error_type}")
+        else:
+            # Error condition - set error event
+            self.error_event.set()
+            logger.debug(f"Set error_event due to {error_type}")
         
         # Also call the client's error callback if available
         if self.error_callback:
