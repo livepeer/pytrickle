@@ -207,6 +207,7 @@ if __name__ == "__main__":
         param_updater=update_params,
         on_stream_stop=on_stream_stop,
         name="green-processor",
-        port=8000
+        port=8000,
+        version="0.0.1"
     )
     processor.run()

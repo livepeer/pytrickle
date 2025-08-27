@@ -13,7 +13,7 @@ from dataclasses import dataclass
 import os
 
 from aiohttp import web
-
+from .version import __version__
 
 from .api import StreamParamsUpdateRequest, StreamStartRequest, Version, HardwareInformation, HardwareStats
 from .state import StreamState, PipelineState
@@ -227,6 +227,7 @@ class StreamServer:
         system_routes = [
             ("/health", self._handle_health),
             ("/version", self._handle_version),
+            ("/app-version", self._handle_app_version),
             ("/hardware/info", self._handle_hardware_info),
             ("/hardware/stats", self._handle_hardware_stats),
         ]
@@ -525,12 +526,18 @@ class StreamServer:
             }, status=500)
     
     async def _handle_version(self, request: web.Request) -> web.Response:
-        """Handle health check requests."""
+        """Handle version requests - returns package version."""
         return web.json_response(Version(
             pipeline=self.pipeline,
             model_id=self.capability_name,
-            version=self.version
+            version=__version__
         ).model_dump())
+    
+    async def _handle_app_version(self, request: web.Request) -> web.Response:
+        """Handle app version requests - returns customizable application version."""
+        return web.json_response({
+            "version": self.version
+        })
     
     async def _handle_hardware_info(self, request: web.Request) -> web.Response:
         """Handle hardware info requests."""

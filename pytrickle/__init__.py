@@ -30,8 +30,7 @@ from .stream_processor import StreamProcessor
 from .fps_meter import FPSMeter
 
 from . import api
-
-__version__ = "0.1.1"
+from .version import __version__
 
 __all__ = [
     "TrickleClient",
@@ -56,5 +55,6 @@ __all__ = [
     "api",
     "ErrorCallback",
     "FrameProcessor",
-    "FPSMeter"
+    "FPSMeter",
+    "__version__"
 ] 
