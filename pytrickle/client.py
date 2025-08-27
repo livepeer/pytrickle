@@ -307,19 +307,17 @@ class TrickleClient:
                 
                 # Pull all available items from the data_queue
                 data_items = []
-                while True:
-                    try:
-                        data = self.data_queue.popleft()
-                        if data is None:
-                            # Sentinel value to stop loop
-                            if data_items:
-                                # Send any remaining items before stopping
-                                break
-                            else:
-                                return  # No items to send, just stop
+                while len(self.data_queue) > 0 and not self.stop_event.is_set() and not self.error_event.is_set():
+                    data = self.data_queue.popleft()
+                    if data is None:
+                        # Sentinel value to stop loop
+                        if data_items:
+                            # Send any remaining items before stopping
+                            break
+                        else:
+                            return  # No items to send, just stop
+                    else:
                         data_items.append(data)
-                    except IndexError:
-                        break  # No more items in queue
                 
                 # Send all collected data items
                 if len(data_items) > 0:
