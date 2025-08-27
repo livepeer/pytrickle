@@ -128,7 +128,7 @@ class _InternalFrameProcessor(FrameProcessor):
         """Load model using provided function."""
         if self.model_loader:
             try:
-                self.model_loader(self, **kwargs)
+                self.model_loader(**kwargs)
                 logger.info(f"StreamProcessor '{self.name}' model loaded successfully")
             except Exception as e:
                 logger.error(f"Error in model loader: {e}")

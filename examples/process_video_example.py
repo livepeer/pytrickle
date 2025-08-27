@@ -23,14 +23,11 @@ processor = None
 background_tasks = []
 background_task_started = False
 
-def load_model(processor_ref, **kwargs):
+def load_model(**kwargs):
     """Initialize processor state - called during model loading phase."""
     global intensity, ready, processor
     
     logger.info(f"load_model called with kwargs: {kwargs}")
-    
-    # Store processor reference for later use
-    processor = processor_ref
     
     # Set processor variables from kwargs or use defaults
     intensity = kwargs.get('intensity', 0.5)
@@ -41,7 +38,6 @@ def load_model(processor_ref, **kwargs):
     
     # Note: Cannot start background tasks here as event loop isn't running yet
     # Background task will be started when first frame is processed
-    
     ready = True
     logger.info(f"✅ OpenCV Green processor with horizontal flip ready (intensity: {intensity}, ready: {ready})")
 
