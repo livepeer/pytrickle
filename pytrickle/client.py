@@ -114,12 +114,9 @@ class TrickleClient:
             logger.info("Stopping protocol due to client loops ending")
             
             # Call the optional on_stream_stop callback before stopping protocol
-            if hasattr(self.frame_processor, 'on_stream_stop') and self.frame_processor.on_stream_stop:
+            if self.frame_processor.on_stream_stop:
                 try:
-                    if asyncio.iscoroutinefunction(self.frame_processor.on_stream_stop):
-                        await self.frame_processor.on_stream_stop()
-                    else:
-                        self.frame_processor.on_stream_stop()
+                    await self.frame_processor.on_stream_stop()
                     logger.info("Stream stop callback executed successfully")
                 except Exception as e:
                     logger.error(f"Error in stream stop callback: {e}")
@@ -155,14 +152,9 @@ class TrickleClient:
         # Also call the client's error callback if available
         if self.error_callback:
             try:
-                if asyncio.iscoroutinefunction(self.error_callback):
-                    await self.error_callback(error_type, exception)
-                else:
-                    self.error_callback(error_type, exception)
+                await self.error_callback(error_type, exception)
             except Exception as e:
                 logger.error(f"Error in client error callback: {e}")
-
-
 
     async def _ingress_loop(self):
         """Process incoming frames with native async support."""
@@ -207,10 +199,7 @@ class TrickleClient:
                     # Notify frame processor about the error
                     if self.error_callback:
                         try:
-                            if asyncio.iscoroutinefunction(self.error_callback):
-                                await self.error_callback("frame_processing_error", e)
-                            else:
-                                self.error_callback("frame_processing_error", e)
+                            await self.error_callback("frame_processing_error", e)
                         except Exception as cb_error:
                             logger.error(f"Error in frame processing error callback: {cb_error}")
                     
@@ -237,10 +226,7 @@ class TrickleClient:
             # Notify parent if error callback is set
             if self.error_callback:
                 try:
-                    if asyncio.iscoroutinefunction(self.error_callback):
-                        await self.error_callback("ingress_loop_error", e)
-                    else:
-                        self.error_callback("ingress_loop_error", e)
+                    await self.error_callback("ingress_loop_error", e)
                 except Exception as cb_error:
                     logger.error(f"Error in error callback: {cb_error}")
     
@@ -274,10 +260,7 @@ class TrickleClient:
             # Notify parent if error callback is set
             if self.error_callback:
                 try:
-                    if asyncio.iscoroutinefunction(self.error_callback):
-                        await self.error_callback("egress_loop_error", e)
-                    else:
-                        self.error_callback("egress_loop_error", e)
+                    await self.error_callback("egress_loop_error", e)
                 except Exception as cb_error:
                     logger.error(f"Error in error callback: {cb_error}")
     
@@ -298,10 +281,7 @@ class TrickleClient:
             # Notify parent if error callback is set
             if self.error_callback:
                 try:
-                    if asyncio.iscoroutinefunction(self.error_callback):
-                        await self.error_callback("control_loop_error", e)
-                    else:
-                        self.error_callback("control_loop_error", e)
+                    await self.error_callback("control_loop_error", e)
                 except Exception as cb_error:
                     logger.error(f"Error in error callback: {cb_error}")
     

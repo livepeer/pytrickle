@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Optional, Callable, Dict, Any, List, Union, Awaitable
+from typing import Optional, Callable, Dict, Any, List, Union, Awaitable, Coroutine
 
 from pytrickle.state import PipelineState
 
@@ -21,7 +21,7 @@ class StreamProcessor:
         audio_processor: Optional[AudioProcessor] = None,
         model_loader: Optional[Callable[[], None]] = None,
         param_updater: Optional[Callable[[Dict[str, Any]], None]] = None,
-        on_stream_stop: Optional[Callable[[], None]] = None,
+        on_stream_stop: Optional[Callable[[], Coroutine[Any, Any, None]]] = None,
         send_data_interval: Optional[float] = 0.333,
         name: str = "stream-processor",
         port: int = 8000,
@@ -35,7 +35,7 @@ class StreamProcessor:
             audio_processor: Function that processes AudioFrame objects  
             model_loader: Optional function called during load_model phase
             param_updater: Optional function called when parameters update
-            on_stream_stop: Optional function called when stream stops/client disconnects
+            on_stream_stop: Optional async function called when stream stops/client disconnects
             name: Processor name
             port: Server port
             **server_kwargs: Additional arguments passed to StreamServer
@@ -109,7 +109,7 @@ class _InternalFrameProcessor(FrameProcessor):
         audio_processor: Optional[AudioProcessor] = None,
         model_loader: Optional[Callable[[], None]] = None,
         param_updater: Optional[Callable[[Dict[str, Any]], None]] = None,
-        on_stream_stop: Optional[Callable[[], None]] = None,
+        on_stream_stop: Optional[Callable[[], Coroutine[Any, Any, None]]] = None,
         name: str = "internal-processor"
     ):
         # Set attributes first before calling parent

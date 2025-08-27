@@ -67,10 +67,7 @@ class TrickleComponent:
         
         if self.error_callback:
             try:
-                if asyncio.iscoroutinefunction(self.error_callback):
-                    await self.error_callback(error_type, exception)
-                else:
-                    self.error_callback(error_type, exception)
+                await self.error_callback(error_type, exception)
             except Exception as e:
                 logger.error(f"Error in error callback: {e}")
 

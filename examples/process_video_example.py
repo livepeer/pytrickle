@@ -83,10 +83,10 @@ async def send_periodic_status():
     except Exception as e:
         logger.error(f"Error in background status task: {e}")
 
-def on_stream_stop():
+async def on_stream_stop():
     """Called when stream stops - cleanup background tasks."""
     global background_tasks, background_task_started
-    logger.info("🛑 Stream stopped, cleaning up background tasks")
+    logger.info("Stream stopped, cleaning up background tasks")
     
     for task in background_tasks:
         if not task.done():
@@ -95,7 +95,7 @@ def on_stream_stop():
     
     background_tasks.clear()
     background_task_started = False  # Reset flag for next stream
-    logger.info("✅ All background tasks cleaned up")
+    logger.info("All background tasks cleaned up")
 
 async def process_video(frame: VideoFrame) -> VideoFrame:
     """Apply horizontal flip and green hue using OpenCV."""
