@@ -140,7 +140,7 @@ class TrickleSubscriber(TrickleComponent):
                 self.idx = idx + 1
 
             # Set up the next connection in the background
-            self._track_background_task(asyncio.create_task(self._preconnect_next_segment()), "preconnect")
+            self._track_background_task(asyncio.create_task(self._preconnect_next_segment()))
             logger.debug(f"Created background preconnect task for {self.base_url}, total tasks: {len(self._background_tasks)}")
 
         return segment

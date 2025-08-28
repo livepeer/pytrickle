@@ -84,7 +84,7 @@ class TricklePublisher(TrickleComponent):
         try:
             # Create a queue for streaming data incrementally
             queue = asyncio.Queue()
-            self._track_background_task(asyncio.create_task(self._run_post(url, queue)), "POST")
+            self._track_background_task(asyncio.create_task(self._run_post(url, queue)))
             return queue
         except Exception as e:
             logger.error(f"Failed to complete POST for {url}: {e}")
@@ -179,7 +179,7 @@ class TricklePublisher(TrickleComponent):
 
             # Only create background task if not shutting down
             if not self._should_stop():
-                self._track_background_task(asyncio.create_task(self._preconnect_next_segment()), "preconnect")
+                self._track_background_task(asyncio.create_task(self._preconnect_next_segment()))
 
         return SegmentWriter(writer)
 

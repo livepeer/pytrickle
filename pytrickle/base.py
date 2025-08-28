@@ -82,7 +82,7 @@ class TrickleComponent:
             "should_stop": self._should_stop()
         }
 
-    def _track_background_task(self, task: asyncio.Task, task_type: str = "background"):
+    def _track_background_task(self, task: asyncio.Task):
         """Track a background task with unified cleanup handling."""
         self._background_tasks.append(task)
         
