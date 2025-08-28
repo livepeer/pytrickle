@@ -23,7 +23,7 @@ processor = None
 background_tasks = []
 background_task_started = False
 
-def load_model(**kwargs):
+async def load_model(**kwargs):
     """Initialize processor state - called during model loading phase."""
     global intensity, ready, processor
     
@@ -185,7 +185,7 @@ async def process_video(frame: VideoFrame) -> VideoFrame:
     
     return frame.replace_tensor(result_tensor)
 
-def update_params(params: dict):
+async def update_params(params: dict):
     """Update green hue intensity (0.0 to 1.0)."""
     global intensity, delay
     if "intensity" in params:
