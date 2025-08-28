@@ -297,21 +297,8 @@ class TrickleClient:
         try:
             while not self.stop_event.is_set() and not self.error_event.is_set():
                 # Wait for send_data_interval or until stop/error event is set
-                try:
-                    done, pending = await asyncio.wait(
-                        [asyncio.create_task(self.stop_event.wait()), 
-                         asyncio.create_task(self.error_event.wait())],
-                        timeout=self.send_data_interval,
-                        return_when=asyncio.FIRST_COMPLETED
-                    )
-                    # Cancel any pending tasks
-                    for task in pending:
-                        task.cancel()
-                    if done:
-                        break  # Stop or error event was set, exit loop
-                except asyncio.TimeoutError:
-                    pass  # Timeout is expected, continue to process data
-                
+                if await self._wait_for_interval(self.send_data_interval):
+                    break  # Stop or error event was set, exit loop
                 # Pull all available items from the data_queue
                 data_items = []
                 while len(self.data_queue) > 0 and not self.stop_event.is_set() and not self.error_event.is_set():
@@ -360,4 +347,29 @@ class TrickleClient:
         except Exception as e:
             logger.error(f"Error sending output: {e}")
 
- 
+    async def _wait_for_interval(self, interval: float):
+        """Wait for the specified interval or until stop/error event is set.
+        
+        Returns:
+            bool: True if stop/error event is set, False if timeout occurred (should continue)
+        """
+        try:
+            done, pending = await asyncio.wait(
+                [asyncio.create_task(self.stop_event.wait()), 
+                asyncio.create_task(self.error_event.wait())],
+                timeout=interval,
+                return_when=asyncio.FIRST_COMPLETED
+            )
+            # Cancel any pending tasks
+            for task in pending:
+                task.cancel()
+            
+            # Return True if any event is set (done set has completed tasks)
+            return len(done) > 0
+        except asyncio.TimeoutError:
+            # Timeout means no event was set, should continue processing
+            return False
+        except Exception as e:
+            logger.error(f"Error in wait_for_interval: {e}")
+            # On error, signal to stop the loop
+            return True
