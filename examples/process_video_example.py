@@ -3,6 +3,7 @@
 OpenCV Green Processor using StreamProcessor
 """
 
+import asyncio
 import logging
 import torch
 import cv2
@@ -18,10 +19,13 @@ logger = logging.getLogger(__name__)
 intensity = 0.8
 delay = 0.0
 ready = False
+processor = None
+background_tasks = []
+background_task_started = False
 
 def load_model(**kwargs):
     """Initialize processor state - called during model loading phase."""
-    global intensity, ready
+    global intensity, ready, processor
     
     logger.info(f"load_model called with kwargs: {kwargs}")
     
@@ -32,12 +36,69 @@ def load_model(**kwargs):
     # Load the model here if needed
     # model = torch.load('my_model.pth')
     
+    # Note: Cannot start background tasks here as event loop isn't running yet
+    # Background task will be started when first frame is processed
     ready = True
     logger.info(f"✅ OpenCV Green processor with horizontal flip ready (intensity: {intensity}, ready: {ready})")
+
+def start_background_task():
+    """Start the background task if not already started."""
+    global background_task_started, background_tasks
+    
+    if not background_task_started and processor:
+        task = asyncio.create_task(send_periodic_status())
+        background_tasks.append(task)
+        background_task_started = True
+        logger.info("Started background status task")
+
+async def send_periodic_status():
+    """Background task that sends periodic status updates."""
+    global processor
+    counter = 0
+    try:
+        while True:
+            await asyncio.sleep(5.0)  # Send status every 5 seconds
+            counter += 1
+            if processor:
+                status_data = {
+                    "type": "status_update",
+                    "counter": counter,
+                    "intensity": intensity,
+                    "ready": ready,
+                    "timestamp": time.time()
+                }
+                success = await processor.send_data(str(status_data))
+                if success:
+                    logger.info(f"Sent status update #{counter}")
+                else:
+                    logger.warning(f"Failed to send status update #{counter}, stopping background task")
+                    break  # Exit the loop if sending fails
+    except asyncio.CancelledError:
+        logger.info("Background status task cancelled")
+        raise
+    except Exception as e:
+        logger.error(f"Error in background status task: {e}")
+
+async def on_stream_stop():
+    """Called when stream stops - cleanup background tasks."""
+    global background_tasks, background_task_started
+    logger.info("Stream stopped, cleaning up background tasks")
+    
+    for task in background_tasks:
+        if not task.done():
+            task.cancel()
+            logger.info("Cancelled background task")
+    
+    background_tasks.clear()
+    background_task_started = False  # Reset flag for next stream
+    logger.info("All background tasks cleaned up")
 
 async def process_video(frame: VideoFrame) -> VideoFrame:
     """Apply horizontal flip and green hue using OpenCV."""
     global intensity, ready, delay
+    
+    # Start background task on first frame (when event loop is running)
+    start_background_task()
     
     # Simulated processing time
     time.sleep(delay)
@@ -144,6 +205,7 @@ if __name__ == "__main__":
         video_processor=process_video,
         model_loader=load_model,
         param_updater=update_params,
+        on_stream_stop=on_stream_stop,
         name="green-processor",
         port=8000
     )

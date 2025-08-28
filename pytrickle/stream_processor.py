@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Optional, Callable, Dict, Any, List, Union, Awaitable
+from typing import Optional, Callable, Dict, Any, List, Union, Awaitable, Coroutine
 
 from pytrickle.state import PipelineState
 
@@ -21,6 +21,7 @@ class StreamProcessor:
         audio_processor: Optional[AudioProcessor] = None,
         model_loader: Optional[Callable[[], None]] = None,
         param_updater: Optional[Callable[[Dict[str, Any]], None]] = None,
+        on_stream_stop: Optional[Callable[[], None]] = None,
         send_data_interval: Optional[float] = 0.333,
         name: str = "stream-processor",
         port: int = 8000,
@@ -34,6 +35,7 @@ class StreamProcessor:
             audio_processor: Function that processes AudioFrame objects  
             model_loader: Optional function called during load_model phase
             param_updater: Optional function called when parameters update
+            on_stream_stop: Optional async function called when stream stops/client disconnects
             name: Processor name
             port: Server port
             **server_kwargs: Additional arguments passed to StreamServer
@@ -42,6 +44,7 @@ class StreamProcessor:
         self.audio_processor = audio_processor
         self.model_loader = model_loader
         self.param_updater = param_updater
+        self.on_stream_stop = on_stream_stop
         self.send_data_interval = send_data_interval
         self.name = name
         self.port = port
@@ -53,6 +56,7 @@ class StreamProcessor:
             audio_processor=audio_processor,
             model_loader=model_loader,
             param_updater=param_updater,
+            on_stream_stop=on_stream_stop,
             name=name
         )
         
@@ -68,8 +72,20 @@ class StreamProcessor:
         if self.server.current_client is None:
             logger.warning("No active client connection, cannot send data")
             return False
-        await self.server.current_client.publish_data(data)
-        return True
+        
+        client = self.server.current_client
+        
+        # Check if client is in error state or stopping
+        if client.error_event.is_set() or client.stop_event.is_set():
+            logger.debug("Client is in error/stop state, not sending data")
+            return False
+            
+        try:
+            await client.publish_data(data)
+            return True
+        except Exception as e:
+            logger.error(f"Error sending data: {e}")
+            return False
 
     async def run_forever(self):
         """Run the stream processor server forever."""
@@ -88,6 +104,7 @@ class _InternalFrameProcessor(FrameProcessor):
         audio_processor: Optional[AudioProcessor] = None,
         model_loader: Optional[Callable[[], None]] = None,
         param_updater: Optional[Callable[[Dict[str, Any]], None]] = None,
+        on_stream_stop: Optional[Callable[[], None]] = None,
         name: str = "internal-processor"
     ):
         # Set attributes first before calling parent
@@ -95,6 +112,7 @@ class _InternalFrameProcessor(FrameProcessor):
         self.audio_processor = audio_processor
         self.model_loader = model_loader
         self.param_updater = param_updater
+        self.on_stream_stop = on_stream_stop
         self._ready = False
         self.name = name
         

@@ -141,10 +141,7 @@ class TrickleStreamHandler(StreamHandler):
         # Call external error callback if provided
         if self._error_callback:
             try:
-                if asyncio.iscoroutinefunction(self._error_callback):
-                    await self._error_callback(error_type, exception)
-                else:
-                    self._error_callback(error_type, exception)
+                await self._error_callback(error_type, exception)
             except Exception as e:
                 logger.error(f"Error in error callback: {e}")
     

@@ -47,6 +47,10 @@ class TrickleClient:
         # Use provided error_callback, or fall back to frame_processor's error_callback
         self.error_callback = error_callback or frame_processor.error_callback
         
+        # Connect protocol error callback to client error handling
+        if not self.protocol.error_callback:
+            self.protocol.error_callback = self._on_protocol_error
+        
         # Client state
         self.running = False
         self.request_id = "default"
@@ -108,6 +112,15 @@ class TrickleClient:
         finally:
             self.running = False
             logger.info("Stopping protocol due to client loops ending")
+            
+            # Call the optional on_stream_stop callback before stopping protocol
+            if self.frame_processor.on_stream_stop:
+                try:
+                    await self.frame_processor.on_stream_stop()
+                    logger.info("Stream stop callback executed successfully")
+                except Exception as e:
+                    logger.error(f"Error in stream stop callback: {e}")
+            
             await self.protocol.stop()
     
     async def stop(self):
@@ -128,6 +141,27 @@ class TrickleClient:
     async def publish_data(self, data: str):
         """Publish data via the protocol's data publisher."""
         self.data_queue.append(data)
+
+    async def _on_protocol_error(self, error_type: str, exception: Optional[Exception] = None):
+        """Handle protocol errors and shutdown events."""
+        logger.info(f"Protocol event received: {error_type} - {exception}")
+        
+        # Set appropriate event based on error type
+        if error_type in ("protocol_shutdown", "subscription_ended"):
+            # Clean shutdown - set stop event
+            self.stop_event.set()
+            logger.debug(f"Set stop_event due to {error_type}")
+        else:
+            # Error condition - set error event
+            self.error_event.set()
+            logger.debug(f"Set error_event due to {error_type}")
+        
+        # Also call the client's error callback if available
+        if self.error_callback:
+            try:
+                await self.error_callback(error_type, exception)
+            except Exception as e:
+                logger.error(f"Error in client error callback: {e}")
 
     async def _ingress_loop(self):
         """Process incoming frames with native async support."""
@@ -172,10 +206,7 @@ class TrickleClient:
                     # Notify frame processor about the error
                     if self.error_callback:
                         try:
-                            if asyncio.iscoroutinefunction(self.error_callback):
-                                await self.error_callback("frame_processing_error", e)
-                            else:
-                                self.error_callback("frame_processing_error", e)
+                            await self.error_callback("frame_processing_error", e)
                         except Exception as cb_error:
                             logger.error(f"Error in frame processing error callback: {cb_error}")
                     
@@ -191,6 +222,9 @@ class TrickleClient:
             logger.info("Ingress loop completed, sending sentinel to egress loop")
             await self._send_output(None)
             
+            # Set stop event to signal other loops to complete
+            self.stop_event.set()
+            
         except Exception as e:
             logger.error(f"Error in ingress loop: {e}")
             # Set error state and stop event to trigger other loops to stop
@@ -199,12 +233,10 @@ class TrickleClient:
             # Notify parent if error callback is set
             if self.error_callback:
                 try:
-                    if asyncio.iscoroutinefunction(self.error_callback):
-                        await self.error_callback("ingress_loop_error", e)
-                    else:
-                        self.error_callback("ingress_loop_error", e)
+                    await self.error_callback("ingress_loop_error", e)
                 except Exception as cb_error:
                     logger.error(f"Error in error callback: {cb_error}")
+    
     async def _egress_loop(self):
         """Handle outgoing frames."""
         try:
@@ -235,10 +267,7 @@ class TrickleClient:
             # Notify parent if error callback is set
             if self.error_callback:
                 try:
-                    if asyncio.iscoroutinefunction(self.error_callback):
-                        await self.error_callback("egress_loop_error", e)
-                    else:
-                        self.error_callback("egress_loop_error", e)
+                    await self.error_callback("egress_loop_error", e)
                 except Exception as cb_error:
                     logger.error(f"Error in error callback: {cb_error}")
     
@@ -259,39 +288,30 @@ class TrickleClient:
             # Notify parent if error callback is set
             if self.error_callback:
                 try:
-                    if asyncio.iscoroutinefunction(self.error_callback):
-                        await self.error_callback("control_loop_error", e)
-                    else:
-                        self.error_callback("control_loop_error", e)
+                    await self.error_callback("control_loop_error", e)
                 except Exception as cb_error:
                     logger.error(f"Error in error callback: {cb_error}")
     
     async def _send_data_loop(self):
         """Send data to the server every 333ms, batching all available items."""
         try:
-            while not self.stop_event.is_set():
-                # Wait for send_data_interval or until stop event is set
-                try:
-                    await asyncio.wait_for(self.stop_event.wait(), timeout=self.send_data_interval)
-                    break  # Stop event was set, exit loop
-                except asyncio.TimeoutError:
-                    pass  # Timeout is expected, continue to process data
-                
+            while not self.stop_event.is_set() and not self.error_event.is_set():
+                # Wait for send_data_interval or until stop/error event is set
+                if await self._wait_for_interval(self.send_data_interval):
+                    break  # Stop or error event was set, exit loop
                 # Pull all available items from the data_queue
                 data_items = []
-                while True:
-                    try:
-                        data = self.data_queue.popleft()
-                        if data is None:
-                            # Sentinel value to stop loop
-                            if data_items:
-                                # Send any remaining items before stopping
-                                break
-                            else:
-                                return  # No items to send, just stop
+                while len(self.data_queue) > 0 and not self.stop_event.is_set() and not self.error_event.is_set():
+                    data = self.data_queue.popleft()
+                    if data is None:
+                        # Sentinel value to stop loop
+                        if data_items:
+                            # Send any remaining items before stopping
+                            break
+                        else:
+                            return  # No items to send, just stop
+                    else:
                         data_items.append(data)
-                    except IndexError:
-                        break  # No more items in queue
                 
                 # Send all collected data items
                 if len(data_items) > 0:
@@ -327,4 +347,29 @@ class TrickleClient:
         except Exception as e:
             logger.error(f"Error sending output: {e}")
 
- 
+    async def _wait_for_interval(self, interval: float):
+        """Wait for the specified interval or until stop/error event is set.
+        
+        Returns:
+            bool: True if stop/error event is set, False if timeout occurred (should continue)
+        """
+        try:
+            done, pending = await asyncio.wait(
+                [asyncio.create_task(self.stop_event.wait()), 
+                asyncio.create_task(self.error_event.wait())],
+                timeout=interval,
+                return_when=asyncio.FIRST_COMPLETED
+            )
+            # Cancel any pending tasks
+            for task in pending:
+                task.cancel()
+            
+            # Return True if any event is set (done set has completed tasks)
+            return len(done) > 0
+        except asyncio.TimeoutError:
+            # Timeout means no event was set, should continue processing
+            return False
+        except Exception as e:
+            logger.error(f"Error in wait_for_interval: {e}")
+            # On error, signal to stop the loop
+            return True

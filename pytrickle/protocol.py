@@ -11,7 +11,7 @@ import queue
 import logging
 from typing import Optional, AsyncGenerator
 
-from .base import TrickleComponent, ComponentState
+from .base import TrickleComponent, ComponentState, setup_asyncio_exception_handler
 from .subscriber import TrickleSubscriber
 from .publisher import TricklePublisher
 from .media import run_subscribe, run_publish
@@ -77,10 +77,15 @@ class TrickleProtocol(TrickleComponent):
         # FPS tracking
         self.fps_meter = FPSMeter()
 
-    async def _on_component_error(self, error_type: str, exception: Optional[Exception] = None):
-        """Handle errors from subscriber/publisher components."""
-        logger.error(f"Component error: {error_type} - {exception}")
-        await self._notify_error(error_type, exception)
+    async def _run_task_with_error_handling(self, task_func, task_name: str, *args, **kwargs):
+        """Generic wrapper for running tasks with error handling."""
+        try:
+            await task_func(*args, **kwargs)
+        except Exception as e:
+            logger.error(f"{task_name} task failed: {e}")
+            # Trigger error handling which will propagate to client
+            await self._notify_error(f"{task_name.lower()}_task_error", e)
+            raise
 
     async def _monitor_subscription_end(self):
         """Monitor for subscription task completion and trigger immediate shutdown."""
@@ -93,6 +98,13 @@ class TrickleProtocol(TrickleComponent):
                 # Set shutdown and subscription ended events first
                 self.shutdown_event.set()
                 self.subscription_ended.set()
+                
+                # Notify client of subscription end via error callback
+                if self.error_callback:
+                    try:
+                        await self.error_callback("subscription_ended", None)
+                    except Exception as e:
+                        logger.error(f"Error in subscription end callback: {e}")
                 
                 # Immediately signal shutdown to events publisher to stop background tasks
                 if self.events_publisher:
@@ -119,6 +131,9 @@ class TrickleProtocol(TrickleComponent):
         self._update_state(ComponentState.STARTING)
         logger.info(f"Starting trickle protocol: subscribe={self.subscribe_url}, publish={self.publish_url}")
         
+        # Setup global asyncio exception handler to suppress aiohttp connection reset errors
+        setup_asyncio_exception_handler()
+        
         # Initialize queues
         self.subscribe_queue = queue.Queue()
         self.publish_queue = queue.Queue()
@@ -126,9 +141,11 @@ class TrickleProtocol(TrickleComponent):
         # Metadata cache to pass video metadata from decoder to encoder
         metadata_cache = LastValueCache()
         
-        # Start subscribe and publish tasks
+        # Start subscribe and publish tasks with error monitoring
         self.subscribe_task = asyncio.create_task(
-            run_subscribe(
+            self._run_task_with_error_handling(
+                run_subscribe,
+                "Subscribe",
                 self.subscribe_url, 
                 self.subscribe_queue.put, 
                 metadata_cache.put, 
@@ -141,7 +158,9 @@ class TrickleProtocol(TrickleComponent):
         )
         
         self.publish_task = asyncio.create_task(
-            run_publish(
+            self._run_task_with_error_handling(
+                run_publish,
+                "Publish",
                 self.publish_url, 
                 self.publish_queue.get, 
                 metadata_cache.get, 
@@ -154,13 +173,13 @@ class TrickleProtocol(TrickleComponent):
         if self.control_url and self.control_url.strip():
             self.control_subscriber = TrickleSubscriber(
                 self.control_url,
-                error_callback=self._on_component_error,
+                error_callback=self._notify_error,
                 connect_timeout_seconds=self.subscriber_timeout,
             )
             
         # Initialize events publisher if URL provided
         if self.events_url and self.events_url.strip():
-            self.events_publisher = TricklePublisher(self.events_url, "application/json", error_callback=self._on_component_error)
+            self.events_publisher = TricklePublisher(self.events_url, "application/json", error_callback=self._notify_error)
             if self.publisher_timeout is not None:
                 self.events_publisher.connect_timeout_seconds = self.publisher_timeout
             await self.events_publisher.start()
@@ -170,7 +189,7 @@ class TrickleProtocol(TrickleComponent):
             
         # Initialize data publisher if URL provided
         if self.data_url and self.data_url.strip():
-            self.data_publisher = TricklePublisher(self.data_url, "application/jsonl", error_callback=self._on_component_error)
+            self.data_publisher = TricklePublisher(self.data_url, "application/jsonl", error_callback=self._notify_error)
             if self.publisher_timeout is not None:
                 self.data_publisher.connect_timeout_seconds = self.publisher_timeout
             await self.data_publisher.start()
@@ -187,6 +206,13 @@ class TrickleProtocol(TrickleComponent):
         
         # Signal shutdown immediately to all components
         self.shutdown_event.set()
+        
+        # Notify client of protocol shutdown via error callback
+        if self.error_callback:
+            try:
+                await self.error_callback("protocol_shutdown", None)
+            except Exception as e:
+                logger.error(f"Error in shutdown callback: {e}")
         
         # Stop heartbeat task first
         if self._heartbeat_task and not self._heartbeat_task.done():

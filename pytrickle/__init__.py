@@ -6,11 +6,8 @@ Provides functionality to subscribe to and publish video streams with real-time 
 
 from typing import Union, Callable, Optional, Coroutine, Any
 
-# Type alias for error callback functions
-ErrorCallback = Union[
-    Callable[[str, Optional[Exception]], None],
-    Callable[[str, Optional[Exception]], Coroutine[Any, Any, None]]
-]
+# Type alias for error callback functions (async only)
+ErrorCallback = Callable[[str, Optional[Exception]], Coroutine[Any, Any, None]]
 
 from .client import TrickleClient
 from .server import StreamServer
