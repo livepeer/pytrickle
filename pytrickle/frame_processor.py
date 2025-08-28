@@ -122,3 +122,15 @@ class FrameProcessor(ABC):
             params: Dictionary of parameters to update
         """
         pass
+
+    async def on_stream_stop(self):
+        """
+        Called when a stream stops or client disconnects.
+        
+        Override this method to perform cleanup operations like:
+        - Cancelling background tasks
+        - Resetting internal state
+        - Cleaning up resources
+        - Stopping timers or loops
+        """
+        pass

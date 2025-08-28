@@ -21,7 +21,7 @@ class StreamProcessor:
         audio_processor: Optional[AudioProcessor] = None,
         model_loader: Optional[Callable[[], None]] = None,
         param_updater: Optional[Callable[[Dict[str, Any]], None]] = None,
-        on_stream_stop: Optional[Callable[[], Coroutine[Any, Any, None]]] = None,
+        on_stream_stop: Optional[Callable[[], None]] = None,
         send_data_interval: Optional[float] = 0.333,
         name: str = "stream-processor",
         port: int = 8000,
@@ -104,7 +104,7 @@ class _InternalFrameProcessor(FrameProcessor):
         audio_processor: Optional[AudioProcessor] = None,
         model_loader: Optional[Callable[[], None]] = None,
         param_updater: Optional[Callable[[Dict[str, Any]], None]] = None,
-        on_stream_stop: Optional[Callable[[], Coroutine[Any, Any, None]]] = None,
+        on_stream_stop: Optional[Callable[[], None]] = None,
         name: str = "internal-processor"
     ):
         # Set attributes first before calling parent
