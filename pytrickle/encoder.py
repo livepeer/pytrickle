@@ -10,6 +10,7 @@ import time
 import datetime
 import logging
 import os
+import math
 from typing import Optional, Callable
 from fractions import Fraction
 from collections import deque
@@ -183,6 +184,7 @@ def encode_av(
             encoded_packets = output_video_stream.encode(frame)
             for ep in encoded_packets:
                 output_container.mux(ep)
+            logger.debug(f"encoded video packets={len(encoded_packets)} pts={frame.pts} time_base={frame.time_base} ts={float(current)}")
             continue
 
         if isinstance(avframe, AudioOutput):
@@ -300,3 +302,44 @@ def _log_frame_timestamps(frame_type: str, frame: InputFrame):
     log_duration('pre_process_frame', 'post_process_frame')
     log_duration('post_process_frame', 'frame_end')
     log_duration('frame_init', 'frame_end') 
+
+def default_output_metadata(height: int, width: int):
+    """Generate default metadata for output streams."""
+    return {
+        'video': {
+            'codec': 'h264',
+            'width': width,
+            'height': height,
+            'pix_fmt': 'yuv420p',
+            'time_base': OUT_TIME_BASE,
+            'framerate': Fraction(24, 1),
+            'sar': calc_aspect_ratio(height, width),
+            'dar': calc_aspect_ratio(height, width),
+            'format': 'yuv420p',
+            'target_width': width,
+            'target_height': height,
+        },
+        'audio': {
+            'codec': 'aac',
+            'sample_rate': 48000,
+            'format': 'fltp',
+            'channels': 2,
+            'layout': 'stereo',
+            'time_base': OUT_TIME_BASE,
+        }
+    }
+
+def calc_aspect_ratio(height: int, width: int) -> Fraction:
+    """Calculate aspect ratio as a Fraction."""
+    if height <= 0 or width <= 0:
+        return Fraction(1, 1)
+    
+    # Calculate the greatest common divisor (GCD) of width and height
+    common_divisor = math.gcd(width, height)
+
+    # Divide width and height by their GCD to get the simplified ratio
+    simplified_width = width // common_divisor
+    simplified_height = height // common_divisor
+
+    # Create and return a Fraction object
+    return Fraction(simplified_width, simplified_height)

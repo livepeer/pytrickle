@@ -300,6 +300,7 @@ class TrickleClient:
                     try:
                         frame = await asyncio.wait_for(self.output_queue.get(), timeout=0.5)
                         if frame is not None:
+                            logger.debug("pulled frame from output queue")
                             yield frame
                         else:
                             break

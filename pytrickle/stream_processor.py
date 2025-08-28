@@ -3,7 +3,7 @@ import inspect
 import logging
 from typing import Optional, Callable, Dict, Any, List, Union, Awaitable, Coroutine
 
-from .frames import VideoFrame, AudioFrame
+from .frames import VideoFrame, AudioFrame, VideoOutput
 from .frame_processor import FrameProcessor
 from .server import StreamServer
 from .frame_skipper import FrameSkipConfig
@@ -98,6 +98,26 @@ class StreamProcessor:
             return True
         except Exception as e:
             logger.error(f"Error sending data: {e}")
+            return False
+
+    async def send_frame(self, frame: VideoFrame):
+        """Send a video frame to the server."""
+        if self.server.current_client is None:
+            logger.debug("No active client connection, cannot send frame")
+            return False
+
+        client = self.server.current_client
+        # Check if client is in error state or stopping
+        if client.error_event.is_set() or client.stop_event.is_set():
+            logger.debug("Client is in error/stop state, not sending frame")
+            return False
+
+        try:
+            logger.debug("sending frame to client")
+            await client._send_output(VideoOutput(frame, self.server.current_client.request_id))
+            return True
+        except Exception as e:
+            logger.error(f"Error sending frame: {e}")
             return False
 
     async def run_forever(self):

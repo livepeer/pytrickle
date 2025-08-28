@@ -17,6 +17,7 @@ from .publisher import TricklePublisher
 from .media import run_subscribe, run_publish
 from .frames import InputFrame, OutputFrame, AudioFrame, VideoFrame, AudioOutput, VideoOutput, DEFAULT_WIDTH, DEFAULT_HEIGHT
 from .decoder import DEFAULT_MAX_FRAMERATE
+from .encoder import default_output_metadata
 from .cache import LastValueCache
 from .fps_meter import FPSMeter
 from . import ErrorCallback
@@ -142,32 +143,38 @@ class TrickleProtocol(TrickleComponent):
         metadata_cache = LastValueCache()
         
         # Start subscribe and publish tasks with error monitoring
-        self.subscribe_task = asyncio.create_task(
-            self._run_task_with_error_handling(
-                run_subscribe,
-                "Subscribe",
-                self.subscribe_url, 
-                self.subscribe_queue.put, 
-                metadata_cache.put, 
-                self.emit_monitoring_event, 
-                self.width or DEFAULT_WIDTH, 
-                self.height or DEFAULT_HEIGHT,
-                self.max_framerate or DEFAULT_MAX_FRAMERATE,
-                self.subscriber_timeout,
+        if self.subscribe_url and self.subscribe_url.strip():
+            self.subscribe_task = asyncio.create_task(
+                self._run_task_with_error_handling(
+                    run_subscribe,
+                    "Subscribe",
+                    self.subscribe_url, 
+                    self.subscribe_queue.put, 
+                    metadata_cache.put, 
+                    self.emit_monitoring_event, 
+                    self.width or DEFAULT_WIDTH, 
+                    self.height or DEFAULT_HEIGHT,
+                    self.max_framerate or DEFAULT_MAX_FRAMERATE,
+                    self.subscriber_timeout,
+                )
             )
-        )
-        
-        self.publish_task = asyncio.create_task(
-            self._run_task_with_error_handling(
-                run_publish,
-                "Publish",
-                self.publish_url, 
-                self.publish_queue.get, 
-                metadata_cache.get, 
-                self.emit_monitoring_event,
-                self.publisher_timeout,
+        else:
+            #add default metadata to allow encoder to startup
+            logger.info("setting default metadata for encoder")
+            metadata_cache.put(default_output_metadata(self.width or DEFAULT_WIDTH, self.height or DEFAULT_HEIGHT))
+
+        if self.publish_url and self.publish_url.strip():
+            self.publish_task = asyncio.create_task(
+                self._run_task_with_error_handling(
+                    run_publish,
+                    "Publish",
+                    self.publish_url, 
+                    self.publish_queue.get, 
+                    metadata_cache.get, 
+                    self.emit_monitoring_event,
+                    self.publisher_timeout,
+                )
             )
-        )
         
         # Initialize control subscriber if URL provided
         if self.control_url and self.control_url.strip():
