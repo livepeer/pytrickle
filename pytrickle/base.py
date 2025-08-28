@@ -102,7 +102,10 @@ class TrickleComponent:
                     # Task already removed, that's fine
                     pass
         
-        task.add_done_callback(cleanup_task)
+        if task.done():
+            cleanup_task(task)
+        else:
+            task.add_done_callback(cleanup_task)
 
     async def shutdown(self):
         """Signal shutdown to stop background tasks."""
