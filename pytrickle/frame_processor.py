@@ -55,39 +55,10 @@ class FrameProcessor(ABC):
         """
         self.error_callback = error_callback
         self.state: Optional[StreamState] = None
-        self.model_loaded: bool = False
-        # Note: load_model is now async but __init__ cannot be async
-        # The actual loading will be done when the processor is first used
-        # or when explicitly called via load_model_async()
-
-    async def load_model_async(self, **kwargs) -> None:
-        """
-        Load the model asynchronously.
-
-        This method should be implemented to load any required models or resources.
-        It is called automatically when needed.
-        
-        Args:
-            **kwargs: Additional parameters for model loading
-        """
-        try:
-            self.state.set_state(PipelineState.LOADING)
-            await self.load_model(**kwargs)
-            self.model_loaded = True
-            # If a state manager is already attached, mark ready automatically
-            if self.state is not None:
-                self.state.set_state(PipelineState.IDLE)
-        except Exception:
-            # If load fails and we have a state manager, mark ERROR
-            if self.state is not None:
-                self.state.set_state(PipelineState.ERROR)
-            raise
 
     def attach_state(self, state: StreamState) -> None:
         """Attach a pipeline state manager and set IDLE if model already loaded."""
         self.state = state
-        if self.model_loaded:
-            self.state.set_state(PipelineState.IDLE)
 
     @abstractmethod
     async def load_model(self, **kwargs):
