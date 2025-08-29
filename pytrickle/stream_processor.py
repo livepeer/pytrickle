@@ -13,15 +13,18 @@ logger = logging.getLogger(__name__)
 # Type aliases for processing functions
 VideoProcessor = Callable[[VideoFrame], Awaitable[Optional[VideoFrame]]]
 AudioProcessor = Callable[[AudioFrame], Awaitable[Optional[List[AudioFrame]]]]
+ModelLoader = Callable[[Dict[str, Any]], Awaitable[None]]
+ParamUpdater = Callable[[Dict[str, Any]], Awaitable[None]]
+OnStreamStop = Callable[[], Awaitable[None]]
 
 class StreamProcessor:
     def __init__(
         self,
         video_processor: Optional[VideoProcessor] = None,
         audio_processor: Optional[AudioProcessor] = None,
-        model_loader: Optional[Callable[[], None]] = None,
-        param_updater: Optional[Callable[[Dict[str, Any]], None]] = None,
-        on_stream_stop: Optional[Callable[[], None]] = None,
+        model_loader: Optional[ModelLoader] = None,
+        param_updater: Optional[ParamUpdater] = None,
+        on_stream_stop: Optional[OnStreamStop] = None,
         send_data_interval: Optional[float] = 0.333,
         name: str = "stream-processor",
         port: int = 8000,
@@ -31,11 +34,11 @@ class StreamProcessor:
         Initialize StreamProcessor with processing functions.
         
         Args:
-            video_processor: Function that processes VideoFrame objects
-            audio_processor: Function that processes AudioFrame objects  
-            model_loader: Optional function called during load_model phase
-            param_updater: Optional function called when parameters update
-            on_stream_stop: Optional async function called when stream stops/client disconnects
+            video_processor: Async function that processes VideoFrame objects
+            audio_processor: Async function that processes AudioFrame objects  
+            model_loader: Optional async function called during load_model phase
+            param_updater: Optional async function called when parameters update
+            send_data_interval: Interval for sending data
             name: Processor name
             port: Server port
             **server_kwargs: Additional arguments passed to StreamServer
@@ -102,9 +105,9 @@ class _InternalFrameProcessor(FrameProcessor):
         self,
         video_processor: Optional[VideoProcessor] = None,
         audio_processor: Optional[AudioProcessor] = None,
-        model_loader: Optional[Callable[[], None]] = None,
-        param_updater: Optional[Callable[[Dict[str, Any]], None]] = None,
-        on_stream_stop: Optional[Callable[[], None]] = None,
+        model_loader: Optional[ModelLoader] = None,
+        param_updater: Optional[ParamUpdater] = None,
+        on_stream_stop: Optional[OnStreamStop] = None,
         name: str = "internal-processor"
     ):
         # Set attributes first before calling parent
@@ -116,18 +119,19 @@ class _InternalFrameProcessor(FrameProcessor):
         self._ready = False
         self.name = name
         
-        # Initialize parent with error_callback=None, which will call load_model
+        # Initialize parent with error_callback=None
         super().__init__(error_callback=None)
     
-    def load_model(self, **kwargs):
-        """Load model using provided function."""
+    async def load_model(self, **kwargs):
+        """Load model using provided async function."""
         if self.model_loader:
             try:
-                self.model_loader(**kwargs)
+                await self.model_loader(**kwargs)
                 logger.info(f"StreamProcessor '{self.name}' model loaded successfully")
             except Exception as e:
                 logger.error(f"Error in model loader: {e}")
                 raise
+        
         self._ready = True
     
     async def process_video_async(self, frame: VideoFrame) -> Optional[VideoFrame]:
@@ -160,11 +164,11 @@ class _InternalFrameProcessor(FrameProcessor):
             logger.error(f"Error in audio processing: {e}")
             return [frame]
     
-    def update_params(self, params: Dict[str, Any]):
-        """Update parameters using provided function."""
+    async def update_params(self, params: Dict[str, Any]):
+        """Update parameters using provided async function."""
         if self.param_updater:
             try:
-                self.param_updater(params)
+                await self.param_updater(params)
                 logger.info(f"Parameters updated: {params}")
             except Exception as e:
                 logger.error(f"Error updating parameters: {e}")

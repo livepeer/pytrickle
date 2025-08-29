@@ -190,31 +190,33 @@ class TestFrameProcessorStateIntegration:
         processor.attach_state(state)
         assert processor.state is state
 
-    def test_frame_processor_model_loading_success(self):
+    @pytest.mark.asyncio
+    async def test_frame_processor_model_loading_success(self):
         """Test frame processor model loading with state updates."""
         processor = MockFrameProcessor()
         state = StreamState()
         processor.attach_state(state)
         
         # Model loading should work without errors
-        processor.load_model()
+        await processor.load_model()
         # MockFrameProcessor doesn't change state, but real ones would
 
-    def test_frame_processor_model_loading_failure(self):
+    @pytest.mark.asyncio
+    async def test_frame_processor_model_loading_failure(self):
         """Test frame processor handles model loading failures."""
         processor = MockFrameProcessor()
         state = StreamState()
         processor.attach_state(state)
         
         # Mock a failing load_model
-        def failing_load_model(**kwargs):
+        async def failing_load_model(**kwargs):
             raise Exception("Model loading failed")
         
         processor.load_model = failing_load_model
         
         # Should handle the exception gracefully
         try:
-            processor.load_model()
+            await processor.load_model()
             assert False, "Expected exception"
         except Exception as e:
             assert "Model loading failed" in str(e)
@@ -236,10 +238,10 @@ class TestFrameProcessorStateIntegration:
         processor.attach_state(state)
         
         # Test model loading
-        processor.load_model()
+        await processor.load_model()
         
         # Test parameter updates
-        processor.update_params({"intensity": 0.8})
+        await processor.update_params({"intensity": 0.8})
 
 
 class TestServerStateIntegration:
@@ -423,11 +425,11 @@ class TestStateIntegrationWithStreamProcessor:
         assert processor.state is state
         
         # Test model loading
-        processor.load_model()
+        await processor.load_model()
         
         # Test parameter updates
         test_params = {"intensity": 0.7, "effect": "test"}
-        processor.update_params(test_params)
+        await processor.update_params(test_params)
         
         # Verify processor handled params (internal behavior may vary)
         # The important thing is no exceptions were raised
