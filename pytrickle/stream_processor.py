@@ -62,7 +62,6 @@ class StreamProcessor:
         self.send_data_interval = send_data_interval
         self.name = name
         self.port = port
-        self.enable_frame_skipping = enable_frame_skipping
         self.target_fps = target_fps
         self.auto_target_fps = auto_target_fps
         self.server_kwargs = server_kwargs

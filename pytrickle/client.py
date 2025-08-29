@@ -35,10 +35,11 @@ class TrickleClient:
         send_data_interval: Optional[float] = 0.333,
         error_callback: Optional[ErrorCallback] = None,
         max_queue_size: int = 300,
+        enable_frame_skipping: bool = True,
         target_fps: Optional[float] = None,
         auto_target_fps: bool = True
     ):
-        """Initialize TrickleClient with AdaptiveFrameSkipper for intelligent frame management.
+        """Initialize TrickleClient with optional AdaptiveFrameSkipper for intelligent frame management.
         
         Args:
             protocol: TrickleProtocol instance
@@ -46,6 +47,7 @@ class TrickleClient:
             control_handler: Optional control message handler
             error_callback: Optional error callback (if None, uses frame_processor.error_callback)
             max_queue_size: Maximum size for frame queues
+            enable_frame_skipping: Whether to enable intelligent frame skipping
             target_fps: Target FPS for intelligent skipping (None = auto-detect)
             auto_target_fps: Whether to automatically detect and use ingress FPS as target
         """
@@ -58,6 +60,7 @@ class TrickleClient:
         self.error_callback = error_callback or frame_processor.error_callback
         
         # Queue configuration
+        self.enable_frame_skipping = enable_frame_skipping
         self.target_fps = target_fps
         self.auto_target_fps = auto_target_fps
         self.max_queue_size = max_queue_size
@@ -81,13 +84,16 @@ class TrickleClient:
         # Data queue
         self.data_queue: Deque[Any] = deque(maxlen=1000)
         
-        # Adaptive frame skipper for intelligent video frame management
-        self.frame_skipper = AdaptiveFrameSkipper(
-            target_fps=target_fps or float(DEFAULT_MAX_FRAMERATE),
-            auto_target_fps=auto_target_fps,
-            skip_pattern="uniform",  # Use uniform skipping pattern
-            adaptation_window=2.0    # 2 second adaptation window
-        )
+        # Adaptive frame skipper for intelligent video frame management (optional)
+        if enable_frame_skipping:
+            self.frame_skipper = AdaptiveFrameSkipper(
+                target_fps=target_fps or float(DEFAULT_MAX_FRAMERATE),
+                auto_target_fps=auto_target_fps,
+                skip_pattern="uniform",  # Use uniform skipping pattern
+                adaptation_window=2.0    # 2 second adaptation window
+            )
+        else:
+            self.frame_skipper = None
         
         # Monotonic audio timeline tracker for automatic A/V sync
         self.audio_timeline_tracker = MonotonicAudioTracker(frame_duration_ms=20)
@@ -165,16 +171,12 @@ class TrickleClient:
 
     def get_statistics(self) -> dict:
         """Get comprehensive processing statistics."""
-        return {
-            "frame_skipper": self.frame_skipper.get_statistics(),
-            "audio_timeline": self.audio_timeline_tracker.get_statistics(),
+        stats = {
             "input_queue_size": self.input_queue.qsize(),
             "output_queue_size": self.output_queue.qsize()
         }
-    
-    def get_frame_skip_statistics(self) -> Optional[dict]:
-        """Get frame skipping statistics (for backward compatibility)."""
-        return self.frame_skipper.get_statistics()
+
+        return stats
     
     def set_target_fps(self, target_fps: float):
         """Manually set the target FPS for intelligent frame skipping.
@@ -182,12 +184,18 @@ class TrickleClient:
         Args:
             target_fps: New target FPS value
         """
-        self.frame_skipper.update_target_fps(target_fps)
-        logger.info(f"Manually set target FPS to {target_fps}")
+        if self.frame_skipper:
+            self.frame_skipper.update_target_fps(target_fps)
+            logger.info(f"Manually set target FPS to {target_fps}")
+        else:
+            logger.warning("Frame skipping is disabled, cannot set target FPS")
     
     def enable_auto_target_fps(self):
         """Re-enable automatic target FPS detection."""
-        self.frame_skipper.enable_auto_target_fps()
+        if self.frame_skipper:
+            self.frame_skipper.enable_auto_target_fps()
+        else:
+            logger.warning("Frame skipping is disabled, cannot enable auto target FPS")
 
     async def _on_protocol_error(self, error_type: str, exception: Optional[Exception] = None):
         """Handle protocol errors and shutdown events."""
@@ -256,28 +264,40 @@ class TrickleClient:
         try:
             while not self.stop_event.is_set() and not self.error_event.is_set():
                 try:
-                    # Use frame skipper for intelligent frame management
-                    frame_or_result = await self.frame_skipper.process_queue_with_skipping(self.input_queue, timeout=5)
-                    
-                    # Handle processing results (non-frame returns)
-                    if is_processing_result(frame_or_result):
-                        if frame_or_result == FrameProcessingResult.SHUTDOWN:
-                            # Sentinel value received, break out of processing loop
-                            logger.info("Processing loop received shutdown signal, ending")
-                            break
-                        elif frame_or_result == FrameProcessingResult.FRAME_SKIPPED:
-                            # Frame was skipped, continue to get next frame
-                            continue
-                        elif frame_or_result == FrameProcessingResult.TIMEOUT:
+                    if self.frame_skipper:
+                        # Use frame skipper for intelligent frame management
+                        frame_or_result = await self.frame_skipper.process_queue_with_skipping(self.input_queue, timeout=5)
+                        
+                        # Handle processing results (non-frame returns)
+                        if is_processing_result(frame_or_result):
+                            if frame_or_result == FrameProcessingResult.SHUTDOWN:
+                                # Sentinel value received, break out of processing loop
+                                logger.info("Processing loop received shutdown signal, ending")
+                                break
+                            elif frame_or_result == FrameProcessingResult.FRAME_SKIPPED:
+                                # Frame was skipped, continue to get next frame
+                                continue
+                            elif frame_or_result == FrameProcessingResult.TIMEOUT:
+                                # Timeout occurred, continue to try again
+                                continue
+                            else:
+                                # Unknown processing result, log and continue
+                                logger.warning(f"Unknown frame processing result: {frame_or_result}")
+                                continue
+                        
+                        # At this point, we have a valid frame
+                        frame = frame_or_result
+                    else:
+                        # No frame skipping - process all frames directly
+                        try:
+                            frame = await asyncio.wait_for(self.input_queue.get(), timeout=5.0)
+                            if frame is None:
+                                # Sentinel value received, break out of processing loop
+                                logger.info("Processing loop received shutdown signal, ending")
+                                break
+                        except asyncio.TimeoutError:
                             # Timeout occurred, continue to try again
                             continue
-                        else:
-                            # Unknown processing result, log and continue
-                            logger.warning(f"Unknown frame processing result: {frame_or_result}")
-                            continue
-                    
-                    # At this point, we have a valid frame
-                    frame = frame_or_result
                     
                     # Process frames asynchronously
                     if isinstance(frame, VideoFrame):

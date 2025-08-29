@@ -343,6 +343,7 @@ class StreamServer:
                 protocol=protocol,
                 frame_processor=self.frame_processor,
                 control_handler=self._handle_control_message,
+                enable_frame_skipping=self.enable_frame_skipping,
                 target_fps=self.target_fps,
                 auto_target_fps=self.auto_target_fps,
             )
