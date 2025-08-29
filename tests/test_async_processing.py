@@ -123,6 +123,7 @@ async def test_async_processing():
     protocol = Mock(spec=TrickleProtocol)
     protocol.start = AsyncMock()
     protocol.stop = AsyncMock()
+    protocol.error_callback = None  # Add the missing attribute
     
     # Create test frames
     test_frames = await create_test_frames()
