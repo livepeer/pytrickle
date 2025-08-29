@@ -28,7 +28,6 @@ from .utils.register import RegisterCapability
 from .frame_processor import FrameProcessor
 from .stream_processor import StreamProcessor
 from .fps_meter import FPSMeter
-from .frame_processing_types import FrameProcessingResult
 
 from . import api
 from .version import __version__
@@ -57,6 +56,6 @@ __all__ = [
     "ErrorCallback",
     "FrameProcessor",
     "FPSMeter",
-    "FrameProcessingResult",,
+    "FrameProcessingResult",
     "__version__"
 ] 

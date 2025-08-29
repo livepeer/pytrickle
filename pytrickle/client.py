@@ -19,7 +19,6 @@ from .frame_processor import FrameProcessor
 from .decoder import DEFAULT_MAX_FRAMERATE
 from .frame_skipper import AdaptiveFrameSkipper
 from .monotonic_audio import MonotonicAudioTracker
-from .frame_processing_types import FrameProcessingResult, is_processing_result, is_frame
 
 logger = logging.getLogger(__name__)
 
@@ -266,27 +265,23 @@ class TrickleClient:
                 try:
                     if self.frame_skipper:
                         # Use frame skipper for intelligent frame management
-                        frame_or_result = await self.frame_skipper.process_queue_with_skipping(self.input_queue, timeout=5)
-                        
-                        # Handle processing results (non-frame returns)
-                        if is_processing_result(frame_or_result):
-                            if frame_or_result == FrameProcessingResult.SHUTDOWN:
+                        try:
+                            frame_or_result = await self.frame_skipper.process_queue_with_skipping(self.input_queue, timeout=5)
+                            
+                            # Handle simple return values
+                            if frame_or_result is None:
                                 # Sentinel value received, break out of processing loop
                                 logger.info("Processing loop received shutdown signal, ending")
                                 break
-                            elif frame_or_result == FrameProcessingResult.FRAME_SKIPPED:
+                            elif frame_or_result is False:
                                 # Frame was skipped, continue to get next frame
                                 continue
-                            elif frame_or_result == FrameProcessingResult.TIMEOUT:
-                                # Timeout occurred, continue to try again
-                                continue
-                            else:
-                                # Unknown processing result, log and continue
-                                logger.warning(f"Unknown frame processing result: {frame_or_result}")
-                                continue
-                        
-                        # At this point, we have a valid frame
-                        frame = frame_or_result
+                            
+                            # At this point, we have a valid frame
+                            frame = frame_or_result
+                        except asyncio.TimeoutError:
+                            # Timeout occurred, continue to try again
+                            continue
                     else:
                         # No frame skipping - process all frames directly
                         try:
