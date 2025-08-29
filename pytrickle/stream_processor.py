@@ -29,7 +29,6 @@ class StreamProcessor:
         port: int = 8000,
         enable_frame_skipping: bool = True,
         target_fps: Optional[float] = None,
-        auto_target_fps: bool = True,
         **server_kwargs
     ):
         """
@@ -44,8 +43,7 @@ class StreamProcessor:
             name: Processor name
             port: Server port
             enable_frame_skipping: Whether to enable intelligent frame skipping
-            target_fps: Target FPS for frame skipping (None = auto-detect)
-            auto_target_fps: Whether to automatically detect target FPS
+            target_fps: Target FPS for frame skipping (None = auto-detect from ingress)
             **server_kwargs: Additional arguments passed to StreamServer
         """
         # Validate that processors are async functions
@@ -63,7 +61,6 @@ class StreamProcessor:
         self.name = name
         self.port = port
         self.target_fps = target_fps
-        self.auto_target_fps = auto_target_fps
         self.server_kwargs = server_kwargs
         
         # Create internal frame processor
@@ -82,7 +79,6 @@ class StreamProcessor:
             port=port,
             enable_frame_skipping=enable_frame_skipping,
             target_fps=target_fps,
-            auto_target_fps=auto_target_fps,
             **server_kwargs
         )
     

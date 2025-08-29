@@ -63,7 +63,6 @@ class StreamServer:
         # Frame skipping configuration
         enable_frame_skipping: bool = True,
         target_fps: Optional[float] = None,
-        auto_target_fps: bool = True,
 
     ):
         """Initialize StreamServer.
@@ -86,8 +85,7 @@ class StreamServer:
             on_shutdown: List of shutdown handlers
             app_kwargs: Additional kwargs for aiohttp.web.Application
             enable_frame_skipping: Whether to enable intelligent frame skipping
-            target_fps: Target FPS for frame skipping (None = auto-detect)
-            auto_target_fps: Whether to automatically detect target FPS
+            target_fps: Target FPS for frame skipping (None = auto-detect from ingress)
         """
         self.frame_processor = frame_processor
         self.port = port
@@ -112,7 +110,6 @@ class StreamServer:
         # Frame skipping configuration
         self.enable_frame_skipping = enable_frame_skipping
         self.target_fps = target_fps
-        self.auto_target_fps = auto_target_fps
         
         # Stream management - simple and direct
         self.current_client: Optional[TrickleClient] = None
@@ -345,7 +342,6 @@ class StreamServer:
                 control_handler=self._handle_control_message,
                 enable_frame_skipping=self.enable_frame_skipping,
                 target_fps=self.target_fps,
-                auto_target_fps=self.auto_target_fps,
             )
             
             # Update state

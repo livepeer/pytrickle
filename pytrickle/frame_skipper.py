@@ -24,23 +24,19 @@ class AdaptiveFrameSkipper:
     
     def __init__(
         self,
-        target_fps: float = 24.0,
+        target_fps: Optional[float] = None,
         adaptation_window: float = 2.0,  # Seconds to measure performance
-        skip_pattern: str = "uniform",  # "uniform", "keyframe", or "temporal"
-        auto_target_fps: bool = True  # Automatically use ingress FPS as target
+        skip_pattern: str = "uniform"  # "uniform", "keyframe", or "temporal"
     ):
         """
         Initialize self-updating adaptive frame skipper.
         
         Args:
-            target_fps: Initial/fallback target FPS
+            target_fps: Target FPS (None = auto-detect from ingress)
             adaptation_window: Time window for FPS measurement
             skip_pattern: Frame skipping pattern strategy
-            auto_target_fps: Automatically update target FPS based on ingress FPS
         """
-        self.target_fps = target_fps
-        self.initial_target_fps = target_fps  # Keep original as fallback
-        self.auto_target_fps = auto_target_fps
+        self.target_fps = target_fps  # None means auto-detect from ingress
         self.adaptation_window = adaptation_window
         self.skip_pattern = skip_pattern
         
@@ -53,11 +49,7 @@ class AdaptiveFrameSkipper:
         
         # Last adaptation time to prevent too frequent changes
         self.last_adaptation_time = time.time()
-        self.adaptation_cooldown = 2.0  # Skip pattern adaptation interval (reduced frequency)
-        
-        # Target FPS auto-update timing
-        self.target_fps_update_interval = 5.0  # Update target FPS every 5 seconds (reduced frequency)
-        self.last_target_fps_update = time.time()
+        self.adaptation_cooldown = 2.0  # Skip pattern adaptation interval
 
     async def process_queue_with_skipping(self, input_queue: asyncio.Queue, timeout: float = 5) -> Union[VideoFrame, AudioFrame, bool, None]:
         """
@@ -150,10 +142,6 @@ class AdaptiveFrameSkipper:
         """Self-updating adaptation with performance optimization."""
         current_time = time.time()
         
-        # Update target FPS automatically if enabled (less frequently)
-        if self.auto_target_fps:
-            self._update_target_fps_from_ingress(current_time)
-        
         # Only adapt skip pattern if enough time has passed
         if current_time - self.last_adaptation_time < self.adaptation_cooldown:
             return  # EXIT EARLY - avoid expensive FPS calculation
@@ -165,41 +153,24 @@ class AdaptiveFrameSkipper:
         if ingress_fps < 1.0:
             return
         
+        # Use ingress FPS as target if target_fps is None (auto-detect mode)
+        effective_target_fps = self.target_fps if self.target_fps is not None else ingress_fps
+        
         # Direct calculation: skip_interval = ingress_fps / target_fps
-        if ingress_fps <= self.target_fps:
+        if ingress_fps <= effective_target_fps:
             new_skip_interval = 1
         else:
-            new_skip_interval = max(1, round(ingress_fps / self.target_fps))
+            new_skip_interval = max(1, round(ingress_fps / effective_target_fps))
         
         # Apply new skip interval
         if new_skip_interval != self.skip_interval:
             logger.info(f"Skip pattern update: ingress_fps={ingress_fps:.1f}, "
-                       f"target_fps={self.target_fps:.1f}, skip_interval={self.skip_interval}->{new_skip_interval}")
+                       f"target_fps={effective_target_fps:.1f}, skip_interval={self.skip_interval}->{new_skip_interval}")
             self.skip_interval = new_skip_interval
         
         self.last_adaptation_time = current_time
 
-    def _update_target_fps_from_ingress(self, current_time: float):
-        """Automatically update target FPS based on measured ingress FPS."""
-        # Only update target FPS periodically
-        if current_time - self.last_target_fps_update < self.target_fps_update_interval:
-            return
-        
-        # Get measured ingress FPS
-        ingress_fps = self.fps_meter.get_ingress_video_fps()
-        
-        # Need reliable measurements
-        if ingress_fps < 1.0:
-            return
-        
-        # Only update if ingress FPS has stabilized (not changing rapidly)
-        if abs(ingress_fps - self.target_fps) > 2.0:  # Significant change
-            logger.debug(f"Auto-updating target FPS: {self.target_fps:.1f} -> {ingress_fps:.1f}")
-            self.target_fps = ingress_fps
-            self.last_adaptation_time = 0  # Force immediate skip pattern update
-        
-        self.last_target_fps_update = current_time
-    
+
     def _apply_skip_pattern(self) -> bool:
         """Apply the current skip pattern to determine if this frame should be skipped."""
         if self.skip_interval <= 1:
@@ -228,25 +199,24 @@ class AdaptiveFrameSkipper:
         self.skip_interval = 1
         self.fps_meter.reset()
     
-    def update_target_fps(self, new_target_fps: float):
+    def update_target_fps(self, new_target_fps: Optional[float]):
         """Update the target FPS dynamically and recalculate skip pattern.
         
         Args:
-            new_target_fps: New target FPS value
+            new_target_fps: New target FPS value (None = auto-detect from ingress)
         """
-        if new_target_fps > 0:
+        if new_target_fps is None or new_target_fps > 0:
             self.target_fps = new_target_fps
-            # Disable auto-detection when manually set
-            self.auto_target_fps = False
             # Force immediate recalculation of skip pattern
             self.last_adaptation_time = 0
             self._adapt_skip_pattern()
-            logger.info(f"Manually updated target_fps to {new_target_fps}, disabled auto-detection")
+            if new_target_fps is None:
+                logger.info("Updated to auto-detect target FPS from ingress")
+            else:
+                logger.info(f"Manually updated target_fps to {new_target_fps}")
         else:
             logger.warning(f"Invalid target_fps value: {new_target_fps}, keeping current value: {self.target_fps}")
     
     def enable_auto_target_fps(self):
-        """Re-enable automatic target FPS detection."""
-        self.auto_target_fps = True
-        self.last_target_fps_update = 0  # Force immediate update
-        logger.info("Re-enabled automatic target FPS detection")
+        """Enable automatic target FPS detection (same as setting target_fps=None)."""
+        self.update_target_fps(None)

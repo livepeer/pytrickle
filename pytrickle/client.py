@@ -35,8 +35,7 @@ class TrickleClient:
         error_callback: Optional[ErrorCallback] = None,
         max_queue_size: int = 300,
         enable_frame_skipping: bool = True,
-        target_fps: Optional[float] = None,
-        auto_target_fps: bool = True
+        target_fps: Optional[float] = None
     ):
         """Initialize TrickleClient with optional AdaptiveFrameSkipper for intelligent frame management.
         
@@ -47,8 +46,7 @@ class TrickleClient:
             error_callback: Optional error callback (if None, uses frame_processor.error_callback)
             max_queue_size: Maximum size for frame queues
             enable_frame_skipping: Whether to enable intelligent frame skipping
-            target_fps: Target FPS for intelligent skipping (None = auto-detect)
-            auto_target_fps: Whether to automatically detect and use ingress FPS as target
+            target_fps: Target FPS for intelligent skipping (None = auto-detect from ingress)
         """
         self.protocol = protocol
         self.frame_processor = frame_processor
@@ -61,7 +59,6 @@ class TrickleClient:
         # Queue configuration
         self.enable_frame_skipping = enable_frame_skipping
         self.target_fps = target_fps
-        self.auto_target_fps = auto_target_fps
         self.max_queue_size = max_queue_size
         
         # Connect protocol error callback to client error handling
@@ -86,8 +83,7 @@ class TrickleClient:
         # Adaptive frame skipper for intelligent video frame management (optional)
         if enable_frame_skipping:
             self.frame_skipper = AdaptiveFrameSkipper(
-                target_fps=target_fps or float(DEFAULT_MAX_FRAMERATE),
-                auto_target_fps=auto_target_fps,
+                target_fps=target_fps,  # None means auto-detect from ingress
                 skip_pattern="uniform",  # Use uniform skipping pattern
                 adaptation_window=2.0    # 2 second adaptation window
             )

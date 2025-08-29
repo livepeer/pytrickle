@@ -211,7 +211,5 @@ if __name__ == "__main__":
         port=8001,
         # Frame skipping configuration (optional)
         enable_frame_skipping=True,    # Enable intelligent frame skipping (default: True)
-        target_fps=30.0,               # Target FPS for output (default: None = auto-detect)
-        auto_target_fps=False,         # Don't auto-detect FPS (default: True)
     )
     processor.run()
