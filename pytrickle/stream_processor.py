@@ -1,7 +1,7 @@
 import asyncio
 import inspect
 import logging
-from typing import Optional, Callable, Dict, Any, List, Union, Awaitable, Coroutine
+from typing import Optional, Callable, Dict, Any, List, Awaitable
 
 from .frames import VideoFrame, AudioFrame
 from .frame_processor import FrameProcessor
@@ -79,6 +79,10 @@ class StreamProcessor:
             frame_skip_config=frame_skip_config,
             **server_kwargs
         )
+        
+        # Store model_loader for later automatic loading
+        self._model_loader = model_loader
+        self._model_loading_task = None
     
     async def send_data(self, data: str):
         """Send data to the server."""
@@ -102,11 +106,61 @@ class StreamProcessor:
 
     async def run_forever(self):
         """Run the stream processor server forever."""
+        # Start automatic model loading if we have a model_loader
+        if self._model_loader:
+            self.start_model_loading()
+        
         await self.server.run_forever()
     
     def run(self):
         """Run the stream processor server (blocking)."""
         asyncio.run(self.run_forever())
+    
+    async def _load_model_async(self):
+        """Automatically load the model when StreamProcessor is created."""
+        try:
+            logger.info(f"StreamProcessor '{self.name}' starting automatic model loading...")
+            await self._frame_processor.load_model()
+            logger.info(f"StreamProcessor '{self.name}' automatic model loading completed")
+            
+            # Now that model loading is complete, we can mark the server as ready
+            # This transitions the server from LOADING -> IDLE
+            if self.server:
+                self.server.mark_startup_complete()
+                logger.info(f"Server startup marked complete after model loading")
+                
+        except Exception as e:
+            logger.error(f"StreamProcessor '{self.name}' automatic model loading failed: {e}")
+            # Set error state on the server
+            if self.server:
+                self.server.state.set_error(f"Model loading failed: {str(e)}")
+    
+    def start_model_loading(self):
+        """Start the automatic model loading process.
+        
+        This should be called when an event loop is running.
+        """
+        if self._model_loader and not self._model_loading_task:
+            self._model_loading_task = asyncio.create_task(self._load_model_async())
+            logger.info(f"StreamProcessor '{self.name}' started automatic model loading")
+    
+    async def wait_for_model(self, timeout: Optional[float] = None):
+        """Wait for the model loading to complete.
+        
+        Args:
+            timeout: Optional timeout in seconds. If None, waits indefinitely.
+        """
+        if self._model_loading_task:
+            try:
+                if timeout:
+                    await asyncio.wait_for(self._model_loading_task, timeout=timeout)
+                else:
+                    await self._model_loading_task
+            except asyncio.TimeoutError:
+                raise TimeoutError(f"Model loading timed out after {timeout} seconds")
+            except Exception as e:
+                # Re-raise the original error from model loading
+                raise e
 
 class _InternalFrameProcessor(FrameProcessor):
     """Internal frame processor that wraps user-provided functions."""
@@ -145,9 +199,8 @@ class _InternalFrameProcessor(FrameProcessor):
                 raise
     
     async def process_video_async(self, frame: VideoFrame) -> Optional[VideoFrame]:
-        """Process video frame using provided async function."""
+        """Process video frame using provided function."""
         if not self.video_processor:
-            logger.debug("No video processor defined, passing frame unchanged")
             return frame
             
         try:
@@ -158,9 +211,8 @@ class _InternalFrameProcessor(FrameProcessor):
             return frame
     
     async def process_audio_async(self, frame: AudioFrame) -> Optional[List[AudioFrame]]:
-        """Process audio frame using provided async function."""
+        """Process audio frame using provided function."""
         if not self.audio_processor:
-            logger.debug("No audio processor defined, passing frame unchanged")
             return [frame]
             
         try:
@@ -184,3 +236,4 @@ class _InternalFrameProcessor(FrameProcessor):
                 logger.info(f"Parameters updated: {params}")
             except Exception as e:
                 logger.error(f"Error updating parameters: {e}")
+                raise

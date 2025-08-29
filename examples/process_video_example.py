@@ -25,7 +25,7 @@ background_tasks = []
 background_task_started = False
 
 async def load_model(**kwargs):
-    """Initialize processor state - called during model loading phase."""
+    """Initialize processor state - called automatically when StreamProcessor is created."""
     global intensity, ready, processor
     
     logger.info(f"load_model called with kwargs: {kwargs}")
@@ -33,6 +33,7 @@ async def load_model(**kwargs):
     # Set processor variables from kwargs or use defaults
     intensity = kwargs.get('intensity', 0.5)
     intensity = max(0.0, min(1.0, intensity))
+
     
     # Load the model here if needed
     # model = torch.load('my_model.pth')
@@ -202,6 +203,8 @@ async def update_params(params: dict):
 
 # Create and run StreamProcessor
 if __name__ == "__main__":
+    # StreamProcessor automatically calls load_model when created
+    # The state will transition from LOADING -> IDLE during model loading
     processor = StreamProcessor(
         video_processor=process_video,
         model_loader=load_model,

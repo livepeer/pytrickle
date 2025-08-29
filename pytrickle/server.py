@@ -632,8 +632,9 @@ class StreamServer:
         await site.start()
         
         # Set pipeline ready when server is up and ready to accept requests
-        self.state.set_state(PipelineState.IDLE)
-        self.state.set_startup_complete()
+        # Note: Model loading may still be in progress, so don't mark startup complete yet
+        # The StreamProcessor will handle the final state transition after model loading
+        self.state.set_state(PipelineState.LOADING)
         
         logger.info(f"Server started on {self.host}:{self.port}")
         return runner
@@ -681,6 +682,14 @@ class StreamServer:
         """Get a simple health status string."""
         state = self.state.get_pipeline_state()
         return state.get('state', 'unknown')
+    
+    def mark_startup_complete(self) -> None:
+        """Mark server startup as complete, transitioning from LOADING to IDLE state.
+        
+        This should be called after model loading or initialization is complete.
+        """
+        self.state.set_startup_complete()
+        logger.info("Server startup marked complete")
 
     async def run_forever(self):
         """Run the server forever."""
