@@ -102,20 +102,6 @@ class MonotonicAudioTracker:
         
         return corrected_frame
     
-    def get_statistics(self) -> dict:
-        """Get audio timeline correction statistics."""
-        correction_rate = (self.drift_correction_count / self.total_audio_frames 
-                          if self.total_audio_frames > 0 else 0.0)
-        
-        return {
-            "total_audio_frames": self.total_audio_frames,
-            "drift_corrections": self.drift_correction_count,
-            "correction_rate": correction_rate,
-            "last_timestamp": self.last_audio_timestamp,
-            "expected_next": self.expected_next_timestamp,
-            "frame_duration_ms": self.frame_duration_ms
-        }
-    
     def reset(self):
         """Reset the audio timeline tracker."""
         self.last_audio_timestamp = None

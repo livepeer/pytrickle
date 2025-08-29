@@ -55,12 +55,6 @@ class AdaptiveFrameSkipper:
         self.frame_counter = 0
         self.skip_interval = 1  # Skip every N frames (1 = no skipping)
         
-        # Statistics
-        self.total_frames_received = 0
-        self.total_frames_processed = 0
-        self.total_frames_skipped = 0
-        self.queue_frames_skipped = 0  # Additional frames skipped from queue
-        
         # Last adaptation time to prevent too frequent changes
         self.last_adaptation_time = time.time()
         self.adaptation_cooldown = 2.0  # Skip pattern adaptation interval (reduced frequency)
@@ -102,11 +96,8 @@ class AdaptiveFrameSkipper:
                     
                     # Only skip if it's a video frame
                     if isinstance(skipped_frame, VideoFrame):
-                        # Count this as a skipped video frame
-                        self.total_frames_received += 1
-                        self.total_frames_skipped += 1
-                        self.queue_frames_skipped += 1
-                        self.fps_meter.record_ingress_video_frame()  # Count as received
+                        # Record ingress frame for FPS measurement
+                        self.fps_meter.record_ingress_video_frame()
                         skipped_count += 1
                     else:
                         # Audio frames now have corrected timestamps from ingress loop
@@ -122,8 +113,7 @@ class AdaptiveFrameSkipper:
             
             # Apply skip pattern to video frames only
             if isinstance(frame, VideoFrame):
-                # Count this frame as received
-                self.total_frames_received += 1
+                # Count frame and record for FPS measurement
                 self.frame_counter += 1
                 self.fps_meter.record_ingress_video_frame()
                 
@@ -132,12 +122,10 @@ class AdaptiveFrameSkipper:
                 should_skip = self._apply_skip_pattern()
                 
                 if should_skip:
-                    self.total_frames_skipped += 1
                     # Return FRAME_SKIPPED to indicate this frame should be skipped
                     # The caller should handle getting the next frame
                     return FrameProcessingResult.FRAME_SKIPPED
                 else:
-                    self.total_frames_processed += 1
                     self.fps_meter.record_egress_video_frame()
             # Audio frames pass through unchanged without counting
             
@@ -238,31 +226,8 @@ class AdaptiveFrameSkipper:
             # Default to uniform
             return (self.frame_counter % self.skip_interval) != 1
     
-    def get_statistics(self) -> Dict[str, Any]:
-        """Get comprehensive frame skipping statistics."""
-        fps_stats = self.fps_meter.get_fps_stats()
-        
-        skip_ratio = (self.total_frames_skipped / self.total_frames_received 
-                     if self.total_frames_received > 0 else 0.0)
-        
-        return {
-            "total_frames_received": self.total_frames_received,
-            "total_frames_processed": self.total_frames_processed,
-            "total_frames_skipped": self.total_frames_skipped,
-            "skip_ratio": skip_ratio,
-            "current_skip_interval": self.skip_interval,
-            "target_fps": self.target_fps,
-            "auto_target_fps": self.auto_target_fps,
-            "queue_frames_skipped": getattr(self, 'queue_frames_skipped', 0),  # Additional frames skipped from queue
-            **fps_stats
-        }
-    
     def reset_statistics(self):
-        """Reset all statistics and measurements."""
-        self.total_frames_received = 0
-        self.total_frames_processed = 0
-        self.total_frames_skipped = 0
-        self.queue_frames_skipped = 0
+        """Reset frame counter and measurements."""
         self.frame_counter = 0
         self.skip_interval = 1
         self.fps_meter.reset()
