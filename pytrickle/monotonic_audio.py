@@ -6,10 +6,18 @@ preventing encoder sync issues without blocking video frame processing.
 """
 
 import logging
+from dataclasses import dataclass
 from typing import Optional
 from .frames import AudioFrame
 
 logger = logging.getLogger(__name__)
+
+@dataclass
+class AudioTrackingConfig:
+    """Configuration for audio timeline tracking."""
+    frame_duration_ms: int = 20
+    drift_threshold_ms: int = 50  # Correct drift > 50ms
+    max_drift_ms: int = 200  # Reset timeline if drift > 200ms
 
 
 class MonotonicAudioTracker:
@@ -20,22 +28,22 @@ class MonotonicAudioTracker:
     audio timeline, even when frame skipping occurs or timestamps are irregular.
     """
     
-    def __init__(self, frame_duration_ms: int = 20):
+    def __init__(self, frame_duration_ms: int = 20, config: Optional[AudioTrackingConfig] = None):
         """
         Initialize monotonic audio tracker.
         
         Args:
             frame_duration_ms: Expected duration between audio frames in milliseconds
+            config: Optional configuration object (overrides individual params)
         """
-        self.frame_duration_ms = frame_duration_ms
+        # Use config if provided, otherwise create from individual params
+        if config is not None:
+            self.config = config
+        else:
+            self.config = AudioTrackingConfig(frame_duration_ms=frame_duration_ms)
+        
         self.last_audio_timestamp: Optional[int] = None
         self.expected_next_timestamp: Optional[int] = None
-        self.drift_correction_count = 0
-        self.total_audio_frames = 0
-        
-        # Drift detection thresholds
-        self.drift_threshold_ms = 50  # Correct drift > 50ms
-        self.max_drift_ms = 200  # Reset timeline if drift > 200ms
         
     def process_audio_frame(self, audio_frame: AudioFrame) -> AudioFrame:
         """
@@ -48,12 +56,11 @@ class MonotonicAudioTracker:
             AudioFrame with corrected monotonic timestamp
         """
         current_timestamp = audio_frame.timestamp
-        self.total_audio_frames += 1
         
         # Initialize timeline on first audio frame
         if self.last_audio_timestamp is None:
             self.last_audio_timestamp = current_timestamp
-            self.expected_next_timestamp = current_timestamp + self.frame_duration_ms
+            self.expected_next_timestamp = current_timestamp + self.config.frame_duration_ms
             logger.info(f"Audio timeline initialized at timestamp {current_timestamp}")
             return audio_frame
         
@@ -71,24 +78,17 @@ class MonotonicAudioTracker:
             corrected_timestamp = expected_ts
             logger.debug(f"Audio timestamp went backwards: {current_timestamp} <= {self.last_audio_timestamp}")
             
-        elif drift_ms > self.max_drift_ms:
+        elif drift_ms > self.config.max_drift_ms:
             # Large drift - reset timeline to current timestamp
             corrected_timestamp = current_timestamp
             
-        elif drift_ms > self.drift_threshold_ms:
+        elif drift_ms > self.config.drift_threshold_ms:
             # Moderate drift - use expected timestamp for smooth timeline
             needs_correction = True
             corrected_timestamp = expected_ts
             
         # Apply correction if needed
         if needs_correction:
-            self.drift_correction_count += 1
-            
-            # Log corrections periodically
-            if self.drift_correction_count % 50 == 0:
-                logger.info(f"Audio timeline corrections: {self.drift_correction_count}/{self.total_audio_frames} "
-                           f"({100.0 * self.drift_correction_count / self.total_audio_frames:.1f}%)")
-            
             # Adjust timestamp without creating a new frame
             audio_frame.timestamp = corrected_timestamp
             corrected_frame = audio_frame
@@ -98,14 +98,12 @@ class MonotonicAudioTracker:
         
         # Update timeline state
         self.last_audio_timestamp = corrected_timestamp
-        self.expected_next_timestamp = corrected_timestamp + self.frame_duration_ms
+        self.expected_next_timestamp = corrected_timestamp + self.config.frame_duration_ms
         
         return corrected_frame
     
     def reset(self):
-        """Reset the audio timeline tracker."""
+        """Reset the audio timeline tracker completely."""
         self.last_audio_timestamp = None
         self.expected_next_timestamp = None
-        self.drift_correction_count = 0
-        self.total_audio_frames = 0
         logger.info("Audio timeline tracker reset")

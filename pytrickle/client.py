@@ -17,8 +17,8 @@ from .frames import VideoFrame, AudioFrame, VideoOutput, AudioOutput
 from . import ErrorCallback
 from .frame_processor import FrameProcessor
 from .decoder import DEFAULT_MAX_FRAMERATE
-from .frame_skipper import AdaptiveFrameSkipper
-from .monotonic_audio import MonotonicAudioTracker
+from .frame_skipper import AdaptiveFrameSkipper, SkippingConfig
+from .monotonic_audio import MonotonicAudioTracker, AudioTrackingConfig
 
 logger = logging.getLogger(__name__)
 
