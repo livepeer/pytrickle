@@ -134,7 +134,7 @@ class _InternalFrameProcessor(FrameProcessor):
     async def process_video_async(self, frame: VideoFrame) -> Optional[VideoFrame]:
         """Process video frame using provided async function."""
         if not self.video_processor:
-            logger.info("No video processor defined, passing frame unchanged")
+            logger.debug("No video processor defined, passing frame unchanged")
             return frame
         
         try:
@@ -147,6 +147,7 @@ class _InternalFrameProcessor(FrameProcessor):
     async def process_audio_async(self, frame: AudioFrame) -> Optional[List[AudioFrame]]:
         """Process audio frame using provided async function."""
         if not self.audio_processor:
+            logger.debug("No audio processor defined, passing frame unchanged")
             return [frame]
             
         try:
