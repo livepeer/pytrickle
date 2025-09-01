@@ -116,7 +116,6 @@ class _InternalFrameProcessor(FrameProcessor):
         self.model_loader = model_loader
         self.param_updater = param_updater
         self.on_stream_stop = on_stream_stop
-        self._ready = False
         self.name = name
         
         # Initialize parent with error_callback=None
@@ -131,12 +130,11 @@ class _InternalFrameProcessor(FrameProcessor):
             except Exception as e:
                 logger.error(f"Error in model loader: {e}")
                 raise
-        
-        self._ready = True
     
     async def process_video_async(self, frame: VideoFrame) -> Optional[VideoFrame]:
-        """Process video frame using provided function."""
-        if not self._ready or not self.video_processor:
+        """Process video frame using provided async function."""
+        if not self.video_processor:
+            logger.debug("No video processor defined, passing frame unchanged")
             return frame
         
         try:
@@ -147,8 +145,9 @@ class _InternalFrameProcessor(FrameProcessor):
             return frame
     
     async def process_audio_async(self, frame: AudioFrame) -> Optional[List[AudioFrame]]:
-        """Process audio frame using provided function."""
-        if not self._ready or not self.audio_processor:
+        """Process audio frame using provided async function."""
+        if not self.audio_processor:
+            logger.debug("No audio processor defined, passing frame unchanged")
             return [frame]
             
         try:
