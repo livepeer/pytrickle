@@ -247,6 +247,7 @@ class TrickleClient:
                         # Try to get a frame from the queue with timeout
                         frame = await asyncio.to_thread(self.output_queue.get, timeout=0.1)
                         if frame is not None:
+                            logger.debug("pulled frame from output queue")
                             yield frame
                         else:
                             # None frame indicates shutdown

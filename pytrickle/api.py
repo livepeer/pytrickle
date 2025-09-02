@@ -14,8 +14,8 @@ class StreamStartRequest(BaseModel):
     
     This model is used for both /api/stream/start and /live-video-to-video endpoints.
     """
-    subscribe_url: str = Field(..., description="URL for subscribing to input video stream")
-    publish_url: str = Field(..., description="URL for publishing output video stream")
+    subscribe_url: Optional[str] = Field(default=None, description="URL for subscribing to input video stream")
+    publish_url: Optional[str] = Field(default=None, description="URL for publishing output video stream")
     control_url: Optional[str] = Field(default=None, description="URL for control channel communication")
     events_url: Optional[str] = Field(default=None, description="URL for events channel communication")
     data_url: Optional[str] = Field(default=None, description="URL for publishing text/data output via data channel")
