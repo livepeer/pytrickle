@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class AudioSyncConfig:
     """Configuration for audio synchronization."""
-    frame_duration_ms: int = 20  # Expected audio frame duration (20ms = 50fps)
+    pass  # No configuration needed - frame duration calculated dynamically
 
 class MonotonicAudioSynchronizer:
     """
@@ -39,7 +39,7 @@ class MonotonicAudioSynchronizer:
     
     def synchronize_audio_frame(self, frame: AudioFrame) -> AudioFrame:
         """
-        Ensure audio frame timestamp is strictly monotonic.
+        Ensure audio frame timestamp is strictly monotonic while preserving natural timing.
         
         Args:
             frame: Input audio frame
@@ -50,28 +50,33 @@ class MonotonicAudioSynchronizer:
         if self.last_audio_timestamp is None:
             # Initialize with current timestamp
             self.last_audio_timestamp = frame.timestamp
-            self.expected_interval = self._calculate_interval(frame.time_base)
+            self.expected_interval = self._calculate_interval(frame)
             self.frame_count = 1
-            logger.debug(f"Audio timeline initialized at {frame.timestamp}")
             return frame
         
-        # Calculate next monotonic timestamp
-        next_timestamp = self.last_audio_timestamp + self.expected_interval
+        # Use original timestamp if it's already monotonic, otherwise correct it
+        if frame.timestamp > self.last_audio_timestamp:
+            # Original timestamp is already monotonic, use it
+            corrected_timestamp = frame.timestamp
+            # Update expected interval based on actual gap
+            self.expected_interval = self._calculate_interval(frame)
+        else:
+            # Original timestamp would break monotonicity, use calculated next timestamp
+            corrected_timestamp = self.last_audio_timestamp + self.expected_interval
         
-        # Always use monotonic progression - ignore original timestamp
-        frame.timestamp = next_timestamp
-        logger.debug(f"Audio timestamp set to monotonic: {next_timestamp}")
+        # Update timestamp for monotonic progression
+        frame.timestamp = corrected_timestamp
         
         # Update state
-        self.last_audio_timestamp = next_timestamp
+        self.last_audio_timestamp = corrected_timestamp
         self.frame_count += 1
         
         return frame
     
-    def _calculate_interval(self, time_base: Fraction) -> int:
-        """Calculate expected audio frame interval in timestamp units."""
-        frame_duration_seconds = self.config.frame_duration_ms / 1000.0
-        return int(frame_duration_seconds * time_base.denominator / time_base.numerator)
+    def _calculate_interval(self, frame: AudioFrame) -> int:
+        """Calculate actual audio frame interval based on frame samples and sample rate."""
+        frame_duration_seconds = frame.nb_samples / frame.rate
+        return int(frame_duration_seconds * frame.time_base.denominator / frame.time_base.numerator)
     
     def reset(self):
         """Reset timeline state."""

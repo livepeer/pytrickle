@@ -172,24 +172,16 @@ class TrickleClient:
 
         return stats
     
-    def set_target_fps(self, target_fps: float):
-        """Manually set the target FPS for intelligent frame skipping.
+    def set_target_fps(self, target_fps: Optional[float]):
+        """Set the target FPS for intelligent frame skipping.
         
         Args:
-            target_fps: New target FPS value
+            target_fps: Target FPS value (None = auto-detect from ingress)
         """
         if self.frame_skipper:
-            self.frame_skipper.update_target_fps(target_fps)
-            logger.info(f"Manually set target FPS to {target_fps}")
+            self.frame_skipper.set_target_fps(target_fps)
         else:
             logger.warning("Frame skipping is disabled, cannot set target FPS")
-    
-    def enable_auto_target_fps(self):
-        """Re-enable automatic target FPS detection."""
-        if self.frame_skipper:
-            self.frame_skipper.enable_auto_target_fps()
-        else:
-            logger.warning("Frame skipping is disabled, cannot enable auto target FPS")
 
     async def _on_protocol_error(self, error_type: str, exception: Optional[Exception] = None):
         """Handle protocol errors and shutdown events."""
@@ -220,12 +212,6 @@ class TrickleClient:
                 if self.error_event.is_set() or self.stop_event.is_set():
                     logger.info("Stopping ingress loop due to error or stop signal")
                     break
-                
-                # Audio timestamp synchronization now handled by frame skipper
-                if isinstance(frame, AudioFrame):
-                    logger.debug("Queued audio frame for processing")
-                else:
-                    logger.debug(f"Queued {type(frame).__name__} for async processing")
                 
                 # Queue frames for processing - audio frames now have correct timestamps
                 try:
@@ -292,19 +278,11 @@ class TrickleClient:
                     if isinstance(frame, VideoFrame):
                         logger.debug(f"Processing video frame with frame processor: {frame.tensor.shape}")
                         
-                        # Monitor queue sizes for potential issues
-                        queue_size = self.input_queue.qsize()
-                        output_queue_size = self.output_queue.qsize()
-                        if queue_size > self.max_queue_size * 0.8 or output_queue_size > self.max_queue_size * 0.8:
-                            logger.warning(f"High queue usage - input: {queue_size}/{self.max_queue_size}, output: {output_queue_size}/{self.max_queue_size}")
-                        
-                        # Frame skipper already handled intelligent video frame skipping
-                        # Async processing
+                        # Frame skipper handles video frame skipping
                         processed_frame = await self.frame_processor.process_video_async(frame)
                         if processed_frame:
                             output = VideoOutput(processed_frame, self.request_id)
                             await self.output_queue.put(output)
-                            logger.debug(f"Sent async processed video frame to egress")
                         else:
                             logger.warning(f"Frame processor returned None for video frame")
                             
@@ -317,11 +295,10 @@ class TrickleClient:
                         if processed_frames:
                             output = AudioOutput(processed_frames, self.request_id)
                             await self.output_queue.put(output)
-                            logger.debug(f"Sent async processed audio frame to egress")
                         else:
                             logger.warning(f"Frame processor returned None for audio frame")
                     else:
-                        logger.debug(f"Received unknown frame type: {type(frame)}")
+                        logger.warning(f"Received unknown frame type: {type(frame)}")
                         
                 except asyncio.TimeoutError:
                     continue  # No frame available, continue loop
@@ -372,11 +349,8 @@ class TrickleClient:
                         if frame is not None:
                             # Apply precise audio synchronization right before encoder
                             if isinstance(frame, AudioOutput):
-                                logger.debug(f"EGRESS: Synchronizing {len(frame.frames)} audio frames before encoder")
                                 for audio_frame in frame.frames:
-                                    old_timestamp = audio_frame.timestamp
                                     self.audio_synchronizer.synchronize_audio_frame(audio_frame)
-                                    logger.debug(f"EGRESS: Audio frame: {old_timestamp} -> {audio_frame.timestamp}")
                             yield frame
                         else:
                             # None frame indicates shutdown

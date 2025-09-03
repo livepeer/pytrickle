@@ -28,7 +28,7 @@ from .utils.register import RegisterCapability
 from .frame_processor import FrameProcessor
 from .stream_processor import StreamProcessor
 from .fps_meter import FPSMeter
-from .frame_skipper import AdaptiveFrameSkipper, FrameSkipConfig
+from .frame_skipper import AdaptiveFrameSkipper, FrameSkipConfig, FrameProcessingResult
 from .monotonic_audio import MonotonicAudioSynchronizer, AudioSyncConfig
 from . import api
 

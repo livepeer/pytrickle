@@ -12,7 +12,6 @@ import numpy as np
 from pytrickle import StreamProcessor
 from pytrickle.frames import VideoFrame
 from pytrickle.frame_skipper import FrameSkipConfig
-import asyncio
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -105,7 +104,6 @@ async def process_video(frame: VideoFrame) -> VideoFrame:
     # Simulated processing time
     if delay > 0:
         await asyncio.sleep(delay)
-        
 
     frame_tensor = frame.tensor
     
