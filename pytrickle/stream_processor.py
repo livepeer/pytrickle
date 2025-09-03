@@ -6,6 +6,7 @@ from typing import Optional, Callable, Dict, Any, List, Union, Awaitable, Corout
 from .frames import VideoFrame, AudioFrame
 from .frame_processor import FrameProcessor
 from .server import StreamServer
+from .frame_skipper import FrameSkipConfig
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +28,7 @@ class StreamProcessor:
         send_data_interval: Optional[float] = 0.333,
         name: str = "stream-processor",
         port: int = 8000,
-        enable_frame_skipping: bool = True,
-        target_fps: Optional[float] = None,
+        frame_skip_config: Optional[FrameSkipConfig] = None,
         **server_kwargs
     ):
         """
@@ -42,8 +42,7 @@ class StreamProcessor:
             send_data_interval: Interval for sending data
             name: Processor name
             port: Server port
-            enable_frame_skipping: Whether to enable intelligent frame skipping
-            target_fps: Target FPS for frame skipping (None = auto-detect from ingress)
+            frame_skip_config: Optional frame skipping configuration (None = no frame skipping)
             **server_kwargs: Additional arguments passed to StreamServer
         """
         # Validate that processors are async functions
@@ -60,7 +59,7 @@ class StreamProcessor:
         self.send_data_interval = send_data_interval
         self.name = name
         self.port = port
-        self.target_fps = target_fps
+        self.frame_skip_config = frame_skip_config
         self.server_kwargs = server_kwargs
         
         # Create internal frame processor
@@ -77,8 +76,7 @@ class StreamProcessor:
         self.server = StreamServer(
             frame_processor=self._frame_processor,
             port=port,
-            enable_frame_skipping=enable_frame_skipping,
-            target_fps=target_fps,
+            frame_skip_config=frame_skip_config,
             **server_kwargs
         )
     
@@ -132,7 +130,7 @@ class _InternalFrameProcessor(FrameProcessor):
         
         # Frame skipping is handled at the TrickleClient level
         # Having multiple frame skippers causes interference and double-counting
-        self.enable_frame_skipping = False  # Always False to prevent conflicts
+        self.frame_skip_config = None  # Always None to prevent conflicts
         self.frame_skipper = None
         
         # Initialize parent with error_callback=None, which will call load_model

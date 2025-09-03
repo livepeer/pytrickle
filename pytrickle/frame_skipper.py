@@ -8,64 +8,55 @@ real-time performance with automatic target FPS detection.
 import time
 import logging
 import asyncio
-from collections import deque
 from dataclasses import dataclass
-from typing import Optional, Dict, Any, Union, Literal
-from .fps_meter import FPSMeter
+from enum import Enum
+from typing import Optional, Union
+from fractions import Fraction
 from .frames import VideoFrame, AudioFrame
+from .fps_meter import FPSMeter
 
 logger = logging.getLogger(__name__)
 
-# Type alias for cleaner return type annotations
-FrameResult = Union[VideoFrame, AudioFrame, Literal[False], None]
+class FrameProcessingResult(Enum):
+    """Explicit result types for frame processing operations."""
+    SKIPPED = "skipped"  # Frame was skipped due to adaptive logic
 
+FrameResult = Union[VideoFrame, AudioFrame, FrameProcessingResult, None]
 @dataclass
-class SkippingConfig:
-    """Configuration for adaptive frame skipping behavior."""
-    target_fps: Optional[float] = None
-    adaptation_window: float = 2.0
-    skip_pattern: str = "uniform"  # "uniform", "keyframe", or "temporal"
-    adaptation_cooldown: float = 2.0
+class FrameSkipConfig:
+    """Configuration for adaptive frame skipping behavior.
     
-    # Simple queue overflow prevention
-    max_queue_size: int = 50  # Start dropping frames when queue exceeds this
-    max_cleanup_frames: int = 20  # Maximum frames to drop in one cleanup
-
-
+    This allows StreamProcessor users to easily configure intelligent frame skipping
+    for optimal real-time performance.
+    """
+    target_fps: Optional[float] = None  # Target FPS (None = auto-detect from ingress)
+    adaptation_window: float = 2.0      # Time window for FPS measurement
+    adaptation_cooldown: float = 2.0    # Minimum time between adaptations
+    max_queue_size: int = 50           # Start dropping frames when queue exceeds this
+    max_cleanup_frames: int = 20       # Maximum frames to drop in one cleanup
+    
 class AdaptiveFrameSkipper:
     """
-    Self-updating adaptive frame skipper that automatically detects ingress FPS
-    and adjusts frame dropping to maintain real-time processing.
+    Adaptive frame skipper that automatically detects ingress FPS
+    and adjusts frame dropping to maintain real-time performance.
+    
+    Enhanced with timestamp synchronization to prevent encoder DTS errors.
     """
     
     def __init__(
         self,
-        target_fps: Optional[float] = None,
-        adaptation_window: float = 2.0,
-        skip_pattern: str = "uniform",
-        config: Optional[SkippingConfig] = None
+        config: FrameSkipConfig,
+        fps_meter: 'FPSMeter'
     ):
         """
-        Initialize self-updating adaptive frame skipper.
+        Initialize adaptive frame skipper.
         
         Args:
-            target_fps: Target FPS (None = auto-detect from ingress)
-            adaptation_window: Time window for FPS measurement  
-            skip_pattern: Frame skipping pattern strategy
-            config: Optional configuration object (overrides individual params)
+            config: FrameSkipConfig object with all configuration
+            fps_meter: FPSMeter from protocol for consistent measurements
         """
-        # Use config if provided, otherwise create from individual params
-        if config is not None:
-            self.config = config
-        else:
-            self.config = SkippingConfig(
-                target_fps=target_fps,
-                adaptation_window=adaptation_window,
-                skip_pattern=skip_pattern
-            )
-        
-        # Performance tracking
-        self.fps_meter = FPSMeter(window_seconds=self.config.adaptation_window)
+        self.config = config
+        self.fps_meter = fps_meter
         
         # Frame counting for skip patterns
         self.frame_counter = 0
@@ -73,8 +64,11 @@ class AdaptiveFrameSkipper:
         
         # Last adaptation time to prevent too frequent changes
         self.last_adaptation_time = time.time()
+        
+        # Simple frame counting
+        self.video_frame_count = 0
 
-    async def process_queue_with_skipping(self, input_queue: asyncio.Queue, timeout: float = 5) -> FrameResult:
+    async def process_queue(self, input_queue: asyncio.Queue, timeout: float = 5) -> FrameResult:
         """
         Get frames from input queue with intelligent skipping to maintain real-time performance.
         Only skips video frames - audio frames are always processed.
@@ -86,14 +80,12 @@ class AdaptiveFrameSkipper:
         Returns:
             - VideoFrame or AudioFrame: Frame to process
             - None: Queue received shutdown sentinel
-            - False: Frame was skipped, caller should get next frame
+            - FrameProcessingResult.SKIPPED: Frame was skipped, caller should get next frame
             - Raises asyncio.TimeoutError: Timeout occurred, no frame available
         """
         try:
-            # First handle queue overflow by skipping excess video frames
-            overflow_frame = await self._handle_queue_overflow(input_queue, timeout)
-            if overflow_frame is not None:
-                return overflow_frame  # Return audio frame or sentinel
+            # Handle queue overflow by skipping excess video frames
+            await self._cleanup_queue_overflow(input_queue, timeout)
             
             # Get the next frame to potentially process
             frame = await asyncio.wait_for(input_queue.get(), timeout=timeout)
@@ -101,140 +93,117 @@ class AdaptiveFrameSkipper:
                 return None  # Sentinel value for shutdown
             
             # Handle frame based on type
-            return self._process_frame_for_skipping(frame)
+            return self._process_frame(frame)
             
         except asyncio.TimeoutError:
             raise  # Let the caller handle the timeout
 
-    async def _handle_queue_overflow(self, input_queue: asyncio.Queue, timeout: float) -> Optional[Union[AudioFrame, None]]:
-        """Handle queue overflow by skipping excess video frames."""
+    async def _cleanup_queue_overflow(self, input_queue: asyncio.Queue, timeout: float):
+        """Clean up queue overflow by dropping excess video frames."""
         queue_size = input_queue.qsize()
         
-        # Simple check: if queue is too big, drop some frames
-        if queue_size > self.config.max_queue_size:
-            frames_to_drop = min(queue_size - self.config.max_queue_size, self.config.max_cleanup_frames)
-            
-            # Drop frames, but preserve any audio frames we encounter
-            for _ in range(frames_to_drop):
-                try:
-                    dropped_frame = await asyncio.wait_for(input_queue.get(), timeout=timeout)
-                    if dropped_frame is None:
-                        return None  # Hit sentinel, stop processing
-                    
-                    if isinstance(dropped_frame, VideoFrame):
-                        self.fps_meter.record_ingress_video_frame()  # Count it for stats
-                    else:
-                        # Audio frame encountered - return it immediately (don't drop audio!)
-                        return dropped_frame
-                        
-                except asyncio.TimeoutError:
-                    break  # No more frames available quickly
+        if queue_size <= self.config.max_queue_size:
+            return
         
-        return None  # No audio frame found during cleanup
+        frames_to_drop = min(queue_size - self.config.max_queue_size, self.config.max_cleanup_frames)
+        
+        # Drop frames, but preserve any audio frames we encounter
+        for _ in range(frames_to_drop):
+            try:
+                frame = await asyncio.wait_for(input_queue.get(), timeout=timeout)
+                if frame is None:
+                    await input_queue.put(None)  # Re-queue sentinel
+                    return
+                
+                if isinstance(frame, AudioFrame):
+                    # Audio frame - put it back in the queue
+                    await input_queue.put(frame)
+                    
+            except asyncio.TimeoutError:
+                break  # No more frames available
 
-    def _process_frame_for_skipping(self, frame: Union[VideoFrame, AudioFrame]) -> FrameResult:
+    def _process_frame(self, frame: Union[VideoFrame, AudioFrame]) -> FrameResult:
         """Process a frame to determine if it should be skipped."""
         if isinstance(frame, VideoFrame):
-            return self._handle_video_frame(frame)
+            return self._process_video_frame(frame)
         else:
-            # Audio frames always pass through
+            # Audio frames always pass through unchanged - sync handled after frame skipper
             return frame
 
-    def _handle_video_frame(self, frame: VideoFrame) -> FrameResult:
-        """Handle video frame processing and skipping logic."""
-        # Count frame and record for FPS measurement
+    def _process_video_frame(self, frame: VideoFrame) -> FrameResult:
+        """Process video frame and apply skipping logic."""
+        # Count frame for skip pattern
         self.frame_counter += 1
-        self.fps_meter.record_ingress_video_frame()
+        self.video_frame_count += 1
         
-        # Check adaptation and skip pattern
-        self._adapt_skip_pattern()
-        should_skip = self._apply_skip_pattern()
+        # Update skip pattern and check if frame should be skipped
+        self._adapt_skip_interval()
+        should_skip = self._should_skip_frame()
         
         if should_skip:
-            return False  # Frame was skipped
+            return FrameProcessingResult.SKIPPED  # Frame was skipped
         else:
-            self.fps_meter.record_egress_video_frame()
-            return frame
+            return frame  # Frame passes through unchanged
     
-    def _adapt_skip_pattern(self):
-        """Self-updating adaptation with performance optimization."""
+    def _adapt_skip_interval(self):
+        """Adapt skip interval based on current FPS measurements."""
         current_time = time.time()
         
-        # Only adapt skip pattern if enough time has passed
+        # Only adapt if enough time has passed (avoid expensive FPS calculation)
         if current_time - self.last_adaptation_time < self.config.adaptation_cooldown:
-            return  # EXIT EARLY - avoid expensive FPS calculation
+            return
         
-        # Now do the expensive FPS calculation only when needed
         ingress_fps = self.fps_meter.get_ingress_video_fps()
         
-        # Need sufficient data points for reliable measurement
+        # Need sufficient data for reliable measurement
         if ingress_fps < 1.0:
             return
         
-        # Use ingress FPS as target if target_fps is None (auto-detect mode)
-        effective_target_fps = self.config.target_fps if self.config.target_fps is not None else ingress_fps
+        # Use ingress FPS as target if not specified (auto-detect mode)
+        target = self.config.target_fps if self.config.target_fps is not None else ingress_fps
         
-        # Direct calculation: skip_interval = ingress_fps / target_fps
-        if ingress_fps <= effective_target_fps:
-            new_skip_interval = 1
+        # Calculate skip interval: skip_interval = ingress_fps / target_fps
+        if ingress_fps <= target:
+            new_interval = 1
         else:
-            new_skip_interval = max(1, round(ingress_fps / effective_target_fps))
+            new_interval = max(1, round(ingress_fps / target))
         
         # Apply new skip interval
-        if new_skip_interval != self.skip_interval:
-            logger.info(f"Skip pattern update: ingress_fps={ingress_fps:.1f}, "
-                       f"target_fps={effective_target_fps:.1f}, skip_interval={self.skip_interval}->{new_skip_interval}")
-            self.skip_interval = new_skip_interval
+        if new_interval != self.skip_interval:
+            logger.info(f"Skip pattern: {ingress_fps:.1f}fps → {target:.1f}fps (skip every {new_interval} frames)")
+            self.skip_interval = new_interval
         
         self.last_adaptation_time = current_time
 
-
-    def _apply_skip_pattern(self) -> bool:
-        """Apply the current skip pattern to determine if this frame should be skipped."""
+    def _should_skip_frame(self) -> bool:
+        """Determine if current frame should be skipped."""
         if self.skip_interval <= 1:
-            return False  # No skipping
+            return False
         
-        if self.config.skip_pattern == "uniform":
-            # Skip every N frames uniformly
-            return (self.frame_counter % self.skip_interval) != 1
-        
-        elif self.config.skip_pattern == "keyframe":
-            # Simple keyframe pattern - could be enhanced with actual keyframe detection
-            return (self.frame_counter % self.skip_interval) != 1
-        
-        elif self.config.skip_pattern == "temporal":
-            # Skip frames with more temporal distance from last processed
-            # This is a simple implementation - could be more sophisticated
-            return (self.frame_counter % self.skip_interval) != 1
-        
-        else:
-            # Default to uniform
-            return (self.frame_counter % self.skip_interval) != 1
+        # Skip every N frames uniformly
+        return (self.frame_counter % self.skip_interval) != 1
     
-    def reset_statistics(self):
+    def reset(self):
         """Reset frame counter and measurements."""
         self.frame_counter = 0
         self.skip_interval = 1
-        self.fps_meter.reset()
+        self.video_frame_count = 0
     
-    def update_target_fps(self, new_target_fps: Optional[float]):
-        """Update the target FPS dynamically and recalculate skip pattern.
+    def set_target_fps(self, target_fps: Optional[float]):
+        """Set target FPS and recalculate skip pattern.
         
         Args:
-            new_target_fps: New target FPS value (None = auto-detect from ingress)
+            target_fps: Target FPS (None = auto-detect from ingress)
         """
-        if new_target_fps is None or new_target_fps > 0:
-            self.config.target_fps = new_target_fps
-            # Force immediate recalculation of skip pattern
+        if target_fps is None or target_fps > 0:
+            self.config.target_fps = target_fps
+            # Force immediate recalculation
             self.last_adaptation_time = 0
-            self._adapt_skip_pattern()
-            if new_target_fps is None:
-                logger.info("Updated to auto-detect target FPS from ingress")
+            self._adapt_skip_interval()
+            
+            if target_fps is None:
+                logger.info("Auto-detect target FPS enabled")
             else:
-                logger.info(f"Manually updated target_fps to {new_target_fps}")
+                logger.info(f"Target FPS set to {target_fps}")
         else:
-            logger.warning(f"Invalid target_fps value: {new_target_fps}, keeping current value: {self.config.target_fps}")
-    
-    def enable_auto_target_fps(self):
-        """Enable automatic target FPS detection (same as setting target_fps=None)."""
-        self.update_target_fps(None)
+            logger.warning(f"Invalid target FPS: {target_fps}, keeping current: {self.config.target_fps}")

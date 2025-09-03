@@ -27,6 +27,8 @@ class TestProcessor(FrameProcessor):
     def __init__(self, processing_delay: float = 0.1):
         self.processing_delay = processing_delay
         self.processed_count = 0
+        self.processed_video_count = 0
+        self.processed_audio_count = 0
         super().__init__()
     
     async def load_model(self, **kwargs):
@@ -45,6 +47,7 @@ class TestProcessor(FrameProcessor):
         # Simple processing: just modify the tensor
         processed_tensor = frame.tensor * 0.8  # Darken the frame
         self.processed_count += 1
+        self.processed_video_count += 1
         
         end_time = time.time()
         logger.info(f"Completed video processing for frame {self.processed_count} in {end_time - start_time:.3f}s")
@@ -64,6 +67,7 @@ class TestProcessor(FrameProcessor):
         processed_samples = frame.samples * 0.8  # Lower volume
         processed_frame = frame.replace_samples(samples=processed_samples)
         self.processed_count += 1
+        self.processed_audio_count += 1
         
         end_time = time.time()
         logger.info(f"Completed audio processing for frame {self.processed_count} in {end_time - start_time:.3f}s")
@@ -77,12 +81,12 @@ class TestProcessor(FrameProcessor):
             logger.info(f"Updated processing delay to {self.processing_delay}s")
 
 
-async def create_test_frames():
+async def create_test_frames(num_frames: int = 2):
     """Create test video and audio frames."""
     frames = []
     
     # Create multiple frames with different timestamps
-    for i in range(2):
+    for i in range(num_frames):
         timestamp = 1000 + (i * 2000)  # Different timestamps
         
         # Create test video frame
@@ -119,11 +123,15 @@ async def test_async_processing():
     # Create test processor with delay
     processor = TestProcessor(processing_delay=0.2)  # 200ms delay per frame
     
-    # Create mock protocol
+    # Create mock protocol with FPSMeter
     protocol = Mock(spec=TrickleProtocol)
     protocol.start = AsyncMock()
     protocol.stop = AsyncMock()
     protocol.error_callback = None  # Add the missing attribute
+    
+    # Mock FPSMeter for the protocol
+    from pytrickle.fps_meter import FPSMeter
+    protocol.fps_meter = FPSMeter()
     
     # Create test frames
     test_frames = await create_test_frames()
@@ -141,8 +149,13 @@ async def test_async_processing():
             await asyncio.sleep(0.05)
         logger.info("Mock ingress loop completed - all frames yielded")
     
+    # Mock egress loop that properly consumes output frames
+    async def mock_egress_loop(output_generator):
+        async for output_frame in output_generator:
+            logger.debug(f"Egress received: {type(output_frame).__name__}")
+    
     protocol.ingress_loop = mock_ingress_loop
-    protocol.egress_loop = AsyncMock()
+    protocol.egress_loop = mock_egress_loop
     protocol.control_loop = async_generator_empty
     
     # Create client
@@ -157,9 +170,9 @@ async def test_async_processing():
     
     # Start client (this should not block on processing)
     try:
-        # Run with a longer timeout to allow all frames to be processed
+        # Run with a reasonable timeout for async processing
         # Expected time: 4 frames * 0.05s ingress delay + processing time
-        await asyncio.wait_for(client.start("test_request"), timeout=10.0)
+        await asyncio.wait_for(client.start("test_request"), timeout=2.0)
     except asyncio.TimeoutError:
         logger.info("Client stopped due to timeout (expected)")
     
@@ -206,6 +219,68 @@ async def test_async_processing():
         logger.warning(f"❌ ISSUE: Only {processor.processed_count}/{len(test_frames)} frames processed")
 
 
+async def test_frame_skipping():
+    """Test that frame skipping is working correctly."""
+    logger.info("=== Testing Frame Skipping ===")
+    
+    # Test the frame skipper directly with a simple unit test
+    from pytrickle.frame_skipper import AdaptiveFrameSkipper, FrameProcessingResult, FrameSkipConfig
+    from pytrickle.frames import VideoFrame, AudioFrame
+    from pytrickle.fps_meter import FPSMeter
+    import torch
+    
+    # Create frame skipper with new simplified interface
+    config = FrameSkipConfig(target_fps=10)
+    fps_meter = FPSMeter()  # Create FPSMeter for testing
+    skipper = AdaptiveFrameSkipper(config=config, fps_meter=fps_meter)
+    
+    # Create test frames using the existing helper
+    test_frames = await create_test_frames(num_frames=10)
+    
+    # Test that video frames can be skipped but audio frames are not
+    video_frames = [f for f in test_frames if isinstance(f, VideoFrame)]
+    audio_frames = [f for f in test_frames if isinstance(f, AudioFrame)]
+    
+    # Manually test the frame processing logic
+    processed_video = 0
+    processed_audio = 0
+    skipped_video = 0
+    
+    # Process video frames - some should be skipped after adaptation
+    for i, frame in enumerate(video_frames):
+        # Simulate frame counter progression
+        skipper.frame_counter = i + 1
+        
+        # Force skip interval to simulate adaptation (skip every 3rd frame)
+        skipper.skip_interval = 3
+        
+        result = skipper._process_frame(frame)
+        if result == FrameProcessingResult.SKIPPED:
+            skipped_video += 1
+        elif isinstance(result, VideoFrame):
+            processed_video += 1
+        else:
+            raise AssertionError(f"Unexpected result for video frame: {result}")
+    
+    # Process audio frames - none should be skipped
+    for frame in audio_frames:
+        result = skipper._process_frame(frame)
+        if isinstance(result, AudioFrame):
+            processed_audio += 1
+        elif result == FrameProcessingResult.SKIPPED:
+            # Audio frames should never be skipped
+            raise AssertionError("Audio frame was unexpectedly skipped")
+    
+    logger.info(f"=== Frame Skipping Results ===")
+    logger.info(f"Video frames: {len(video_frames)} → processed: {processed_video}, skipped: {skipped_video}")
+    logger.info(f"Audio frames: {len(audio_frames)} → processed: {processed_audio}")
+    
+    # Verify that some video frames were skipped and all audio frames were processed
+    assert skipped_video > 0, f"Some video frames should have been skipped: {skipped_video}"
+    assert processed_audio == len(audio_frames), f"All audio frames should be processed: {processed_audio}/{len(audio_frames)}"
+    
+    logger.info("✅ SUCCESS: Frame skipping test passed")
+
 async def async_generator_empty(stop_event=None):
     """Empty async generator for mocking."""
     if False:  # Never yields anything
@@ -214,3 +289,4 @@ async def async_generator_empty(stop_event=None):
 
 if __name__ == "__main__":
     asyncio.run(test_async_processing())
+    asyncio.run(test_frame_skipping())

@@ -5,11 +5,13 @@ OpenCV Green Processor using StreamProcessor
 
 import asyncio
 import logging
+import time
 import torch
 import cv2
 import numpy as np
 from pytrickle import StreamProcessor
 from pytrickle.frames import VideoFrame
+from pytrickle.frame_skipper import FrameSkipConfig
 import asyncio
 
 logging.basicConfig(level=logging.INFO)
@@ -210,6 +212,6 @@ if __name__ == "__main__":
         name="green-processor",
         port=8001,
         # Frame skipping configuration (optional)
-        enable_frame_skipping=True,    # Enable intelligent frame skipping (default: True)
+        frame_skip_config=FrameSkipConfig(),  # Enable intelligent frame skipping
     )
     processor.run()

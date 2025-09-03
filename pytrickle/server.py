@@ -21,6 +21,7 @@ from .utils.hardware import HardwareInfo
 from .frame_processor import FrameProcessor
 from .client import TrickleClient
 from .protocol import TrickleProtocol
+from .frame_skipper import FrameSkipConfig
 
 logger = logging.getLogger(__name__)
 
@@ -61,8 +62,7 @@ class StreamServer:
         subscriber_timeout: Optional[float] = None,
         app_kwargs: Optional[Dict[str, Any]] = None,
         # Frame skipping configuration
-        enable_frame_skipping: bool = True,
-        target_fps: Optional[float] = None,
+        frame_skip_config: Optional[FrameSkipConfig] = None,
 
     ):
         """Initialize StreamServer.
@@ -84,8 +84,7 @@ class StreamServer:
             on_startup: List of startup handlers
             on_shutdown: List of shutdown handlers
             app_kwargs: Additional kwargs for aiohttp.web.Application
-            enable_frame_skipping: Whether to enable intelligent frame skipping
-            target_fps: Target FPS for frame skipping (None = auto-detect from ingress)
+            frame_skip_config: Optional frame skipping configuration (None = no frame skipping)
         """
         self.frame_processor = frame_processor
         self.port = port
@@ -108,8 +107,7 @@ class StreamServer:
         self.subscriber_timeout = subscriber_timeout
         
         # Frame skipping configuration
-        self.enable_frame_skipping = enable_frame_skipping
-        self.target_fps = target_fps
+        self.frame_skip_config = frame_skip_config
         
         # Stream management - simple and direct
         self.current_client: Optional[TrickleClient] = None
@@ -340,8 +338,7 @@ class StreamServer:
                 protocol=protocol,
                 frame_processor=self.frame_processor,
                 control_handler=self._handle_control_message,
-                enable_frame_skipping=self.enable_frame_skipping,
-                target_fps=self.target_fps,
+                frame_skip_config=self.frame_skip_config,
             )
             
             # Update state
