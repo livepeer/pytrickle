@@ -20,7 +20,8 @@ class FrameProcessingResult(Enum):
     """Explicit result types for frame processing operations."""
     SKIPPED = "skipped"  # Frame was skipped due to adaptive logic
 
-FrameResult = Union[VideoFrame, AudioFrame, FrameProcessingResult, None]
+# Type alias for video frame processing result
+FrameResult = Union[VideoFrame, FrameProcessingResult, None]
 @dataclass
 class FrameSkipConfig:
     """Configuration for adaptive frame skipping behavior."""
@@ -51,67 +52,57 @@ class AdaptiveFrameSkipper:
         # Last adaptation time to prevent too frequent changes
         self.last_adaptation_time = time.time()
 
-    async def process_queue(self, input_queue: asyncio.Queue, timeout: float = 5) -> FrameResult:
+    async def process_video_queue(self, video_queue: asyncio.Queue, timeout: float = 5) -> FrameResult:
         """
-        Get frames from input queue with intelligent skipping to maintain real-time performance.
-        Only skips video frames - audio frames are always processed.
+        Get video frames from queue with intelligent skipping to maintain real-time performance.
         
         Args:
-            input_queue: Asyncio queue containing frames to process
+            video_queue: Asyncio queue containing only video frames
             timeout: Timeout for queue operations
             
         Returns:
-            - VideoFrame or AudioFrame: Frame to process
+            - VideoFrame: Frame to process
             - None: Queue received shutdown sentinel
             - FrameProcessingResult.SKIPPED: Frame was skipped, caller should get next frame
             - Raises asyncio.TimeoutError: Timeout occurred, no frame available
         """
         try:
             # Handle queue overflow by skipping excess video frames
-            await self._cleanup_queue_overflow(input_queue, timeout)
+            await self._cleanup_video_queue_overflow(video_queue, timeout)
             
             # Get the next frame to potentially process
-            frame = await asyncio.wait_for(input_queue.get(), timeout=timeout)
+            frame = await asyncio.wait_for(video_queue.get(), timeout=timeout)
             if frame is None:
                 return None  # Sentinel value for shutdown
             
-            # Handle frame based on type
-            return self._process_frame(frame)
+            # Process video frame with skipping logic
+            return self._process_video_frame(frame)
             
         except asyncio.TimeoutError:
             raise  # Let the caller handle the timeout
 
-    async def _cleanup_queue_overflow(self, input_queue: asyncio.Queue, timeout: float):
-        """Clean up queue overflow by dropping excess video frames."""
-        queue_size = input_queue.qsize()
+    async def _cleanup_video_queue_overflow(self, video_queue: asyncio.Queue, timeout: float):
+        """Clean up video queue overflow by dropping excess frames."""
+        queue_size = video_queue.qsize()
         
         if queue_size <= self.config.max_queue_size:
             return
         
         frames_to_drop = min(queue_size - self.config.max_queue_size, self.config.max_cleanup_frames)
         
-        # Drop frames, but preserve any audio frames we encounter
+        # Drop video frames (no need to check type since this is video-only queue)
         for _ in range(frames_to_drop):
             try:
-                frame = await asyncio.wait_for(input_queue.get(), timeout=timeout)
+                frame = await asyncio.wait_for(video_queue.get(), timeout=timeout)
                 if frame is None:
-                    await input_queue.put(None)  # Re-queue sentinel
+                    await video_queue.put(None)  # Re-queue sentinel
                     return
-                
-                if isinstance(frame, AudioFrame):
-                    # Audio frame - put it back in the queue
-                    await input_queue.put(frame)
+                # Simply drop the video frame (no requeuing needed)
                     
             except asyncio.TimeoutError:
                 break  # No more frames available
 
-    def _process_frame(self, frame: Union[VideoFrame, AudioFrame]) -> FrameResult:
-        """Process a frame to determine if it should be skipped."""
-        if isinstance(frame, VideoFrame):
-            return self._process_video_frame(frame)
-        else:
-            # Audio frames always pass through unchanged - sync handled after frame skipper
-            return frame
+
 
     def _process_video_frame(self, frame: VideoFrame) -> FrameResult:
         """Process video frame and apply skipping logic."""

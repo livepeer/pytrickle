@@ -19,10 +19,7 @@ from .frame_processor import FrameProcessor
 from .decoder import DEFAULT_MAX_FRAMERATE
 from .frame_skipper import AdaptiveFrameSkipper, FrameSkipConfig, FrameProcessingResult
 
-
-
 logger = logging.getLogger(__name__)
-
 
 class TrickleClient:
     """High-level client for trickle stream processing with native async support."""
@@ -128,6 +125,10 @@ class TrickleClient:
                     logger.error(f"Error in stream stop callback: {e}")
             
             await self.protocol.stop()
+            
+            # Cleanup frame skipper resources
+            if self.frame_skipper:
+                self.frame_skipper.reset()
     
     async def stop(self):
         """Stop the trickle client."""
@@ -255,7 +256,7 @@ class TrickleClient:
                 try:
                     if self.frame_skipper:
                         try:
-                            frame_or_result = await self.frame_skipper.process_queue(self.video_input_queue, timeout=5)
+                            frame_or_result = await self.frame_skipper.process_video_queue(self.video_input_queue, timeout=5)
                             
                             if frame_or_result is None:
                                 break

@@ -132,7 +132,6 @@ class _InternalFrameProcessor(FrameProcessor):
         self.frame_skip_config = None
         self.frame_skipper = None
         
-        # Initialize parent with error_callback=None, which will call load_model
         super().__init__(error_callback=None)
     
     async def load_model(self, **kwargs):
