@@ -18,7 +18,7 @@ from . import ErrorCallback
 from .frame_processor import FrameProcessor
 from .decoder import DEFAULT_MAX_FRAMERATE
 from .frame_skipper import AdaptiveFrameSkipper, FrameSkipConfig, FrameProcessingResult
-from .monotonic_audio import MonotonicAudioSynchronizer
+
 
 
 logger = logging.getLogger(__name__)
@@ -71,8 +71,9 @@ class TrickleClient:
         self.stop_event = asyncio.Event()
         self.error_event = asyncio.Event()
         
-        # Frame processing queues
-        self.input_queue = asyncio.Queue(maxsize=max_queue_size)
+        # Separate frame processing queues for clean audio/video handling
+        self.video_input_queue = asyncio.Queue(maxsize=max_queue_size)  # Video frames can be dropped
+        self.audio_input_queue = asyncio.Queue(maxsize=max_queue_size * 4)  # Audio frames never dropped, larger buffer
         self.output_queue = asyncio.Queue(maxsize=200)
         
         # Data queue
@@ -87,8 +88,14 @@ class TrickleClient:
         else:
             self.frame_skipper = None
         
-        # Audio synchronizer for monotonic timestamp progression
-        self.audio_synchronizer = MonotonicAudioSynchronizer()
+
+        
+        # Frame sequence tracking for ordered output
+        self._frame_sequence_counter = 0
+        self._pending_outputs = {}  # sequence_id -> (output, timestamp)
+        self._next_expected_sequence = 0
+        self._sequence_lock = asyncio.Lock()
+        self._sequence_timeout = 5.0  # Max seconds to wait for missing sequence
         
     async def start(self, request_id: str = "default"):
         """Start the trickle client."""
@@ -166,7 +173,8 @@ class TrickleClient:
     def get_statistics(self) -> dict:
         """Get comprehensive processing statistics."""
         stats = {
-            "input_queue_size": self.input_queue.qsize(),
+            "video_input_queue_size": self.video_input_queue.qsize(),
+            "audio_input_queue_size": self.audio_input_queue.qsize(),
             "output_queue_size": self.output_queue.qsize()
         }
 
@@ -182,6 +190,101 @@ class TrickleClient:
             self.frame_skipper.set_target_fps(target_fps)
         else:
             logger.warning("Frame skipping is disabled, cannot set target FPS")
+    
+    def _get_next_sequence_id(self) -> int:
+        """Get the next sequence ID for frame ordering."""
+        sequence_id = self._frame_sequence_counter
+        self._frame_sequence_counter += 1
+        return sequence_id
+    
+    async def _queue_ordered_output(self, output, sequence_id: int):
+        """Queue output with sequence ordering to maintain frame order."""
+        async with self._sequence_lock:
+            self._pending_outputs[sequence_id] = (output, time.time())
+            
+            # Output all consecutive frames starting from next expected sequence
+            await self._flush_consecutive_outputs()
+    
+    async def _flush_consecutive_outputs(self):
+        """Flush all consecutive outputs and handle timeouts for missing sequences."""
+        current_time = time.time()
+        
+        # Output all consecutive frames starting from next expected sequence
+        while self._next_expected_sequence in self._pending_outputs:
+            pending_output, _ = self._pending_outputs.pop(self._next_expected_sequence)
+            await self.output_queue.put(pending_output)
+            self._next_expected_sequence += 1
+        
+        # Handle timeout for missing sequences - skip them to prevent blocking
+        if self._pending_outputs:
+            oldest_sequence = min(self._pending_outputs.keys())
+            if oldest_sequence > self._next_expected_sequence:
+                # Check if we've waited too long for the missing sequence
+                oldest_timestamp = min(timestamp for _, timestamp in self._pending_outputs.values())
+                if current_time - oldest_timestamp > self._sequence_timeout:
+                    logger.warning(f"Sequence timeout: skipping missing sequence {self._next_expected_sequence}, jumping to {oldest_sequence}")
+                    self._next_expected_sequence = oldest_sequence
+                    # Flush consecutive outputs after advancing (non-recursive)
+                    while self._next_expected_sequence in self._pending_outputs:
+                        pending_output, _ = self._pending_outputs.pop(self._next_expected_sequence)
+                        await self.output_queue.put(pending_output)
+                        self._next_expected_sequence += 1
+    
+    async def _process_frame_with_ordering(self, frame: Union[VideoFrame, AudioFrame], sequence_id: int):
+        """Process a frame and handle ordering, with proper error recovery."""
+        try:
+            if isinstance(frame, VideoFrame):
+                logger.debug(f"Processing video frame with frame processor: {frame.tensor.shape} (seq: {sequence_id})")
+                
+                processed_frame = await self.frame_processor.process_video_async(frame)
+                if processed_frame:
+                    output = VideoOutput(processed_frame, self.request_id)
+                    await self._queue_ordered_output(output, sequence_id)
+                else:
+                    logger.warning(f"Frame processor returned None for video frame (seq: {sequence_id})")
+                    await self._advance_sequence_if_next(sequence_id)
+                    
+            elif isinstance(frame, AudioFrame):
+                logger.debug(f"Processing audio frame with frame processor: {frame.samples.shape} (seq: {sequence_id})")
+                
+                processed_frames = await self.frame_processor.process_audio_async(frame)
+                if processed_frames:
+                    output = AudioOutput(processed_frames, self.request_id)
+                    await self._queue_ordered_output(output, sequence_id)
+                else:
+                    logger.warning(f"Frame processor returned None for audio frame (seq: {sequence_id})")
+                    await self._advance_sequence_if_next(sequence_id)
+            else:
+                logger.warning(f"Received unknown frame type: {type(frame)} (seq: {sequence_id})")
+                await self._advance_sequence_if_next(sequence_id)
+                
+        except Exception as e:
+            logger.error(f"Error processing frame (seq: {sequence_id}): {e}")
+            
+            # Send original frame as fallback with proper ordering
+            try:
+                if isinstance(frame, VideoFrame):
+                    fallback_output = VideoOutput(frame, self.request_id)
+                    await self._queue_ordered_output(fallback_output, sequence_id)
+                elif isinstance(frame, AudioFrame):
+                    fallback_output = AudioOutput([frame], self.request_id)
+                    await self._queue_ordered_output(fallback_output, sequence_id)
+                else:
+                    # Unknown frame type - just advance sequence
+                    await self._advance_sequence_if_next(sequence_id)
+            except Exception as fallback_error:
+                logger.error(f"Error in fallback handling (seq: {sequence_id}): {fallback_error}")
+                await self._advance_sequence_if_next(sequence_id)
+    
+    async def _advance_sequence_if_next(self, sequence_id: int):
+        """Advance sequence counter if this is the next expected sequence."""
+        async with self._sequence_lock:
+            if sequence_id == self._next_expected_sequence:
+                self._next_expected_sequence += 1
+                # Try to flush any subsequent consecutive outputs
+                await self._flush_consecutive_outputs()
+    
+
 
     async def _on_protocol_error(self, error_type: str, exception: Optional[Exception] = None):
         """Handle protocol errors and shutdown events."""
@@ -213,15 +316,21 @@ class TrickleClient:
                     logger.info("Stopping ingress loop due to error or stop signal")
                     break
                 
-                # Queue frames for processing - audio frames now have correct timestamps
+                # Route frames to appropriate queues based on type
                 try:
-                    await self.input_queue.put(frame)
+                    if isinstance(frame, VideoFrame):
+                        await self.video_input_queue.put(frame)
+                    elif isinstance(frame, AudioFrame):
+                        await self.audio_input_queue.put(frame)
+                    else:
+                        logger.warning(f"Unknown frame type received: {type(frame)}")
                 except Exception as e:
                     logger.error(f"Error queueing frame for processing: {e}")
             
-            # Send sentinel to signal processing loop to complete
-            logger.info("Ingress loop completed, sending sentinel to processing loop")
-            await self.input_queue.put(None)
+            # Send sentinels to both queues to signal processing loop to complete
+            logger.info("Ingress loop completed, sending sentinels to processing loops")
+            await self.video_input_queue.put(None)
+            await self.audio_input_queue.put(None)
             
         except Exception as e:
             logger.error(f"Error in ingress loop: {e}")
@@ -239,87 +348,14 @@ class TrickleClient:
                     logger.error(f"Error in error callback: {cb_error}")
 
     async def _processing_loop(self):
-        """Process frames asynchronously from the input queue."""
+        """Process frames asynchronously from separate video and audio queues."""
         try:
-            while not self.stop_event.is_set() and not self.error_event.is_set():
-                try:
-                    if self.frame_skipper:
-                        # Use frame skipper for intelligent frame management
-                        try:
-                            frame_or_result = await self.frame_skipper.process_queue(self.input_queue, timeout=5)
-                            
-                            # Handle simple return values
-                            if frame_or_result is None:
-                                # Sentinel value received, break out of processing loop
-                                logger.info("Processing loop received shutdown signal, ending")
-                                break
-                            elif frame_or_result == FrameProcessingResult.SKIPPED:
-                                # Frame was skipped, continue to get next frame
-                                continue
-                            
-                            # At this point, we have a valid frame
-                            frame = frame_or_result
-                        except asyncio.TimeoutError:
-                            # Timeout occurred, continue to try again
-                            continue
-                    else:
-                        # No frame skipping - process all frames directly
-                        try:
-                            frame = await asyncio.wait_for(self.input_queue.get(), timeout=5.0)
-                            if frame is None:
-                                # Sentinel value received, break out of processing loop
-                                logger.info("Processing loop received shutdown signal, ending")
-                                break
-                        except asyncio.TimeoutError:
-                            # Timeout occurred, continue to try again
-                            continue
-                    
-                    # Process frames asynchronously
-                    if isinstance(frame, VideoFrame):
-                        logger.debug(f"Processing video frame with frame processor: {frame.tensor.shape}")
-                        
-                        # Frame skipper handles video frame skipping
-                        processed_frame = await self.frame_processor.process_video_async(frame)
-                        if processed_frame:
-                            output = VideoOutput(processed_frame, self.request_id)
-                            await self.output_queue.put(output)
-                        else:
-                            logger.warning(f"Frame processor returned None for video frame")
-                            
-                    elif isinstance(frame, AudioFrame):
-                        logger.debug(f"Processing audio frame with frame processor: {frame.samples.shape}")
-                        
-                        # Audio frames are never skipped - always process them
-                        # Audio synchronization will happen at egress before encoder
-                        processed_frames = await self.frame_processor.process_audio_async(frame)
-                        if processed_frames:
-                            output = AudioOutput(processed_frames, self.request_id)
-                            await self.output_queue.put(output)
-                        else:
-                            logger.warning(f"Frame processor returned None for audio frame")
-                    else:
-                        logger.warning(f"Received unknown frame type: {type(frame)}")
-                        
-                except asyncio.TimeoutError:
-                    continue  # No frame available, continue loop
-                except Exception as e:
-                    logger.error(f"Error in async frame processing: {e}")
-                    
-                    # Notify frame processor about the error
-                    if self.error_callback:
-                        try:
-                            await self.error_callback("frame_processing_error", e)
-                        except Exception as cb_error:
-                            logger.error(f"Error in frame processing error callback: {cb_error}")
-                    
-                    # Still send the original frame as fallback if we have it
-                    if 'frame' in locals() and frame is not None:
-                        if isinstance(frame, VideoFrame):
-                            fallback_output = VideoOutput(frame, self.request_id)
-                            await self.output_queue.put(fallback_output)
-                        elif isinstance(frame, AudioFrame):
-                            fallback_output = AudioOutput([frame], self.request_id)
-                            await self.output_queue.put(fallback_output)
+            # Run video and audio processing concurrently
+            await asyncio.gather(
+                self._process_video_frames(),
+                self._process_audio_frames(),
+                return_exceptions=True
+            )
             
             # Send sentinel to signal egress loop to complete
             logger.info("Processing loop completed, sending sentinel to egress loop")
@@ -333,9 +369,123 @@ class TrickleClient:
             # Notify parent if error callback is set
             if self.error_callback:
                 try:
-                    await self.error_callback("ingress_loop_error", e)
+                    await self.error_callback("processing_loop_error", e)
                 except Exception as cb_error:
                     logger.error(f"Error in error callback: {cb_error}")
+    
+    async def _process_video_frames(self):
+        """Process video frames with real-time adaptive skipping."""
+        try:
+            processing_times = []  # Track recent processing times for adaptive skipping
+            
+            while not self.stop_event.is_set() and not self.error_event.is_set():
+                try:
+                    # Get video frame with short timeout for responsiveness
+                    try:
+                        frame = await asyncio.wait_for(self.video_input_queue.get(), timeout=0.1)
+                        if frame is None:
+                            logger.info("Video processing received shutdown signal")
+                            break
+                    except asyncio.TimeoutError:
+                        continue  # No video frame available
+                    
+                    # Real-time skipping decision based on current conditions
+                    should_skip = False
+                    
+                    if self.frame_skipper:
+                        # Check frame skipper pattern first
+                        skip_result = self.frame_skipper._process_frame(frame)
+                        if skip_result == FrameProcessingResult.SKIPPED:
+                            should_skip = True
+                        else:
+                            # Additional adaptive skipping based on real-time conditions
+                            queue_pressure = self.video_input_queue.qsize() / self.frame_skipper.config.max_queue_size
+                            avg_processing_time = sum(processing_times[-10:]) / len(processing_times) if processing_times else 0.1
+                            
+                            # Skip if queue is building up or processing is slow
+                            if queue_pressure > 0.6:  # Start skipping earlier
+                                should_skip = True
+                            elif avg_processing_time > 0.2:  # Skip if processing is taking too long
+                                should_skip = True
+                    
+                    if should_skip:
+                        continue  # Skip this video frame for smooth motion
+                    
+                    # Process video frame and track timing
+                    start_time = time.time()
+                    logger.debug(f"Processing video frame: {frame.tensor.shape}")
+                    processed_frame = await self.frame_processor.process_video_async(frame)
+                    processing_time = time.time() - start_time
+                    
+                    # Track processing times for adaptive behavior
+                    processing_times.append(processing_time)
+                    if len(processing_times) > 20:  # Keep recent history
+                        processing_times.pop(0)
+                    
+                    if processed_frame:
+                        output = VideoOutput(processed_frame, self.request_id)
+                        await self.output_queue.put(output)
+                    
+                except Exception as e:
+                    logger.error(f"Error processing video frame: {e}")
+                    
+        except Exception as e:
+            logger.error(f"Error in video processing loop: {e}")
+    
+    async def _process_audio_frames(self):
+        """Process audio frames without any skipping or reordering."""
+        try:
+            while not self.stop_event.is_set() and not self.error_event.is_set():
+                try:
+                    # Get audio frame - prioritize audio processing for continuity
+                    try:
+                        frame = await asyncio.wait_for(self.audio_input_queue.get(), timeout=0.05)
+                        if frame is None:
+                            logger.info("Audio processing received shutdown signal")
+                            break
+                    except asyncio.TimeoutError:
+                        continue  # No audio frame available
+                    
+                    # Process audio frame immediately (no skipping)
+                    logger.debug(f"Processing audio frame: {frame.samples.shape}")
+                    processed_frames = await self.frame_processor.process_audio_async(frame)
+                    if processed_frames:
+                        output = AudioOutput(processed_frames, self.request_id)
+                        await self.output_queue.put(output)
+                    
+                except Exception as e:
+                    logger.error(f"Error processing audio frame: {e}")
+                    
+        except Exception as e:
+            logger.error(f"Error in audio processing loop: {e}")
+    
+    async def _cleanup_video_queue_simple(self):
+        """Light cleanup - only when queue is severely overflowing."""
+        queue_size = self.video_input_queue.qsize()
+        max_size = self.frame_skipper.config.max_queue_size
+        
+        # Only do emergency cleanup when severely overflowing
+        if queue_size <= max_size * 1.5:
+            return
+        
+        # Light cleanup - just drop a few frames to prevent total overflow
+        frames_to_drop = min(5, queue_size - max_size)  # Drop max 5 frames at a time
+        dropped = 0
+        
+        for _ in range(frames_to_drop):
+            try:
+                frame = self.video_input_queue.get_nowait()
+                if frame is None:
+                    # Sentinel - put it back and stop
+                    await self.video_input_queue.put(frame)
+                    break
+                # Drop video frame (don't put it back)
+                dropped += 1
+            except asyncio.QueueEmpty:
+                break
+        
+        if dropped > 0:
+            logger.debug(f"Emergency cleanup: dropped {dropped} video frames (queue: {queue_size} → {self.video_input_queue.qsize()})")
 
     async def _egress_loop(self):
         """Handle outgoing frames."""
@@ -347,10 +497,7 @@ class TrickleClient:
                         # Get frame from output queue
                         frame = await asyncio.wait_for(self.output_queue.get(), timeout=0.5)
                         if frame is not None:
-                            # Apply precise audio synchronization right before encoder
-                            if isinstance(frame, AudioOutput):
-                                for audio_frame in frame.frames:
-                                    self.audio_synchronizer.synchronize_audio_frame(audio_frame)
+                            # No audio timestamp modifications - preserve original timing
                             yield frame
                         else:
                             # None frame indicates shutdown

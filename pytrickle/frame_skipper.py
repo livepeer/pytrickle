@@ -98,29 +98,6 @@ class AdaptiveFrameSkipper:
         except asyncio.TimeoutError:
             raise  # Let the caller handle the timeout
 
-    async def _cleanup_queue_overflow(self, input_queue: asyncio.Queue, timeout: float):
-        """Clean up queue overflow by dropping excess video frames."""
-        queue_size = input_queue.qsize()
-        
-        if queue_size <= self.config.max_queue_size:
-            return
-        
-        frames_to_drop = min(queue_size - self.config.max_queue_size, self.config.max_cleanup_frames)
-        
-        # Drop frames, but preserve any audio frames we encounter
-        for _ in range(frames_to_drop):
-            try:
-                frame = await asyncio.wait_for(input_queue.get(), timeout=timeout)
-                if frame is None:
-                    await input_queue.put(None)  # Re-queue sentinel
-                    return
-                
-                if isinstance(frame, AudioFrame):
-                    # Audio frame - put it back in the queue
-                    await input_queue.put(frame)
-                    
-            except asyncio.TimeoutError:
-                break  # No more frames available
 
     def _process_frame(self, frame: Union[VideoFrame, AudioFrame]) -> FrameResult:
         """Process a frame to determine if it should be skipped."""
