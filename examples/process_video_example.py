@@ -209,7 +209,6 @@ if __name__ == "__main__":
         on_stream_stop=on_stream_stop,
         name="green-processor",
         port=8000,
-        # Frame skipping configuration (optional)
-        frame_skip_config=FrameSkipConfig(),  # Enable intelligent frame skipping
+        frame_skip_config=FrameSkipConfig(),  # Optional frame skipping
     )
     processor.run()

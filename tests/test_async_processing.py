@@ -220,39 +220,29 @@ async def test_async_processing():
 
 
 async def test_frame_skipping():
-    """Test that frame skipping is working correctly."""
+    """Test frame skipping functionality."""
     logger.info("=== Testing Frame Skipping ===")
     
-    # Test the frame skipper directly with a simple unit test
     from pytrickle.frame_skipper import AdaptiveFrameSkipper, FrameProcessingResult, FrameSkipConfig
     from pytrickle.frames import VideoFrame, AudioFrame
     from pytrickle.fps_meter import FPSMeter
-    import torch
     
-    # Create frame skipper with new simplified interface
     config = FrameSkipConfig(target_fps=10)
-    fps_meter = FPSMeter()  # Create FPSMeter for testing
+    fps_meter = FPSMeter()
     skipper = AdaptiveFrameSkipper(config=config, fps_meter=fps_meter)
     
-    # Create test frames using the existing helper
     test_frames = await create_test_frames(num_frames=10)
-    
-    # Test that video frames can be skipped but audio frames are not
     video_frames = [f for f in test_frames if isinstance(f, VideoFrame)]
     audio_frames = [f for f in test_frames if isinstance(f, AudioFrame)]
     
-    # Manually test the frame processing logic
     processed_video = 0
     processed_audio = 0
     skipped_video = 0
     
-    # Process video frames - some should be skipped after adaptation
+    # Test video frame skipping
     for i, frame in enumerate(video_frames):
-        # Simulate frame counter progression
         skipper.frame_counter = i + 1
-        
-        # Force skip interval to simulate adaptation (skip every 3rd frame)
-        skipper.skip_interval = 3
+        skipper.skip_interval = 3  # Skip every 3rd frame
         
         result = skipper._process_frame(frame)
         if result == FrameProcessingResult.SKIPPED:
@@ -262,24 +252,21 @@ async def test_frame_skipping():
         else:
             raise AssertionError(f"Unexpected result for video frame: {result}")
     
-    # Process audio frames - none should be skipped
+    # Test audio frames are never skipped
     for frame in audio_frames:
         result = skipper._process_frame(frame)
         if isinstance(result, AudioFrame):
             processed_audio += 1
         elif result == FrameProcessingResult.SKIPPED:
-            # Audio frames should never be skipped
             raise AssertionError("Audio frame was unexpectedly skipped")
     
-    logger.info(f"=== Frame Skipping Results ===")
     logger.info(f"Video frames: {len(video_frames)} → processed: {processed_video}, skipped: {skipped_video}")
     logger.info(f"Audio frames: {len(audio_frames)} → processed: {processed_audio}")
     
-    # Verify that some video frames were skipped and all audio frames were processed
-    assert skipped_video > 0, f"Some video frames should have been skipped: {skipped_video}"
-    assert processed_audio == len(audio_frames), f"All audio frames should be processed: {processed_audio}/{len(audio_frames)}"
+    assert skipped_video > 0, "Some video frames should have been skipped"
+    assert processed_audio == len(audio_frames), "All audio frames should be processed"
     
-    logger.info("✅ SUCCESS: Frame skipping test passed")
+    logger.info("✅ Frame skipping test passed")
 
 async def async_generator_empty(stop_event=None):
     """Empty async generator for mocking."""

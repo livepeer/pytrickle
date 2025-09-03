@@ -37,16 +37,7 @@ class TrickleClient:
         max_queue_size: int = 300,
         frame_skip_config: Optional[FrameSkipConfig] = None
     ):
-        """Initialize TrickleClient with optional AdaptiveFrameSkipper for intelligent frame management.
-        
-        Args:
-            protocol: TrickleProtocol instance
-            frame_processor: FrameProcessor for native async processing
-            control_handler: Optional control message handler
-            error_callback: Optional error callback (if None, uses frame_processor.error_callback)
-            max_queue_size: Maximum size for frame queues
-            frame_skip_config: Optional frame skipping configuration (None = no frame skipping)
-        """
+        """Initialize TrickleClient with optional frame skipping."""
         self.protocol = protocol
         self.frame_processor = frame_processor
         self.control_handler = control_handler
@@ -71,15 +62,13 @@ class TrickleClient:
         self.stop_event = asyncio.Event()
         self.error_event = asyncio.Event()
         
-        # Separate frame processing queues for clean audio/video handling
-        self.video_input_queue = asyncio.Queue(maxsize=max_queue_size)  # Video frames can be dropped
-        self.audio_input_queue = asyncio.Queue(maxsize=max_queue_size * 4)  # Audio frames never dropped, larger buffer
+        # Frame processing queues
+        self.video_input_queue = asyncio.Queue(maxsize=max_queue_size)
+        self.audio_input_queue = asyncio.Queue(maxsize=max_queue_size * 4)
         self.output_queue = asyncio.Queue(maxsize=200)
-        
-        # Data queue
         self.data_queue: Deque[Any] = deque(maxlen=1000)
         
-        # Adaptive frame skipper for intelligent video frame management (optional)
+        # Optional frame skipper
         if frame_skip_config is not None:
             self.frame_skipper = AdaptiveFrameSkipper(
                 config=frame_skip_config,
@@ -87,11 +76,7 @@ class TrickleClient:
             )
         else:
             self.frame_skipper = None
-        
-
-        
-
-        
+    
     async def start(self, request_id: str = "default"):
         """Start the trickle client."""
         if self.running:
@@ -166,25 +151,19 @@ class TrickleClient:
         self.data_queue.append(data)
 
     def get_statistics(self) -> dict:
-        """Get comprehensive processing statistics."""
-        stats = {
+        """Get processing statistics."""
+        return {
             "video_input_queue_size": self.video_input_queue.qsize(),
             "audio_input_queue_size": self.audio_input_queue.qsize(),
             "output_queue_size": self.output_queue.qsize()
         }
-
-        return stats
     
     def set_target_fps(self, target_fps: Optional[float]):
-        """Set the target FPS for intelligent frame skipping.
-        
-        Args:
-            target_fps: Target FPS value (None = auto-detect from ingress)
-        """
+        """Set target FPS for frame skipping."""
         if self.frame_skipper:
             self.frame_skipper.set_target_fps(target_fps)
         else:
-            logger.warning("Frame skipping is disabled, cannot set target FPS")
+            logger.warning("Frame skipping is disabled")
 
     async def _on_protocol_error(self, error_type: str, exception: Optional[Exception] = None):
         """Handle protocol errors and shutdown events."""
@@ -208,15 +187,12 @@ class TrickleClient:
                 logger.error(f"Error in client error callback: {e}")
 
     async def _ingress_loop(self):
-        """Receive incoming frames and queue them with automatic audio timeline correction."""
+        """Receive incoming frames and route them to appropriate queues."""
         try:
             async for frame in self.protocol.ingress_loop(self.stop_event):
-                # Check for error state or stop signal
                 if self.error_event.is_set() or self.stop_event.is_set():
-                    logger.info("Stopping ingress loop due to error or stop signal")
                     break
                 
-                # Route frames to appropriate queues based on type
                 try:
                     if isinstance(frame, VideoFrame):
                         await self.video_input_queue.put(frame)
@@ -225,10 +201,9 @@ class TrickleClient:
                     else:
                         logger.warning(f"Unknown frame type received: {type(frame)}")
                 except Exception as e:
-                    logger.error(f"Error queueing frame for processing: {e}")
+                    logger.error(f"Error queueing frame: {e}")
             
-            # Send sentinels to both queues to signal processing loop to complete
-            logger.info("Ingress loop completed, sending sentinels to processing loops")
+            # Send sentinels to signal processing completion
             await self.video_input_queue.put(None)
             await self.audio_input_queue.put(None)
             
@@ -274,36 +249,30 @@ class TrickleClient:
                     logger.error(f"Error in error callback: {cb_error}")
     
     async def _process_video_frames(self):
-        """Process video frames with intelligent skipping via frame skipper."""
+        """Process video frames with optional frame skipping."""
         try:
             while not self.stop_event.is_set() and not self.error_event.is_set():
                 try:
                     if self.frame_skipper:
-                        # Use frame skipper for intelligent video frame management
                         try:
                             frame_or_result = await self.frame_skipper.process_queue(self.video_input_queue, timeout=5)
                             
                             if frame_or_result is None:
-                                logger.info("Video processing received shutdown signal")
                                 break
                             elif frame_or_result == FrameProcessingResult.SKIPPED:
-                                continue  # Frame was skipped, get next frame
+                                continue
                             
                             frame = frame_or_result
                         except asyncio.TimeoutError:
-                            continue  # Timeout, try again
+                            continue
                     else:
-                        # No frame skipping - process all video frames
                         try:
                             frame = await asyncio.wait_for(self.video_input_queue.get(), timeout=5.0)
                             if frame is None:
-                                logger.info("Video processing received shutdown signal")
                                 break
                         except asyncio.TimeoutError:
                             continue
                     
-                    # Process video frame
-                    logger.debug(f"Processing video frame: {frame.tensor.shape}")
                     processed_frame = await self.frame_processor.process_video_async(frame)
                     if processed_frame:
                         output = VideoOutput(processed_frame, self.request_id)
@@ -316,21 +285,17 @@ class TrickleClient:
             logger.error(f"Error in video processing loop: {e}")
     
     async def _process_audio_frames(self):
-        """Process audio frames without any skipping - audio frames are never dropped."""
+        """Process audio frames without skipping."""
         try:
             while not self.stop_event.is_set() and not self.error_event.is_set():
                 try:
-                    # Get audio frame - audio frames are never skipped
                     try:
                         frame = await asyncio.wait_for(self.audio_input_queue.get(), timeout=5.0)
                         if frame is None:
-                            logger.info("Audio processing received shutdown signal")
                             break
                     except asyncio.TimeoutError:
-                        continue  # No audio frame available
+                        continue
                     
-                    # Process audio frame immediately (never skipped)
-                    logger.debug(f"Processing audio frame: {frame.samples.shape}")
                     processed_frames = await self.frame_processor.process_audio_async(frame)
                     if processed_frames:
                         output = AudioOutput(processed_frames, self.request_id)
@@ -346,25 +311,20 @@ class TrickleClient:
         """Handle outgoing frames."""
         try:
             async def output_generator():
-                """Generate output frames from the output queue."""
                 while not self.stop_event.is_set() and not self.error_event.is_set():
                     try:
-                        # Get frame from output queue
                         frame = await asyncio.wait_for(self.output_queue.get(), timeout=0.5)
                         if frame is not None:
-                            # No audio timestamp modifications - preserve original timing
                             yield frame
                         else:
-                            # None frame indicates shutdown
                             break
                     except asyncio.TimeoutError:
-                        continue  # No frame available, continue loop
+                        continue
                     except Exception as e:
                         logger.error(f"Error getting frame from output queue: {e}")
                         continue
                     
             await self.protocol.egress_loop(output_generator())
-            logger.info("Egress loop completed")
         except Exception as e:
             logger.error(f"Error in egress loop: {e}")
             # Set error state and stop event to trigger other loops to stop

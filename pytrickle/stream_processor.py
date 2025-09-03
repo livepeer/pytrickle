@@ -128,9 +128,8 @@ class _InternalFrameProcessor(FrameProcessor):
         self.on_stream_stop = on_stream_stop
         self.name = name
         
-        # Frame skipping is handled at the TrickleClient level
-        # Having multiple frame skippers causes interference and double-counting
-        self.frame_skip_config = None  # Always None to prevent conflicts
+        # Frame skipping is handled at TrickleClient level
+        self.frame_skip_config = None
         self.frame_skipper = None
         
         # Initialize parent with error_callback=None, which will call load_model
@@ -151,11 +150,6 @@ class _InternalFrameProcessor(FrameProcessor):
         if not self.video_processor:
             logger.debug("No video processor defined, passing frame unchanged")
             return frame
-        
-        
-        # NOTE: Frame skipping is handled at the client level (TrickleClient)
-        # Do NOT apply additional frame skipping here as it causes double-skipping
-        # and FPS measurement interference
             
         try:
             result = await self.video_processor(frame)

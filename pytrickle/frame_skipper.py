@@ -11,7 +11,6 @@ import asyncio
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional, Union
-from fractions import Fraction
 from .frames import VideoFrame, AudioFrame
 from .fps_meter import FPSMeter
 
@@ -24,13 +23,8 @@ class FrameProcessingResult(Enum):
 FrameResult = Union[VideoFrame, AudioFrame, FrameProcessingResult, None]
 @dataclass
 class FrameSkipConfig:
-    """Configuration for adaptive frame skipping behavior.
-    
-    This allows StreamProcessor users to easily configure intelligent frame skipping
-    for optimal real-time performance.
-    """
+    """Configuration for adaptive frame skipping behavior."""
     target_fps: Optional[float] = None  # Target FPS (None = auto-detect from ingress)
-    adaptation_window: float = 2.0      # Time window for FPS measurement
     adaptation_cooldown: float = 2.0    # Minimum time between adaptations
     max_queue_size: int = 50           # Start dropping frames when queue exceeds this
     max_cleanup_frames: int = 20       # Maximum frames to drop in one cleanup
@@ -39,8 +33,6 @@ class AdaptiveFrameSkipper:
     """
     Adaptive frame skipper that automatically detects ingress FPS
     and adjusts frame dropping to maintain real-time performance.
-    
-    Enhanced with timestamp synchronization to prevent encoder DTS errors.
     """
     
     def __init__(
@@ -48,13 +40,7 @@ class AdaptiveFrameSkipper:
         config: FrameSkipConfig,
         fps_meter: 'FPSMeter'
     ):
-        """
-        Initialize adaptive frame skipper.
-        
-        Args:
-            config: FrameSkipConfig object with all configuration
-            fps_meter: FPSMeter from protocol for consistent measurements
-        """
+        """Initialize adaptive frame skipper."""
         self.config = config
         self.fps_meter = fps_meter
         
@@ -64,9 +50,6 @@ class AdaptiveFrameSkipper:
         
         # Last adaptation time to prevent too frequent changes
         self.last_adaptation_time = time.time()
-        
-        # Simple frame counting
-        self.video_frame_count = 0
 
     async def process_queue(self, input_queue: asyncio.Queue, timeout: float = 5) -> FrameResult:
         """
@@ -134,16 +117,15 @@ class AdaptiveFrameSkipper:
         """Process video frame and apply skipping logic."""
         # Count frame for skip pattern
         self.frame_counter += 1
-        self.video_frame_count += 1
         
         # Update skip pattern and check if frame should be skipped
         self._adapt_skip_interval()
         should_skip = self._should_skip_frame()
         
         if should_skip:
-            return FrameProcessingResult.SKIPPED  # Frame was skipped
+            return FrameProcessingResult.SKIPPED
         else:
-            return frame  # Frame passes through unchanged
+            return frame
     
     def _adapt_skip_interval(self):
         """Adapt skip interval based on current FPS measurements."""
@@ -187,7 +169,6 @@ class AdaptiveFrameSkipper:
         """Reset frame counter and measurements."""
         self.frame_counter = 0
         self.skip_interval = 1
-        self.video_frame_count = 0
     
     def set_target_fps(self, target_fps: Optional[float]):
         """Set target FPS and recalculate skip pattern.
