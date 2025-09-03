@@ -25,9 +25,9 @@ FrameResult = Union[VideoFrame, AudioFrame, FrameProcessingResult, None]
 class FrameSkipConfig:
     """Configuration for adaptive frame skipping behavior."""
     target_fps: Optional[float] = None  # Target FPS (None = auto-detect from ingress)
-    adaptation_cooldown: float = 2.0    # Minimum time between adaptations
-    max_queue_size: int = 50           # Start dropping frames when queue exceeds this
-    max_cleanup_frames: int = 20       # Maximum frames to drop in one cleanup
+    adaptation_cooldown: float = 0.5    # Minimum time between adaptations
+    max_queue_size: int = 15           # Start dropping frames when queue exceeds this
+    max_cleanup_frames: int = 50       # Maximum frames to drop in one cleanup
     
 class AdaptiveFrameSkipper:
     """
