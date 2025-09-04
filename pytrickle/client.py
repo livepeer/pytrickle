@@ -216,10 +216,7 @@ class TrickleClient:
             # Notify parent if error callback is set
             if self.error_callback:
                 try:
-                    if asyncio.iscoroutinefunction(self.error_callback):
-                        await self.error_callback("ingress_loop_error", e)
-                    else:
-                        self.error_callback("ingress_loop_error", e)
+                    await self.error_callback("ingress_loop_error", e)
                 except Exception as cb_error:
                     logger.error(f"Error in error callback: {cb_error}")
 
