@@ -144,7 +144,7 @@ class AdaptiveFrameSkipper:
         
         # Apply new skip interval
         if new_interval != self.skip_interval:
-            logger.info(f"Skip pattern: {ingress_fps:.1f}fps → {target:.1f}fps (skip every {new_interval} frames)")
+            logger.debug(f"Skip pattern: {ingress_fps:.1f}fps → {target:.1f}fps (skip every {new_interval} frames)")
             self.skip_interval = new_interval
         
         self.last_adaptation_time = current_time
