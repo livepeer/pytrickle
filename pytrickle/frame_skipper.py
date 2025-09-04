@@ -91,18 +91,19 @@ class AdaptiveFrameSkipper:
         frames_to_drop = min(queue_size - self.config.max_queue_size, self.config.max_cleanup_frames)
         
         # Drop video frames (no need to check type since this is video-only queue)
+        sentinel_consumed = False
         for _ in range(frames_to_drop):
             try:
                 frame = await asyncio.wait_for(video_queue.get(), timeout=timeout)
                 if frame is None:
-                    await video_queue.put(None)  # Re-queue sentinel
-                    return
+                    sentinel_consumed = True
+                    break
                 # Simply drop the video frame (no requeuing needed)
-                    
             except asyncio.TimeoutError:
                 break  # No more frames available
-
-
+        
+        if sentinel_consumed:
+            await video_queue.put(None)  # Re-queue sentinel
 
     def _process_video_frame(self, frame: VideoFrame) -> FrameResult:
         """Process video frame and apply skipping logic."""
