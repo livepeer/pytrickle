@@ -9,7 +9,7 @@ import asyncio
 import queue
 import logging
 import json
-from typing import Callable, Optional, Union, Deque, Any
+from typing import Callable, Optional, Union, Deque, Any, Coroutine
 from collections import deque
 
 from .protocol import TrickleProtocol
@@ -19,6 +19,8 @@ from .frame_processor import FrameProcessor
 
 logger = logging.getLogger(__name__)
 
+# Type alias for control handler functions (async only)
+ControlHandler = Callable[[dict], Coroutine[Any, Any, None]]
 
 class TrickleClient:
     """High-level client for trickle stream processing with native async support."""
@@ -27,7 +29,7 @@ class TrickleClient:
         self,
         protocol: TrickleProtocol,
         frame_processor: 'FrameProcessor',
-        control_handler: Optional[Callable] = None,
+        control_handler: Optional[ControlHandler] = None,
         send_data_interval: Optional[float] = 0.333,
         error_callback: Optional[ErrorCallback] = None
     ):
@@ -331,10 +333,7 @@ class TrickleClient:
         """Handle a control message."""
         if self.control_handler:
             try:
-                if asyncio.iscoroutinefunction(self.control_handler):
-                    await self.control_handler(control_data)
-                else:
-                    self.control_handler(control_data)
+                await self.control_handler(control_data)
             except Exception as e:
                 logger.error(f"Error in control handler: {e}")
     
