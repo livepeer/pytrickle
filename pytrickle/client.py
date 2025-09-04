@@ -275,26 +275,22 @@ class TrickleClient:
     
     async def _process_audio_frames(self):
         """Process audio frames without skipping."""
-        try:
-            while not self.stop_event.is_set() and not self.error_event.is_set():
-                try:
-                    try:
-                        frame = await asyncio.wait_for(self.audio_input_queue.get(), timeout=5.0)
-                        if frame is None:
-                            break
-                    except asyncio.TimeoutError:
-                        continue
-                    
-                    processed_frames = await self.frame_processor.process_audio_async(frame)
-                    if processed_frames:
-                        output = AudioOutput(processed_frames, self.request_id)
-                        await self.output_queue.put(output)
-                    
-                except Exception as e:
-                    logger.error(f"Error processing audio frame: {e}")
-                    
-        except Exception as e:
-            logger.error(f"Error in audio processing loop: {e}")
+        while not self.stop_event.is_set() and not self.error_event.is_set():
+            try:
+                frame = await asyncio.wait_for(self.audio_input_queue.get(), timeout=5.0)
+                if frame is None:
+                    break
+                
+                processed_frames = await self.frame_processor.process_audio_async(frame)
+                if processed_frames:
+                    output = AudioOutput(processed_frames, self.request_id)
+                    await self.output_queue.put(output)
+            except asyncio.TimeoutError:
+                continue
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.error(f"Error processing audio frame: {e}")
 
     async def _egress_loop(self):
         """Handle outgoing frames."""
