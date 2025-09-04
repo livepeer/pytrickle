@@ -16,7 +16,6 @@ from .protocol import TrickleProtocol
 from .frames import VideoFrame, AudioFrame, VideoOutput, AudioOutput
 from . import ErrorCallback
 from .frame_processor import FrameProcessor
-from .decoder import DEFAULT_MAX_FRAMERATE
 from .frame_skipper import AdaptiveFrameSkipper, FrameSkipConfig, FrameProcessingResult
 
 logger = logging.getLogger(__name__)
