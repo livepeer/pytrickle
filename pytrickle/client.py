@@ -247,39 +247,31 @@ class TrickleClient:
     
     async def _process_video_frames(self):
         """Process video frames with optional frame skipping."""
-        try:
-            while not self.stop_event.is_set() and not self.error_event.is_set():
-                try:
-                    if self.frame_skipper:
-                        try:
-                            frame_or_result = await self.frame_skipper.process_video_queue(self.video_input_queue, timeout=5)
-                            
-                            if frame_or_result is None:
-                                break
-                            elif frame_or_result == FrameProcessingResult.SKIPPED:
-                                continue
-                            
-                            frame = frame_or_result
-                        except asyncio.TimeoutError:
-                            continue
-                    else:
-                        try:
-                            frame = await asyncio.wait_for(self.video_input_queue.get(), timeout=5.0)
-                            if frame is None:
-                                break
-                        except asyncio.TimeoutError:
-                            continue
-                    
-                    processed_frame = await self.frame_processor.process_video_async(frame)
-                    if processed_frame:
-                        output = VideoOutput(processed_frame, self.request_id)
-                        await self.output_queue.put(output)
-                    
-                except Exception as e:
-                    logger.error(f"Error processing video frame: {e}")
-                    
-        except Exception as e:
-            logger.error(f"Error in video processing loop: {e}")
+        while not self.stop_event.is_set() and not self.error_event.is_set():
+            try:
+                frame_or_result = await (
+                    self.frame_skipper.process_video_queue(self.video_input_queue, timeout=5)
+                    if self.frame_skipper
+                    else asyncio.wait_for(self.video_input_queue.get(), timeout=5.0)
+                )
+
+                if frame_or_result is None:
+                    break
+                if frame_or_result == FrameProcessingResult.SKIPPED:
+                    continue
+
+                frame = frame_or_result
+                
+                processed_frame = await self.frame_processor.process_video_async(frame)
+                if processed_frame:
+                    output = VideoOutput(processed_frame, self.request_id)
+                    await self.output_queue.put(output)
+            except asyncio.TimeoutError:
+                continue
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.error(f"Error processing video frame: {e}")
     
     async def _process_audio_frames(self):
         """Process audio frames without skipping."""
