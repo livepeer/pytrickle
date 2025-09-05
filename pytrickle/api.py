@@ -42,7 +42,7 @@ class StreamParamsUpdateRequest(BaseModel):
     allowing flexible parameter updates without nested structure.
     Width and height values are automatically converted to integers if provided.
     
-    Note: max_framerate cannot be updated during runtime and must be set when starting the stream.
+    Note: max_framerate, width, and height cannot be updated during runtime and must be set when starting the stream.
     """
     
     model_config = {"extra": "allow"}  # Allow arbitrary fields
@@ -114,6 +114,10 @@ class StreamParamsUpdateRequest(BaseModel):
             # Check for unsupported runtime parameters
             if "max_framerate" in obj:
                 raise ValueError("max_framerate cannot be updated during runtime. Set it when starting the stream.")
+            
+            # Check for dimension parameters that cannot be updated during runtime
+            if "width" in obj or "height" in obj:
+                raise ValueError("width and height cannot be updated during runtime. Set them when starting the stream.")
             
             # Validate and get the processed dictionary with dimension conversions
             obj = cls.validate_params(obj)

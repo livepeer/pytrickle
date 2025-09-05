@@ -35,67 +35,60 @@ class TestStreamParamsUpdateRequest:
             StreamParamsUpdateRequest.model_validate(invalid_params)
     
     def test_width_height_both_required(self):
-        """Test that both width and height must be provided together."""
-        # Only width
-        with pytest.raises(ValueError, match="Both 'width' and 'height' must be provided together"):
+        """Test that width and height are blocked in runtime updates."""
+        # Width alone should be blocked
+        with pytest.raises(ValueError, match="width and height cannot be updated during runtime"):
             StreamParamsUpdateRequest.model_validate({"width": 1920})
         
-        # Only height
-        with pytest.raises(ValueError, match="Both 'width' and 'height' must be provided together"):
+        # Height alone should be blocked  
+        with pytest.raises(ValueError, match="width and height cannot be updated during runtime"):
             StreamParamsUpdateRequest.model_validate({"height": 1080})
         
-        # Both provided - should work
-        request = StreamParamsUpdateRequest.model_validate({"width": 1920, "height": 1080})
-        assert request.width == 1920
-        assert request.height == 1080
+        # Both provided should also be blocked
+        with pytest.raises(ValueError, match="width and height cannot be updated during runtime"):
+            StreamParamsUpdateRequest.model_validate({"width": 1920, "height": 1080})
     
     def test_width_height_type_conversion(self):
-        """Test that width/height are automatically converted to integers."""
-        # String values
-        request = StreamParamsUpdateRequest.model_validate({"width": "1920", "height": "1080"})
-        assert request.width == 1920
-        assert request.height == 1080
-        assert isinstance(request.width, int)
-        assert isinstance(request.height, int)
+        """Test that width/height are blocked regardless of type in runtime updates."""
+        # String values should be blocked
+        with pytest.raises(ValueError, match="width and height cannot be updated during runtime"):
+            StreamParamsUpdateRequest.model_validate({"width": "1920", "height": "1080"})
         
-        # Float values
-        request = StreamParamsUpdateRequest.model_validate({"width": 1920.0, "height": 1080.0})
-        assert request.width == 1920
-        assert request.height == 1080
-        assert isinstance(request.width, int)
-        assert isinstance(request.height, int)
+        # Float values should be blocked
+        with pytest.raises(ValueError, match="width and height cannot be updated during runtime"):
+            StreamParamsUpdateRequest.model_validate({"width": 1920.0, "height": 1080.0})
     
     def test_width_height_positive_validation(self):
-        """Test that width and height must be positive integers."""
-        # Zero values
-        with pytest.raises(ValueError, match="Width and height must be valid integers"):
+        """Test that width and height are blocked in runtime updates regardless of validity."""
+        # Zero values should be blocked
+        with pytest.raises(ValueError, match="width and height cannot be updated during runtime"):
             StreamParamsUpdateRequest.model_validate({"width": 0, "height": 1080})
         
-        with pytest.raises(ValueError, match="Width and height must be valid integers"):
+        with pytest.raises(ValueError, match="width and height cannot be updated during runtime"):
             StreamParamsUpdateRequest.model_validate({"width": 1920, "height": 0})
         
-        # Negative values
-        with pytest.raises(ValueError, match="Width and height must be valid integers"):
+        # Negative values should be blocked
+        with pytest.raises(ValueError, match="width and height cannot be updated during runtime"):
             StreamParamsUpdateRequest.model_validate({"width": -1920, "height": 1080})
         
-        with pytest.raises(ValueError, match="Width and height must be valid integers"):
+        with pytest.raises(ValueError, match="width and height cannot be updated during runtime"):
             StreamParamsUpdateRequest.model_validate({"width": 1920, "height": -1080})
     
     def test_width_height_invalid_conversion(self):
-        """Test that invalid width/height values raise validation error."""
-        # Non-numeric strings
-        with pytest.raises(ValueError, match="Width and height must be valid integers"):
+        """Test that width/height are blocked in runtime updates regardless of validity."""
+        # Non-numeric strings should be blocked
+        with pytest.raises(ValueError, match="width and height cannot be updated during runtime"):
             StreamParamsUpdateRequest.model_validate({"width": "invalid", "height": "1080"})
         
-        with pytest.raises(ValueError, match="Width and height must be valid integers"):
+        with pytest.raises(ValueError, match="width and height cannot be updated during runtime"):
             StreamParamsUpdateRequest.model_validate({"width": "1920", "height": "invalid"})
         
-        # None values
-        with pytest.raises(ValueError, match="Width and height must be valid integers"):
+        # None values should be blocked
+        with pytest.raises(ValueError, match="width and height cannot be updated during runtime"):
             StreamParamsUpdateRequest.model_validate({"width": None, "height": "1080"})
     
     def test_mixed_params_with_dimensions(self):
-        """Test mixing regular params with width/height dimensions."""
+        """Test that width/height are blocked even when mixed with valid params."""
         params = {
             "intensity": 0.8,
             "quality": "high",
@@ -104,18 +97,20 @@ class TestStreamParamsUpdateRequest:
             "enabled": True
         }
         
-        request = StreamParamsUpdateRequest.model_validate(params)
+        # Should be blocked due to width/height
+        with pytest.raises(ValueError, match="width and height cannot be updated during runtime"):
+            StreamParamsUpdateRequest.model_validate(params)
         
-        # Check regular params
-        assert request.intensity == 0.8
-        assert request.quality == "high"
-        assert request.enabled is True
-        
-        # Check converted dimensions
-        assert request.width == 1920
-        assert request.height == 1080
-        assert isinstance(request.width, int)
-        assert isinstance(request.height, int)
+        # But params without dimensions should work
+        valid_params = {
+            "intensity": 0.8,
+            "quality": "high",
+            "enabled": True
+        }
+        request = StreamParamsUpdateRequest.model_validate(valid_params)
+        assert request.model_dump()["intensity"] == 0.8
+        assert request.model_dump()["quality"] == "high"
+        assert request.model_dump()["enabled"] is True
     
     def test_validate_params_method(self):
         """Test the validate_params class method directly."""
@@ -156,6 +151,58 @@ class TestStreamParamsUpdateRequest:
         string_update = {"max_framerate": "30"}
         with pytest.raises(ValueError, match="max_framerate cannot be updated during runtime"):
             StreamParamsUpdateRequest.model_validate(string_update)
+    
+    def test_width_height_rejected_in_updates(self):
+        """Test that width and height cannot be updated during runtime."""
+        # Test that width alone is rejected in runtime updates
+        invalid_width = {"width": 1920}
+        with pytest.raises(ValueError, match="width and height cannot be updated during runtime"):
+            StreamParamsUpdateRequest.model_validate(invalid_width)
+        
+        # Test that height alone is rejected in runtime updates
+        invalid_height = {"height": 1080}
+        with pytest.raises(ValueError, match="width and height cannot be updated during runtime"):
+            StreamParamsUpdateRequest.model_validate(invalid_height)
+        
+        # Test that both width and height are rejected in runtime updates
+        invalid_dimensions = {"width": 1920, "height": 1080}
+        with pytest.raises(ValueError, match="width and height cannot be updated during runtime"):
+            StreamParamsUpdateRequest.model_validate(invalid_dimensions)
+        
+        # Test that other parameters still work
+        valid_params = {"intensity": 0.8, "effect": "enhanced"}
+        request = StreamParamsUpdateRequest.model_validate(valid_params)
+        assert request.model_dump()["intensity"] == 0.8
+        
+        # Test mix of valid and invalid parameters (width)
+        mixed_params_width = {"intensity": 0.9, "width": 1280}
+        with pytest.raises(ValueError, match="width and height cannot be updated during runtime"):
+            StreamParamsUpdateRequest.model_validate(mixed_params_width)
+        
+        # Test mix of valid and invalid parameters (height)
+        mixed_params_height = {"intensity": 0.9, "height": 720}
+        with pytest.raises(ValueError, match="width and height cannot be updated during runtime"):
+            StreamParamsUpdateRequest.model_validate(mixed_params_height)
+        
+        # Test width/height rejected with string values in updates
+        string_width_update = {"width": "1920"}
+        with pytest.raises(ValueError, match="width and height cannot be updated during runtime"):
+            StreamParamsUpdateRequest.model_validate(string_width_update)
+        
+        string_height_update = {"height": "1080"}
+        with pytest.raises(ValueError, match="width and height cannot be updated during runtime"):
+            StreamParamsUpdateRequest.model_validate(string_height_update)
+        
+        # Test combination of blocked parameters (framerate + dimensions)
+        all_blocked = {"max_framerate": 30, "width": 1920, "height": 1080}
+        # Should catch max_framerate first (since it's checked first in the code)
+        with pytest.raises(ValueError, match="max_framerate cannot be updated during runtime"):
+            StreamParamsUpdateRequest.model_validate(all_blocked)
+        
+        # Test dimensions without framerate (to ensure dimensions check works independently)
+        dimensions_only = {"width": 1920, "height": 1080, "intensity": 0.5}
+        with pytest.raises(ValueError, match="width and height cannot be updated during runtime"):
+            StreamParamsUpdateRequest.model_validate(dimensions_only)
     
     def test_framerate_conversion_method(self):
         """Test the _convert_framerate method directly."""
@@ -373,6 +420,54 @@ class TestStreamStartRequest:
         
         assert request_str.params["max_framerate"] == 25
         assert isinstance(request_str.params["max_framerate"], int)
+    
+    def test_width_height_validation_in_start_request(self):
+        """Test that width/height validation still works properly in StreamStartRequest."""
+        # Test that both width and height are required together
+        with pytest.raises(ValidationError, match="Both 'width' and 'height' must be provided together"):
+            StreamStartRequest(
+                subscribe_url="http://example.com/input",
+                publish_url="http://example.com/output", 
+                gateway_request_id="test123",
+                params={"width": 1920}  # Missing height
+            )
+        
+        with pytest.raises(ValidationError, match="Both 'width' and 'height' must be provided together"):
+            StreamStartRequest(
+                subscribe_url="http://example.com/input",
+                publish_url="http://example.com/output", 
+                gateway_request_id="test123",
+                params={"height": 1080}  # Missing width
+            )
+        
+        # Test valid width/height conversion
+        request = StreamStartRequest(
+            subscribe_url="http://example.com/input",
+            publish_url="http://example.com/output", 
+            gateway_request_id="test123",
+            params={"width": "1920", "height": "1080"}
+        )
+        assert request.params["width"] == 1920
+        assert request.params["height"] == 1080
+        assert isinstance(request.params["width"], int)
+        assert isinstance(request.params["height"], int)
+        
+        # Test invalid width/height values
+        with pytest.raises(ValidationError, match="Width and height must be valid integers"):
+            StreamStartRequest(
+                subscribe_url="http://example.com/input",
+                publish_url="http://example.com/output", 
+                gateway_request_id="test123",
+                params={"width": 0, "height": 1080}
+            )
+        
+        with pytest.raises(ValidationError, match="Width and height must be valid integers"):
+            StreamStartRequest(
+                subscribe_url="http://example.com/input",
+                publish_url="http://example.com/output", 
+                gateway_request_id="test123",
+                params={"width": "invalid", "height": "1080"}
+            )
         
         # Test invalid max_framerate (negative)
         with pytest.raises(ValidationError, match="max_framerate must be a positive integer"):
@@ -526,19 +621,18 @@ class TestValidationIntegration:
     """Test integration between StreamStartRequest and StreamParamsUpdateRequest validation."""
     
     def test_validation_consistency(self):
-        """Test that both models handle the same params consistently."""
+        """Test that StreamStartRequest allows dimensions but StreamParamsUpdateRequest blocks them."""
         test_params = {
             "intensity": 0.8,
             "width": "1920",
             "height": "1080"
         }
         
-        # Test StreamParamsUpdateRequest
-        update_request = StreamParamsUpdateRequest.model_validate(test_params)
-        assert update_request.width == 1920
-        assert update_request.height == 1080
+        # Test StreamParamsUpdateRequest - should be blocked due to width/height
+        with pytest.raises(ValueError, match="width and height cannot be updated during runtime"):
+            StreamParamsUpdateRequest.model_validate(test_params)
         
-        # Test StreamStartRequest
+        # Test StreamStartRequest - should work
         start_request = StreamStartRequest(
             subscribe_url="http://localhost:3389/sample",
             publish_url="http://localhost:3389/output",
@@ -546,18 +640,20 @@ class TestValidationIntegration:
             params=test_params
         )
         
-        # Both should have the same converted values
-        assert start_request.params["width"] == update_request.width
-        assert start_request.params["height"] == update_request.height
+        # StreamStartRequest should have converted values
+        assert start_request.params["width"] == 1920
+        assert start_request.params["height"] == 1080
+        assert start_request.params["intensity"] == 0.8
     
     def test_validation_error_consistency(self):
-        """Test that both models raise the same validation errors for invalid params."""
+        """Test that models handle invalid params appropriately."""
         invalid_params = {"width": "1920"}  # Missing height
         
-        # Both should raise the same error
-        with pytest.raises(ValueError, match="Both 'width' and 'height' must be provided together"):
+        # StreamParamsUpdateRequest should block width/height entirely
+        with pytest.raises(ValueError, match="width and height cannot be updated during runtime"):
             StreamParamsUpdateRequest.model_validate(invalid_params)
         
+        # StreamStartRequest should validate dimensions properly and require both
         with pytest.raises(ValueError, match="Both 'width' and 'height' must be provided together"):
             StreamStartRequest(
                 subscribe_url="http://localhost:3389/sample",
