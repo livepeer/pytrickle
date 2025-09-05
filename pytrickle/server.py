@@ -21,6 +21,7 @@ from .utils.hardware import HardwareInfo
 from .frame_processor import FrameProcessor
 from .client import TrickleClient
 from .protocol import TrickleProtocol
+from .frame_skipper import FrameSkipConfig
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,8 @@ class StreamServer:
         publisher_timeout: Optional[float] = None,
         subscriber_timeout: Optional[float] = None,
         app_kwargs: Optional[Dict[str, Any]] = None,
+        # Frame skipping configuration
+        frame_skip_config: Optional[FrameSkipConfig] = None,
 
     ):
         """Initialize StreamServer.
@@ -81,6 +84,7 @@ class StreamServer:
             on_startup: List of startup handlers
             on_shutdown: List of shutdown handlers
             app_kwargs: Additional kwargs for aiohttp.web.Application
+            frame_skip_config: Optional frame skipping configuration (None = no frame skipping)
         """
         self.frame_processor = frame_processor
         self.port = port
@@ -101,6 +105,9 @@ class StreamServer:
         self.capability_name = capability_name or os.getenv("CAPABILITY_NAME", os.getenv("MODEL_ID",""))
         self.publisher_timeout = publisher_timeout
         self.subscriber_timeout = subscriber_timeout
+        
+        # Frame skipping configuration
+        self.frame_skip_config = frame_skip_config
         
         # Stream management - simple and direct
         self.current_client: Optional[TrickleClient] = None
@@ -331,6 +338,7 @@ class StreamServer:
                 protocol=protocol,
                 frame_processor=self.frame_processor,
                 control_handler=self._handle_control_message,
+                frame_skip_config=self.frame_skip_config,
             )
             
             # Update state
