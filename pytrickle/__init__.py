@@ -28,7 +28,7 @@ from .utils.register import RegisterCapability
 from .frame_processor import FrameProcessor
 from .stream_processor import StreamProcessor
 from .fps_meter import FPSMeter
-from .frame_skipper import AdaptiveFrameSkipper, FrameSkipConfig, FrameProcessingResult
+from .frame_skipper import FrameSkipConfig
 
 from . import api
 
@@ -58,8 +58,6 @@ __all__ = [
     "ErrorCallback",
     "FrameProcessor",
     "FPSMeter",
-    "AdaptiveFrameSkipper",
     "FrameSkipConfig",
-    "FrameProcessingResult",
     "__version__"
 ] 
