@@ -9,7 +9,7 @@ import asyncio
 import queue
 import logging
 import json
-from typing import Callable, Optional, Union, Deque, Any, Coroutine
+from typing import Callable, Optional, Union, Deque, Any, Awaitable
 from collections import deque
 
 from .protocol import TrickleProtocol
@@ -20,7 +20,7 @@ from .frame_processor import FrameProcessor
 logger = logging.getLogger(__name__)
 
 # Type alias for control handler functions (async only)
-ControlHandler = Callable[[dict], Coroutine[Any, Any, None]]
+ControlHandler = Callable[[dict], Awaitable[None]]
 
 class TrickleClient:
     """High-level client for trickle stream processing with native async support."""
