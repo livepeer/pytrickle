@@ -6,8 +6,8 @@ to ensure all components stop when subscription ends.
 """
 
 import asyncio
-import queue
 import logging
+import time
 import json
 from typing import Callable, Optional, Union, Deque, Any
 from collections import deque
@@ -16,9 +16,9 @@ from .protocol import TrickleProtocol
 from .frames import VideoFrame, AudioFrame, VideoOutput, AudioOutput
 from . import ErrorCallback
 from .frame_processor import FrameProcessor
+from .frame_skipper import AdaptiveFrameSkipper, FrameSkipConfig, FrameProcessingResult
 
 logger = logging.getLogger(__name__)
-
 
 class TrickleClient:
     """High-level client for trickle stream processing with native async support."""
@@ -29,16 +29,11 @@ class TrickleClient:
         frame_processor: 'FrameProcessor',
         control_handler: Optional[Callable] = None,
         send_data_interval: Optional[float] = 0.333,
-        error_callback: Optional[ErrorCallback] = None
+        error_callback: Optional[ErrorCallback] = None,
+        max_queue_size: int = 300,
+        frame_skip_config: Optional[FrameSkipConfig] = None
     ):
-        """Initialize TrickleClient.
-        
-        Args:
-            protocol: TrickleProtocol instance
-            frame_processor: FrameProcessor for native async processing
-            control_handler: Optional control message handler
-            error_callback: Optional error callback (if None, uses frame_processor.error_callback)
-        """
+        """Initialize TrickleClient with optional frame skipping."""
         self.protocol = protocol
         self.frame_processor = frame_processor
         self.control_handler = control_handler
@@ -46,6 +41,10 @@ class TrickleClient:
 
         # Use provided error_callback, or fall back to frame_processor's error_callback
         self.error_callback = error_callback or frame_processor.error_callback
+        
+        # Queue configuration
+        self.frame_skip_config = frame_skip_config
+        self.max_queue_size = max_queue_size
         
         # Connect protocol error callback to client error handling
         if not self.protocol.error_callback:
@@ -59,18 +58,20 @@ class TrickleClient:
         self.stop_event = asyncio.Event()
         self.error_event = asyncio.Event()
         
-        # Output queues
-        self.output_queue = queue.Queue()
+        # Frame processing queues
+        self.video_input_queue = asyncio.Queue(maxsize=max_queue_size)
+        self.audio_input_queue = asyncio.Queue(maxsize=max_queue_size * 4)
+        self.output_queue = asyncio.Queue(maxsize=200)
         self.data_queue: Deque[Any] = deque(maxlen=1000)
-
-    def process_frame(self, frame: Union[VideoFrame, AudioFrame]) -> Optional[Union[VideoOutput, AudioOutput]]:
-        """Process a single frame and return the output."""
-        if not frame:
-            return None
-        if isinstance(frame, VideoFrame):
-            return VideoOutput(frame, self.request_id)
-        elif isinstance(frame, AudioFrame):
-            return AudioOutput([frame], self.request_id)
+        
+        # Optional frame skipper
+        if frame_skip_config is not None:
+            self.frame_skipper = AdaptiveFrameSkipper(
+                config=frame_skip_config,
+                fps_meter=protocol.fps_meter
+            )
+        else:
+            self.frame_skipper = None
     
     async def start(self, request_id: str = "default"):
         """Start the trickle client."""
@@ -93,6 +94,7 @@ class TrickleClient:
             # Run all loops concurrently
             results = await asyncio.gather(
                 self._ingress_loop(),
+                self._processing_loop(),
                 self._egress_loop(),
                 self._control_loop(),
                 self._send_data_loop(),
@@ -102,7 +104,7 @@ class TrickleClient:
             # Check if any loop had an exception that is not a cancelled error
             for i, result in enumerate(results):
                 if isinstance(result, Exception) and not isinstance(result, asyncio.CancelledError):
-                    loop_names = ["ingress", "egress", "control", "send_data"]
+                    loop_names = ["ingress", "processing", "egress", "control", "send_data"]
                     logger.error(f"{loop_names[i]} loop failed: {result}")
                     
         except asyncio.CancelledError:
@@ -122,6 +124,10 @@ class TrickleClient:
                     logger.error(f"Error in stream stop callback: {e}")
             
             await self.protocol.stop()
+            
+            # Cleanup frame skipper resources
+            if self.frame_skipper:
+                self.frame_skipper.reset()
     
     async def stop(self):
         """Stop the trickle client."""
@@ -131,16 +137,33 @@ class TrickleClient:
         logger.info("Stopping trickle client")
         self.stop_event.set()
         
-        # Send sentinel value to stop egress loop
+        # Send sentinel values to stop processing and egress loops
         try:
             self.output_queue.put_nowait(None)
-            self.data_queue.append(None)
-        except queue.Full:
+        except asyncio.QueueFull:
             pass
+        
+        # Send sentinel to data queue (deque doesn't raise QueueFull)
+        self.data_queue.append(None)
     
     async def publish_data(self, data: str):
         """Publish data via the protocol's data publisher."""
         self.data_queue.append(data)
+
+    def get_statistics(self) -> dict:
+        """Get processing statistics."""
+        return {
+            "video_input_queue_size": self.video_input_queue.qsize(),
+            "audio_input_queue_size": self.audio_input_queue.qsize(),
+            "output_queue_size": self.output_queue.qsize()
+        }
+    
+    def set_target_fps(self, target_fps: Optional[float]):
+        """Set target FPS for frame skipping."""
+        if self.frame_skipper:
+            self.frame_skipper.set_target_fps(target_fps)
+        else:
+            logger.warning("Frame skipping is disabled")
 
     async def _on_protocol_error(self, error_type: str, exception: Optional[Exception] = None):
         """Handle protocol errors and shutdown events."""
@@ -164,66 +187,25 @@ class TrickleClient:
                 logger.error(f"Error in client error callback: {e}")
 
     async def _ingress_loop(self):
-        """Process incoming frames with native async support."""
+        """Receive incoming frames and route them to appropriate queues."""
         try:
             async for frame in self.protocol.ingress_loop(self.stop_event):
-                # Check for error state or stop signal
                 if self.error_event.is_set() or self.stop_event.is_set():
-                    logger.info("Stopping ingress loop due to error or stop signal")
                     break
                 
-                # Process frames directly in ingress loop
                 try:
                     if isinstance(frame, VideoFrame):
-                        logger.debug(f"Processing video frame with frame processor: {frame.tensor.shape}")
-                        
-                        # Direct async processing
-                        processed_frame = await self.frame_processor.process_video_async(frame)
-                        if processed_frame:
-                            output = VideoOutput(processed_frame, self.request_id)
-                            await self._send_output(output)
-                            logger.debug(f"Sent async processed video frame to egress")
-                        else:
-                            logger.warning(f"Frame processor returned None for video frame")
-                            
+                        await self.video_input_queue.put(frame)
                     elif isinstance(frame, AudioFrame):
-                        logger.debug(f"Processing audio frame with frame processor: {frame.samples.shape}")
-                        
-                        # Direct async processing for audio
-                        processed_frames = await self.frame_processor.process_audio_async(frame)
-                        if processed_frames:
-                            output = AudioOutput(processed_frames, self.request_id)
-                            await self._send_output(output)
-                            logger.debug(f"Sent async processed audio frame to egress")
-                        else:
-                            logger.warning(f"Frame processor returned None for audio frame")
+                        await self.audio_input_queue.put(frame)
                     else:
-                        logger.debug(f"Received unknown frame type: {type(frame)}")
-                        
+                        logger.warning(f"Unknown frame type received: {type(frame)}")
                 except Exception as e:
-                    logger.error(f"Error in async frame processing: {e}")
-                    
-                    # Notify frame processor about the error
-                    if self.error_callback:
-                        try:
-                            await self.error_callback("frame_processing_error", e)
-                        except Exception as cb_error:
-                            logger.error(f"Error in frame processing error callback: {cb_error}")
-                    
-                    # Still send the original frame as fallback
-                    if isinstance(frame, VideoFrame):
-                        fallback_output = VideoOutput(frame, self.request_id)
-                        await self._send_output(fallback_output)
-                    elif isinstance(frame, AudioFrame):
-                        fallback_output = AudioOutput([frame], self.request_id)
-                        await self._send_output(fallback_output)
+                    logger.error(f"Error queueing frame: {e}")
             
-            # Send sentinel to signal egress loop to complete
-            logger.info("Ingress loop completed, sending sentinel to egress loop")
-            await self._send_output(None)
-            
-            # Set stop event to signal other loops to complete
-            self.stop_event.set()
+            # Send sentinels to signal processing completion
+            await self.video_input_queue.put(None)
+            await self.audio_input_queue.put(None)
             
         except Exception as e:
             logger.error(f"Error in ingress loop: {e}")
@@ -236,29 +218,98 @@ class TrickleClient:
                     await self.error_callback("ingress_loop_error", e)
                 except Exception as cb_error:
                     logger.error(f"Error in error callback: {cb_error}")
+
+    async def _processing_loop(self):
+        """Process frames asynchronously from separate video and audio queues."""
+        try:
+            # Run video and audio processing concurrently
+            await asyncio.gather(
+                self._process_video_frames(),
+                self._process_audio_frames(),
+                return_exceptions=True
+            )
+            
+            # Send sentinel to signal egress loop to complete
+            logger.info("Processing loop completed, sending sentinel to egress loop")
+            await self.output_queue.put(None)
+            
+        except Exception as e:
+            logger.error(f"Error in processing loop: {e}")
+            # Set error state and stop event to trigger other loops to stop
+            self.error_event.set()
+            self.stop_event.set()
+            # Notify parent if error callback is set
+            if self.error_callback:
+                try:
+                    await self.error_callback("processing_loop_error", e)
+                except Exception as cb_error:
+                    logger.error(f"Error in error callback: {cb_error}")
     
+    async def _process_video_frames(self):
+        """Process video frames with optional frame skipping."""
+        while not self.stop_event.is_set() and not self.error_event.is_set():
+            try:
+                frame_or_result = await (
+                    self.frame_skipper.process_video_queue(self.video_input_queue, timeout=5)
+                    if self.frame_skipper
+                    else asyncio.wait_for(self.video_input_queue.get(), timeout=5.0)
+                )
+
+                if frame_or_result is None:
+                    break
+                if frame_or_result == FrameProcessingResult.SKIPPED:
+                    continue
+
+                frame = frame_or_result
+                
+                processed_frame = await self.frame_processor.process_video_async(frame)
+                if processed_frame:
+                    output = VideoOutput(processed_frame, self.request_id)
+                    await self.output_queue.put(output)
+            except asyncio.TimeoutError:
+                continue
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.error(f"Error processing video frame: {e}")
+    
+    async def _process_audio_frames(self):
+        """Process audio frames without skipping."""
+        while not self.stop_event.is_set() and not self.error_event.is_set():
+            try:
+                frame = await asyncio.wait_for(self.audio_input_queue.get(), timeout=5.0)
+                if frame is None:
+                    break
+                
+                processed_frames = await self.frame_processor.process_audio_async(frame)
+                if processed_frames:
+                    output = AudioOutput(processed_frames, self.request_id)
+                    await self.output_queue.put(output)
+            except asyncio.TimeoutError:
+                continue
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.error(f"Error processing audio frame: {e}")
+
     async def _egress_loop(self):
         """Handle outgoing frames."""
         try:
             async def output_generator():
-                """Generate output frames from the queue."""
                 while not self.stop_event.is_set() and not self.error_event.is_set():
                     try:
-                        # Try to get a frame from the queue with timeout
-                        frame = await asyncio.to_thread(self.output_queue.get, timeout=0.1)
+                        frame = await asyncio.wait_for(self.output_queue.get(), timeout=0.5)
                         if frame is not None:
                             yield frame
                         else:
-                            # None frame indicates shutdown
                             break
-                    except queue.Empty:
-                        continue  # No frame available, continue loop
+                    except asyncio.TimeoutError:
+                        continue
                     except Exception as e:
                         logger.error(f"Error getting frame from output queue: {e}")
                         continue
                     
             await self.protocol.egress_loop(output_generator())
-            logger.info("Egress loop completed")
         except Exception as e:
             logger.error(f"Error in egress loop: {e}")
             # Set error state and stop event to trigger other loops to stop
@@ -337,15 +388,6 @@ class TrickleClient:
                     self.control_handler(control_data)
             except Exception as e:
                 logger.error(f"Error in control handler: {e}")
-    
-    async def _send_output(self, output):
-        """Send output to the egress queue."""
-        try:
-            await asyncio.to_thread(self.output_queue.put, output, timeout=1.0)
-        except queue.Full:
-            logger.warning("Output queue is full, dropping frame")
-        except Exception as e:
-            logger.error(f"Error sending output: {e}")
 
     async def _wait_for_interval(self, interval: float):
         """Wait for the specified interval or until stop/error event is set.
