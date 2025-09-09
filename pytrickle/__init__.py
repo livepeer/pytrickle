@@ -30,6 +30,8 @@ from .stream_processor import StreamProcessor
 from .fps_meter import FPSMeter
 from .frame_skipper import FrameSkipConfig
 
+from .decorators import trickle_handler
+
 from . import api
 
 from .version import __version__
@@ -59,5 +61,6 @@ __all__ = [
     "FrameProcessor",
     "FPSMeter",
     "FrameSkipConfig",
+    "trickle_handler",
     "__version__"
 ] 
