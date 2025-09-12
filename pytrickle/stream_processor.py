@@ -13,9 +13,10 @@ logger = logging.getLogger(__name__)
 # Type aliases for processing functions
 VideoProcessor = Callable[[VideoFrame], Awaitable[Optional[VideoFrame]]]
 AudioProcessor = Callable[[AudioFrame], Awaitable[Optional[List[AudioFrame]]]]
-ModelLoader = Callable[[Dict[str, Any]], Awaitable[None]]
+ModelLoader = Callable[..., Awaitable[None]]
 ParamUpdater = Callable[[Dict[str, Any]], Awaitable[None]]
 OnStreamStop = Callable[[], Awaitable[None]]
+
 
 class StreamProcessor:
     @classmethod
@@ -103,7 +104,7 @@ class StreamProcessor:
             raise ValueError("video_processor must be an async function")
         if audio_processor is not None and not inspect.iscoroutinefunction(audio_processor):
             raise ValueError("audio_processor must be an async function")
-            
+
         self.video_processor = video_processor
         self.audio_processor = audio_processor
         self.model_loader = model_loader
@@ -117,11 +118,11 @@ class StreamProcessor:
         
         # Create internal frame processor
         self._frame_processor = _InternalFrameProcessor(
-            video_processor=video_processor,
-            audio_processor=audio_processor,
-            model_loader=model_loader,
-            param_updater=param_updater,
-            on_stream_stop=on_stream_stop,
+            video_processor=self.video_processor,
+            audio_processor=self.audio_processor,
+            model_loader=self.model_loader,
+            param_updater=self.param_updater,
+            on_stream_stop=self.on_stream_stop,
             name=name
         )
         
@@ -178,7 +179,7 @@ class _InternalFrameProcessor(FrameProcessor):
         self.audio_processor = audio_processor
         self.model_loader = model_loader
         self.param_updater = param_updater
-        self.on_stream_stop = on_stream_stop
+        self.on_stream_stop_cb = on_stream_stop
         self.name = name
         
         # Frame skipping is handled at TrickleClient level
@@ -205,7 +206,8 @@ class _InternalFrameProcessor(FrameProcessor):
             
         try:
             result = await self.video_processor(frame)
-            return result if isinstance(result, VideoFrame) else frame
+            # If handler returns None, passthrough original frame
+            return result if result is not None else frame
         except Exception as e:
             logger.error(f"Error in video processing: {e}")
             return frame
@@ -218,6 +220,9 @@ class _InternalFrameProcessor(FrameProcessor):
             
         try:
             result = await self.audio_processor(frame)
+            # If handler returns None, passthrough original frame
+            if result is None:
+                return [frame]
             if isinstance(result, AudioFrame):
                 return [result]
             elif isinstance(result, list):
@@ -237,3 +242,11 @@ class _InternalFrameProcessor(FrameProcessor):
                 logger.info(f"Parameters updated: {params}")
             except Exception as e:
                 logger.error(f"Error updating parameters: {e}")
+
+    async def on_stream_stop(self):
+        """Invoke optional user-provided stream stop callback."""
+        if self.on_stream_stop_cb:
+            try:
+                await self.on_stream_stop_cb()
+            except Exception as e:
+                logger.error(f"Error in on_stream_stop callback: {e}")

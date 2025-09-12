@@ -30,11 +30,19 @@ from .stream_processor import StreamProcessor
 from .fps_meter import FPSMeter
 from .frame_skipper import FrameSkipConfig
 
-from .decorators import trickle_handler
+
+from .decorators import (
+    trickle_handler,
+    video_handler,
+    audio_handler,
+    model_loader,
+    param_updater,
+    on_stream_stop,
+)
 
 from . import api
 
-from .version import __version__
+from .version import VERSION as __version__
 
 __all__ = [
     "TrickleClient",
@@ -62,5 +70,10 @@ __all__ = [
     "FPSMeter",
     "FrameSkipConfig",
     "trickle_handler",
+    "video_handler",
+    "audio_handler",
+    "model_loader",
+    "param_updater",
+    "on_stream_stop",
     "__version__"
 ] 
