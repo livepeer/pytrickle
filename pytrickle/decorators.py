@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from typing import Any, Awaitable, Callable, Dict, List, Optional, cast
+from typing import Any, Callable, Optional, cast
 
 try:
     # Pydantic is optional but available in requirements

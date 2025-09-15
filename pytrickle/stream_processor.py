@@ -1,7 +1,7 @@
 import asyncio
 import inspect
 import logging
-from typing import Optional, Callable, Dict, Any, List, Union, Awaitable, Coroutine
+from typing import Optional, Callable, Dict, Any, List, Awaitable
 
 from .frames import VideoFrame, AudioFrame
 from .frame_processor import FrameProcessor
