@@ -7,8 +7,10 @@ from typing import Any, Callable, Optional, cast
 try:
     # Pydantic is optional but available in requirements
     from pydantic import BaseModel  # type: ignore
+    _PYDANTIC_AVAILABLE = True
 except Exception:  # pragma: no cover - if pydantic missing at runtime
     BaseModel = object  # sentinel
+    _PYDANTIC_AVAILABLE = False
 
 
 def trickle_handler(handler_type: str):
@@ -164,16 +166,43 @@ def param_updater(func: Optional[Callable[..., Any]] = None, *, model: Any | Non
         @trickle_handler("param_updater")
         async def wrapper(*args, **kwargs):
             # Pull params (positional last or kw)
-            if "params" in kwargs:
-                incoming = kwargs["params"]
-            else:
-                incoming = args[-1]
+            has_kw = "params" in kwargs
+            incoming = kwargs["params"] if has_kw else (args[-1] if args else None)
 
             parsed = incoming
-            if model is not None and isinstance(BaseModel, type) and inspect.isclass(model) and issubclass(model, BaseModel):
-                # Validate via Pydantic (v1 style init)
-                parsed = model(**incoming)
-            return await _maybe_await(fn, *(args[:-1] + (parsed,) if not kwargs else args), **({"params": parsed} if "params" in kwargs else {}))
+            # Parse with Pydantic model if provided and available
+            if (
+                model is not None
+                and _PYDANTIC_AVAILABLE
+                and inspect.isclass(model)
+                and issubclass(model, BaseModel)  # type: ignore[arg-type]
+            ):
+                try:
+                    if isinstance(incoming, model):  # already validated instance
+                        parsed = incoming
+                    else:
+                        mv = getattr(model, "model_validate", None)
+                        if callable(mv):  # Pydantic v2
+                            parsed = mv(incoming)
+                        elif isinstance(incoming, dict):  # Pydantic v1 expects kwargs
+                            parsed = model(**incoming)
+                        else:
+                            parsed = incoming
+                except Exception:
+                    # Fall back to original incoming on validation error to avoid breaking stream
+                    parsed = incoming
+
+            # Rebuild args/kwargs replacing only the params argument
+            new_args = list(args)
+            if has_kw:
+                kwargs["params"] = parsed
+            else:
+                if new_args:
+                    new_args[-1] = parsed
+                else:
+                    new_args.append(parsed)
+
+            return await _maybe_await(fn, *tuple(new_args), **kwargs)
 
         # Attach for discovery/testing
         setattr(wrapper, "_trickle_param_model", model)
