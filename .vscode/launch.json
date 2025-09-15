@@ -23,6 +23,19 @@
             },
             "justMyCode": true,
             "python": "${command:python.interpreterPath}"
+        },
+        {
+            "name": "Model Loading Example",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/examples/model_loading_example.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "justMyCode": true,
+            "python": "${command:python.interpreterPath}"
         }
     ]
 }
