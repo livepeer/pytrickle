@@ -7,6 +7,7 @@ from .frames import VideoFrame, AudioFrame, VideoOutput, AudioOutput
 from .frame_processor import FrameProcessor
 from .server import StreamServer
 from .frame_skipper import FrameSkipConfig
+from .state import PipelineState
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +86,39 @@ class StreamProcessor:
             frame_skip_config=frame_skip_config,
             **server_kwargs
         )
+
+        # Ensure state coherence: attach server state to processor for health transitions
+        try:
+            self._frame_processor.attach_state(self.server.state)
+        except Exception:
+            # If attach fails for any reason, log and continue (non-fatal)
+            logger.debug("Failed to attach server state to frame processor")
+
+        # Register server startup hook to preload model on same event loop
+        async def _on_startup(_app):
+            # Schedule non-blocking background preload so server can accept /health immediately
+            async def _background_preload():
+                try:
+                    if getattr(self._frame_processor, "state", None) is not None:
+                        self._frame_processor.state.set_state(PipelineState.LOADING)
+                    await self._frame_processor.load_model()
+                    if getattr(self._frame_processor, "state", None) is not None:
+                        self._frame_processor.state.set_startup_complete()
+                    logger.info(f"StreamProcessor '{self.name}' model preloaded on server startup")
+                except Exception as e:
+                    if getattr(self._frame_processor, "state", None) is not None:
+                        self._frame_processor.state.set_error(str(e))
+                    logger.error(f"Error preloading model on startup: {e}")
+
+            try:
+                asyncio.get_running_loop().create_task(_background_preload())
+            except Exception as e:
+                logger.error(f"Failed to schedule background preload: {e}")
+
+        try:
+            self.server.app.on_startup.append(_on_startup)
+        except Exception as e:
+            logger.error(f"Failed to register startup hook: {e}")
     
     async def send_data(self, data: str):
         """Send data to the server."""

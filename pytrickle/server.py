@@ -631,9 +631,7 @@ class StreamServer:
         site = web.TCPSite(runner, self.host, self.port)
         await site.start()
         
-        # Set pipeline ready when server is up and ready to accept requests
-        self.state.set_state(PipelineState.IDLE)
-        self.state.set_startup_complete()
+        # Do not mark as IDLE here; remain LOADING until model load completes
         
         logger.info(f"Server started on {self.host}:{self.port}")
         return runner
