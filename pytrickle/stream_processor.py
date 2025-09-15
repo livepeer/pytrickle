@@ -104,6 +104,12 @@ class StreamProcessor:
             raise ValueError("video_processor must be an async function")
         if audio_processor is not None and not inspect.iscoroutinefunction(audio_processor):
             raise ValueError("audio_processor must be an async function")
+        if model_loader is not None and not inspect.iscoroutinefunction(model_loader):
+            raise ValueError("model_loader must be an async function")
+        if param_updater is not None and not inspect.iscoroutinefunction(param_updater):
+            raise ValueError("param_updater must be an async function")
+        if on_stream_stop is not None and not inspect.iscoroutinefunction(on_stream_stop):
+            raise ValueError("on_stream_stop must be an async function")
 
         self.video_processor = video_processor
         self.audio_processor = audio_processor
