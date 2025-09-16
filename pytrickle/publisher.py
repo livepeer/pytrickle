@@ -12,7 +12,7 @@ from typing import Optional, List
 
 from . import ErrorCallback
 from .base import TrickleComponent
-
+import time
 logger = logging.getLogger(__name__)
 
 # Default timeouts (seconds)
@@ -96,13 +96,13 @@ class TricklePublisher(TrickleComponent):
         try:
             if not self.session or self._should_stop():
                 return
-                
+            start = time.time()
             resp = await self.session.post(
                 url,
                 headers={'Connection': 'close', 'Content-Type': self.mime_type},
                 data=self._stream_data(queue)
             )
-            logger.info(f"Trickle POST complete for {url}")
+            logger.info(f"Trickle POST complete for {url}, took: {time.time() - start:.2f}s, status: {resp.status}")
             if resp.status != 200:
                 body = await resp.text()
                 logger.error(f"Trickle POST failed {url}, status code: {resp.status}, msg: {body}")
