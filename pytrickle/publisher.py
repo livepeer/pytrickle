@@ -102,6 +102,7 @@ class TricklePublisher(TrickleComponent):
                 headers={'Connection': 'close', 'Content-Type': self.mime_type},
                 data=self._stream_data(queue)
             )
+            
             logger.info(f"Trickle POST complete for {url}, took: {time.time() - start:.2f}s, status: {resp.status}")
             if resp.status != 200:
                 body = await resp.text()
@@ -109,6 +110,8 @@ class TricklePublisher(TrickleComponent):
                 # Don't trigger error callback if we're shutting down
                 if not self._should_stop():
                     await self._notify_error("post_failed", Exception(f"POST failed with status {resp.status}: {body}"))
+            #release the connection
+            await resp.release()
         except aiohttp.ClientConnectionResetError as e:
             # Connection reset is usually due to server shutdown - treat as expected
             logger.debug(f"Connection reset for {url} (expected during shutdown): {e}")
