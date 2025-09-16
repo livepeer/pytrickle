@@ -346,6 +346,7 @@ class TrickleClient:
     
     async def _send_data_loop(self):
         """Send data to the server every 333ms, batching all available items."""
+        last_send_time = time.time()
         try:
             while not self.stop_event.is_set() and not self.error_event.is_set():
                 # Wait for send_data_interval or until stop/error event is set
@@ -365,15 +366,16 @@ class TrickleClient:
                     else:
                         data_items.append(data)
                 
-                # Send all collected data items
-                #if len(data_items) > 0:
-                try:
-                    data_str = json.dumps(data_items) + "\n"
-                except Exception as e:
-                    logger.error(f"Error serializing data items: {e}")
-                    continue
+                # Send all collected data items if present or send empty every 30 seconds to keep alive
+                if len(data_items) > 0 or (time.time() - last_send_time + self.send_data_interval) > 25.0:
+                    try:
+                        data_str = json.dumps(data_items) + "\n"
+                    except Exception as e:
+                        logger.error(f"Error serializing data items: {e}")
+                        continue
 
-                await self.protocol.publish_data(data_str)
+                    await self.protocol.publish_data(data_str)
+                    last_send_time = time.time()
                 
         except Exception as e:
             logger.error(f"Error in data sending loop: {e}")
