@@ -438,6 +438,6 @@ class TrickleProtocol(TrickleComponent):
         try:
             async with await self.data_publisher.next() as segment:
                 await segment.write(data.encode('utf-8'))
-                await segment.close()
+                await segment.write(None)
         except Exception as e:
             logger.error(f"Error publishing data: {e}")
