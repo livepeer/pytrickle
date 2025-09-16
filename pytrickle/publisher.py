@@ -103,7 +103,7 @@ class TricklePublisher(TrickleComponent):
                 data=self._stream_data(queue)
             )
             
-            logger.info(f"Trickle POST complete for {url}, took: {time.time() - start:.2f}s, status: {resp.status}")
+            logger.debug(f"Trickle POST complete for {url}, took: {time.time() - start:.2f}s, status: {resp.status}")
             if resp.status != 200:
                 body = await resp.text()
                 logger.error(f"Trickle POST failed {url}, status code: {resp.status}, msg: {body}")
