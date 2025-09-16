@@ -366,14 +366,14 @@ class TrickleClient:
                         data_items.append(data)
                 
                 # Send all collected data items
-                if len(data_items) > 0:
-                    try:
-                        data_str = json.dumps(data_items) + "\n"
-                    except Exception as e:
-                        logger.error(f"Error serializing data items: {e}")
-                        continue
+                #if len(data_items) > 0:
+                try:
+                    data_str = json.dumps(data_items) + "\n"
+                except Exception as e:
+                    logger.error(f"Error serializing data items: {e}")
+                    continue
 
-                    await self.protocol.publish_data(data_str)
+                await self.protocol.publish_data(data_str)
                 
         except Exception as e:
             logger.error(f"Error in data sending loop: {e}")
