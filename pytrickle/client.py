@@ -150,6 +150,15 @@ class TrickleClient:
         """Publish data via the protocol's data publisher."""
         self.data_queue.append(data)
 
+    async def send_output(self, output):
+        """Send output to the egress queue."""
+        try:
+            await asyncio.wait_for(self.output_queue.put(output), timeout=.10)
+        except asyncio.TimeoutError:
+            logger.warning("Output queue is full, dropping frame")
+        except Exception as e:
+            logger.error(f"Error sending output: {e}")
+
     def get_statistics(self) -> dict:
         """Get processing statistics."""
         return {
@@ -418,3 +427,6 @@ class TrickleClient:
             logger.error(f"Error in wait_for_interval: {e}")
             # On error, signal to stop the loop
             return True
+
+    
+        
