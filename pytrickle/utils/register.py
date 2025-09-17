@@ -61,19 +61,26 @@ class RegisterCapability:
                         if resp.status == 200:
                             self.logger.info("Capability registered successfully")
                             return urlparse(register_req["url"])
-                        elif resp.status_code == 400:
+                        elif resp.status == 400:
                             self.logger.error("Orchestrator secret incorrect")
                             return False
                         else:
                             self.logger.warning(f"Register attempt {attempt} failed: {resp.status} {resp.text}")
 
+            except aiohttp.ClientConnectorError as e:
+                # Handle connect call failed without raising
+                self.logger.warning(f"Register attempt {attempt} failed to connect: {e}")
+            except asyncio.TimeoutError as e:
+                self.logger.warning(f"Register attempt {attempt} timed out: {e}")
             except aiohttp.ClientError as e:
-                self.logger.warning(f"Register attempt {attempt} failed with exception: {e}")
+                self.logger.warning(f"Register attempt {attempt} failed with client error: {e}")
+            except Exception as e:
+                # Ensure unexpected errors don't bubble up and fail startup
+                self.logger.warning(f"Register attempt {attempt} failed with unexpected exception: {e}")
                 
             if attempt < max_retries:
                 await asyncio.sleep(delay)
             else:
-                self.logger.error("All registration retries failed")
                 return False
                 
         return False
