@@ -27,7 +27,6 @@ def trickle_handler(handler_type: str):
         - This does not wrap the callable or change semantics.
         - Convenience typed decorators below build on this to add DX ergonomics.
     """
-
     def decorator(func):
         setattr(func, "_trickle_handler_type", handler_type)
         setattr(func, "_trickle_handler", True)
@@ -66,9 +65,9 @@ def video_handler(func: Callable[..., Any]):
     Signature expected by framework: (self, frame: VideoFrame) -> Optional[VideoFrame]
     """
 
-    from .frames import VideoFrame  # local import to avoid cycles at import time
-    import torch  # type: ignore
-    import numpy as np  # type: ignore
+    from .frames import VideoFrame 
+    import torch
+    import numpy as np
 
     @trickle_handler("video")
     async def wrapper(*args, **kwargs):
@@ -150,7 +149,7 @@ def model_loader(func: Callable[..., Any]):
     return wrapper
 
 
-def param_updater(func: Optional[Callable[..., Any]] = None, *, model: Any | None = None):
+def param_updater(func: Optional[Callable[..., Any]] = None, *, model: Optional[Any] = None):
     """
     Decorator for parameter updates with optional Pydantic model validation.
 

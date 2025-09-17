@@ -126,3 +126,6 @@ ignore_missing_imports = true
 # Enable setuptools-scm for automatic version management from Git tags
 write_to = "pytrickle/_version.py"
 fallback_version = "0.0.0"
+
+[project.scripts]
+pytrickle = "pytrickle.cli:main"

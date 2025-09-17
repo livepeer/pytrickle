@@ -48,14 +48,18 @@ class StreamProcessor:
         # Find all decorated handler methods
         for attr_name in dir(handler_instance):
             attr = getattr(handler_instance, attr_name)
-            if hasattr(attr, '_trickle_handler'):
-                handler_type = attr._trickle_handler_type
-                if handler_type in handlers:
-                    logger.warning(
-                        f"Duplicate handler for '{handler_type}' found; "
-                        f"overriding previous with '{attr_name}'"
-                    )
-                handlers[handler_type] = attr
+            # For bound methods, the marker lives on the underlying function
+            fn_obj = getattr(attr, "__func__", attr)
+            if hasattr(fn_obj, '_trickle_handler'):
+                handler_type = getattr(fn_obj, '_trickle_handler_type', None)
+                if handler_type:
+                    if handler_type in handlers:
+                        logger.warning(
+                            f"Duplicate handler for '{handler_type}' found; "
+                            f"overriding previous with '{attr_name}'"
+                        )
+                    # Store the bound attribute itself so 'self' is preserved
+                    handlers[handler_type] = attr
 
         # Extract handlers directly without conversion
         video_processor = handlers.get('video')
@@ -106,7 +110,7 @@ class StreamProcessor:
         """
         
         # Validate that processors are async functions
-        for name, fn in {
+        for attr_name, fn in {
             "video_processor": video_processor,
             "audio_processor": audio_processor,
             "model_loader": model_loader,
@@ -114,7 +118,10 @@ class StreamProcessor:
             "on_stream_stop": on_stream_stop,
         }.items():
             if fn is not None and not inspect.iscoroutinefunction(fn):
-                raise ValueError(f"{name} must be an async function")
+                # Allow decorated sync functions that became async wrappers
+                # If user passed a bound method that is sync, our decorators wrap it as async
+                # If it's truly sync and not decorated, this will raise to keep contract clear
+                raise ValueError(f"{attr_name} must be an async function")
 
         self.video_processor = video_processor
         self.audio_processor = audio_processor
