@@ -4,9 +4,14 @@ from typing import Optional
 import argparse
 
 TEMPLATE_HANDLERS = """
+import logging
 from pytrickle.decorators import model_loader, video_handler, param_updater, on_stream_stop
 from pytrickle.stream_processor import StreamProcessor
 from pytrickle.frame_skipper import FrameSkipConfig
+
+# --- Basic Setup ---
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 
 class Handlers:
