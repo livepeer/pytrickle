@@ -150,6 +150,15 @@ class TrickleClient:
         """Publish data via the protocol's data publisher."""
         self.data_queue.append(data)
 
+    async def send_output(self, output):
+        """Send output to the egress queue."""
+        try:
+            await asyncio.wait_for(self.output_queue.put(output), timeout=.10)
+        except asyncio.TimeoutError:
+            logger.warning("Output queue is full, dropping frame")
+        except Exception as e:
+            logger.error(f"Error sending output: {e}")
+
     def get_statistics(self) -> dict:
         """Get processing statistics."""
         return {
@@ -300,6 +309,7 @@ class TrickleClient:
                     try:
                         frame = await asyncio.wait_for(self.output_queue.get(), timeout=0.5)
                         if frame is not None:
+                            logger.debug("pulled frame from output queue")
                             yield frame
                         else:
                             break
@@ -345,6 +355,7 @@ class TrickleClient:
     
     async def _send_data_loop(self):
         """Send data to the server every 333ms, batching all available items."""
+        last_send_time = time.time()
         try:
             while not self.stop_event.is_set() and not self.error_event.is_set():
                 # Wait for send_data_interval or until stop/error event is set
@@ -364,8 +375,8 @@ class TrickleClient:
                     else:
                         data_items.append(data)
                 
-                # Send all collected data items
-                if len(data_items) > 0:
+                # Send all collected data items if present or send empty every 30 seconds to keep alive
+                if len(data_items) > 0 or (time.time() - last_send_time + self.send_data_interval) > 25.0:
                     try:
                         data_str = json.dumps(data_items) + "\n"
                     except Exception as e:
@@ -373,6 +384,7 @@ class TrickleClient:
                         continue
 
                     await self.protocol.publish_data(data_str)
+                    last_send_time = time.time()
                 
         except Exception as e:
             logger.error(f"Error in data sending loop: {e}")
@@ -415,3 +427,6 @@ class TrickleClient:
             logger.error(f"Error in wait_for_interval: {e}")
             # On error, signal to stop the loop
             return True
+
+    
+        
