@@ -1,7 +1,7 @@
 import asyncio
 import inspect
 import logging
-from typing import Optional, Callable, Dict, Any, List, Union, Awaitable, Coroutine
+from typing import Optional, Callable, Dict, Any, List, Awaitable
 
 from .frames import VideoFrame, AudioFrame
 from .frame_processor import FrameProcessor
@@ -13,11 +13,74 @@ logger = logging.getLogger(__name__)
 # Type aliases for processing functions
 VideoProcessor = Callable[[VideoFrame], Awaitable[Optional[VideoFrame]]]
 AudioProcessor = Callable[[AudioFrame], Awaitable[Optional[List[AudioFrame]]]]
-ModelLoader = Callable[[Dict[str, Any]], Awaitable[None]]
+ModelLoader = Callable[..., Awaitable[None]]
 ParamUpdater = Callable[[Dict[str, Any]], Awaitable[None]]
 OnStreamStop = Callable[[], Awaitable[None]]
 
+
 class StreamProcessor:
+    @classmethod
+    def from_handlers(
+        cls,
+        handler_instance,
+        send_data_interval: Optional[float] = 0.333,
+        name: str = "stream-processor",
+        port: int = 8000,
+        frame_skip_config: Optional[FrameSkipConfig] = None,
+        **server_kwargs
+    ):
+        """
+        Create StreamProcessor from decorated handler methods.
+
+        Args:
+            handler_instance: Instance with @trickle_handler decorated methods
+            send_data_interval: Interval for sending data
+            name: Processor name
+            port: Server port
+            frame_skip_config: Optional frame skipping configuration
+            **server_kwargs: Additional arguments passed to StreamServer
+
+        Returns:
+            StreamProcessor instance configured with the decorated handlers
+        """
+        handlers = {}
+
+        # Find all decorated handler methods
+        for attr_name in dir(handler_instance):
+            attr = getattr(handler_instance, attr_name)
+            # For bound methods, the marker lives on the underlying function
+            fn_obj = getattr(attr, "__func__", attr)
+            if hasattr(fn_obj, '_trickle_handler'):
+                handler_type = getattr(fn_obj, '_trickle_handler_type', None)
+                if handler_type:
+                    if handler_type in handlers:
+                        logger.warning(
+                            f"Duplicate handler for '{handler_type}' found; "
+                            f"overriding previous with '{attr_name}'"
+                        )
+                    # Store the bound attribute itself so 'self' is preserved
+                    handlers[handler_type] = attr
+
+        # Extract handlers directly without conversion
+        video_processor = handlers.get('video')
+        audio_processor = handlers.get('audio')
+        model_loader = handlers.get('model_loader')
+        param_updater = handlers.get('param_updater')
+        on_stream_stop = handlers.get('stream_stop')
+
+        return cls(
+            video_processor=video_processor,
+            audio_processor=audio_processor,
+            model_loader=model_loader,
+            param_updater=param_updater,
+            on_stream_stop=on_stream_stop,
+            send_data_interval=send_data_interval,
+            name=name,
+            port=port,
+            frame_skip_config=frame_skip_config,
+            **server_kwargs
+        )
+
     def __init__(
         self,
         video_processor: Optional[VideoProcessor] = None,
@@ -45,12 +108,21 @@ class StreamProcessor:
             frame_skip_config: Optional frame skipping configuration (None = no frame skipping)
             **server_kwargs: Additional arguments passed to StreamServer
         """
+        
         # Validate that processors are async functions
-        if video_processor is not None and not inspect.iscoroutinefunction(video_processor):
-            raise ValueError("video_processor must be an async function")
-        if audio_processor is not None and not inspect.iscoroutinefunction(audio_processor):
-            raise ValueError("audio_processor must be an async function")
-            
+        for attr_name, fn in {
+            "video_processor": video_processor,
+            "audio_processor": audio_processor,
+            "model_loader": model_loader,
+            "param_updater": param_updater,
+            "on_stream_stop": on_stream_stop,
+        }.items():
+            if fn is not None and not inspect.iscoroutinefunction(fn):
+                # Allow decorated sync functions that became async wrappers
+                # If user passed a bound method that is sync, our decorators wrap it as async
+                # If it's truly sync and not decorated, this will raise to keep contract clear
+                raise ValueError(f"{attr_name} must be an async function")
+
         self.video_processor = video_processor
         self.audio_processor = audio_processor
         self.model_loader = model_loader
@@ -64,11 +136,11 @@ class StreamProcessor:
         
         # Create internal frame processor
         self._frame_processor = _InternalFrameProcessor(
-            video_processor=video_processor,
-            audio_processor=audio_processor,
-            model_loader=model_loader,
-            param_updater=param_updater,
-            on_stream_stop=on_stream_stop,
+            video_processor=self.video_processor,
+            audio_processor=self.audio_processor,
+            model_loader=self.model_loader,
+            param_updater=self.param_updater,
+            on_stream_stop=self.on_stream_stop,
             name=name
         )
         
@@ -125,7 +197,7 @@ class _InternalFrameProcessor(FrameProcessor):
         self.audio_processor = audio_processor
         self.model_loader = model_loader
         self.param_updater = param_updater
-        self.on_stream_stop = on_stream_stop
+        self.on_stream_stop_cb = on_stream_stop
         self.name = name
         
         # Frame skipping is handled at TrickleClient level
@@ -140,8 +212,8 @@ class _InternalFrameProcessor(FrameProcessor):
             try:
                 await self.model_loader(**kwargs)
                 logger.info(f"StreamProcessor '{self.name}' model loaded successfully")
-            except Exception as e:
-                logger.error(f"Error in model loader: {e}")
+            except Exception:
+                logger.exception("Error in model loader")
                 raise
     
     async def process_video_async(self, frame: VideoFrame) -> Optional[VideoFrame]:
@@ -152,9 +224,10 @@ class _InternalFrameProcessor(FrameProcessor):
             
         try:
             result = await self.video_processor(frame)
-            return result if isinstance(result, VideoFrame) else frame
-        except Exception as e:
-            logger.error(f"Error in video processing: {e}")
+            # If handler returns None, passthrough original frame
+            return result if result is not None else frame
+        except Exception:
+            logger.exception("Error in video processing")
             return frame
     
     async def process_audio_async(self, frame: AudioFrame) -> Optional[List[AudioFrame]]:
@@ -165,15 +238,17 @@ class _InternalFrameProcessor(FrameProcessor):
             
         try:
             result = await self.audio_processor(frame)
+            # Normalize results
+            if result is None:
+                return [frame]
             if isinstance(result, AudioFrame):
                 return [result]
-            elif isinstance(result, list):
+            if isinstance(result, list):
                 return result
-            elif result is None:
-                return [frame]
+            # Unknown type -> pass-through
             return [frame]
-        except Exception as e:
-            logger.error(f"Error in audio processing: {e}")
+        except Exception:
+            logger.exception("Error in audio processing")
             return [frame]
     
     async def update_params(self, params: Dict[str, Any]):
@@ -182,5 +257,13 @@ class _InternalFrameProcessor(FrameProcessor):
             try:
                 await self.param_updater(params)
                 logger.info(f"Parameters updated: {params}")
-            except Exception as e:
-                logger.error(f"Error updating parameters: {e}")
+            except Exception:
+                logger.exception("Error updating parameters")
+
+    async def on_stream_stop(self):
+        """Invoke optional user-provided stream stop callback."""
+        if self.on_stream_stop_cb:
+            try:
+                await self.on_stream_stop_cb()
+            except Exception:
+                logger.exception("Error in on_stream_stop callback")

@@ -63,6 +63,9 @@ class StreamServer:
         app_kwargs: Optional[Dict[str, Any]] = None,
         # Frame skipping configuration
         frame_skip_config: Optional[FrameSkipConfig] = None,
+        # Model loading configuration
+        auto_load_model: bool = True,
+        model_load_kwargs: Optional[Dict[str, Any]] = None,
 
     ):
         """Initialize StreamServer.
@@ -105,6 +108,8 @@ class StreamServer:
         self.capability_name = capability_name or os.getenv("CAPABILITY_NAME", os.getenv("MODEL_ID",""))
         self.publisher_timeout = publisher_timeout
         self.subscriber_timeout = subscriber_timeout
+        self.auto_load_model = auto_load_model
+        self.model_load_kwargs = model_load_kwargs or {}
         
         # Frame skipping configuration
         self.frame_skip_config = frame_skip_config
@@ -122,6 +127,13 @@ class StreamServer:
             for key, value in app_context.items():
                 self.app[key] = value
 
+        # Attach server state to the frame processor for lifecycle awareness
+        try:
+            self.frame_processor.attach_state(self.state)
+        except Exception:
+            # Optional for processors that don't implement it
+            logger.debug("FrameProcessor.attach_state not implemented; proceeding without attachment")
+
         # Setup middleware first (order matters)
         if middleware:
             self._setup_middleware(middleware)
@@ -137,6 +149,26 @@ class StreamServer:
         if on_shutdown:
             for handler in on_shutdown:
                 self.app.on_shutdown.append(handler)
+
+        # Internal: auto-load model on startup if enabled
+        if self.auto_load_model:
+            async def _auto_load_model(app: web.Application):
+                try:
+                    # Indicate loading state explicitly
+                    self.state.set_state(PipelineState.LOADING)
+                    await self.frame_processor.load_model(**self.model_load_kwargs)
+                    # Mark startup complete moves LOADING -> IDLE
+                    self.state.set_startup_complete()
+
+                    # Only log model-related messages if a model_loader decorator is present
+                    if hasattr(self.frame_processor, "model_loader"):
+                        if getattr(self.frame_processor, "model_loader", None) is not None:
+                            logger.info("Model loaded successfully during server startup")
+                except Exception as e:
+                    logger.exception("Model load failed during startup")
+                    self.state.set_error(f"Model load failed: {e}")
+
+            self.app.on_startup.append(_auto_load_model)
 
         # Setup routes
         if enable_default_routes:
@@ -631,9 +663,11 @@ class StreamServer:
         site = web.TCPSite(runner, self.host, self.port)
         await site.start()
         
-        # Set pipeline ready when server is up and ready to accept requests
-        self.state.set_state(PipelineState.IDLE)
-        self.state.set_startup_complete()
+        # If auto-load is enabled, startup_complete/state will be set by the startup hook
+        if not self.auto_load_model:
+            # Set pipeline ready when server is up and ready to accept requests
+            self.state.set_state(PipelineState.IDLE)
+            self.state.set_startup_complete()
         
         logger.info(f"Server started on {self.host}:{self.port}")
         return runner
