@@ -76,7 +76,7 @@ class RegisterCapability:
                 self.logger.warning(f"Register attempt {attempt} failed with client error: {e}")
             except Exception as e:
                 # Ensure unexpected errors don't bubble up and fail startup
-                self.logger.warning(f"Register attempt {attempt} failed with unexpected exception: {e}")
+                self.logger.error(f"Register attempt {attempt} failed with unexpected exception: {e}")
                 
             if attempt < max_retries:
                 await asyncio.sleep(delay)
