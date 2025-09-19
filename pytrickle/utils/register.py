@@ -81,6 +81,7 @@ class RegisterCapability:
             if attempt < max_retries:
                 await asyncio.sleep(delay)
             else:
+                self.logger.warning("All registration retries failed")
                 return False
                 
         return False
