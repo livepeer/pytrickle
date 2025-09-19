@@ -61,7 +61,7 @@ class RegisterCapability:
                         if resp.status == 200:
                             self.logger.info("Capability registered successfully")
                             return urlparse(register_req["url"])
-                        elif resp.status_code == 400:
+                        elif resp.status == 400:
                             self.logger.error("Orchestrator secret incorrect")
                             return False
                         else:
