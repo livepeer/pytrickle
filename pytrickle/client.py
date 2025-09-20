@@ -17,6 +17,7 @@ from .frames import VideoFrame, AudioFrame, VideoOutput, AudioOutput
 from . import ErrorCallback
 from .frame_processor import FrameProcessor
 from .frame_skipper import AdaptiveFrameSkipper, FrameSkipConfig, FrameProcessingResult
+from .state import PipelineState
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,7 @@ class TrickleClient:
             )
         else:
             self.frame_skipper = None
+        
     
     async def start(self, request_id: str = "default"):
         """Start the trickle client."""
@@ -86,6 +88,9 @@ class TrickleClient:
         
         # Start the protocol
         await self.protocol.start()
+        
+        # Ensure model is loaded on the same event loop/thread before processing
+        await self.frame_processor.ensure_model_loaded()
         
         # Start processing loops
         self.running = True
