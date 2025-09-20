@@ -76,6 +76,7 @@ class TrickleClient:
         
         # Guard to ensure model is loaded once per client lifecycle
         self._model_loaded = False
+        self._model_load_lock = asyncio.Lock()
     
     async def start(self, request_id: str = "default"):
         """Start the trickle client."""
@@ -183,21 +184,26 @@ class TrickleClient:
 
     async def _ensure_model_loaded(self):
         """Load the model once on the same event loop before processing begins."""
-        if not self._model_loaded:
-            # Transition to LOADING while model warms up, if state is available
-            try:
-                if getattr(self.frame_processor, "state", None) is not None:
-                    self.frame_processor.state.set_state(PipelineState.LOADING)
-                await self.frame_processor.load_model()
-                # Mark startup complete; this moves LOADING → IDLE per state machine
-                if getattr(self.frame_processor, "state", None) is not None:
-                    self.frame_processor.state.set_startup_complete()
-                self._model_loaded = True
-            except Exception as e:
-                # Reflect error in state if available, then propagate
-                if getattr(self.frame_processor, "state", None) is not None:
-                    self.frame_processor.state.set_error(str(e))
-                raise
+        # Transition to LOADING while model warms up, if state is available
+        try:
+            if getattr(self.frame_processor, "state", None) is not None:
+                self.frame_processor.state.set_state(PipelineState.LOADING)
+            
+            # Use the thread-safe wrapper
+            await self.frame_processor.ensure_model_loaded()
+            
+            # Mark startup complete; this moves LOADING → IDLE per state machine
+            if getattr(self.frame_processor, "state", None) is not None:
+                self.frame_processor.state.set_startup_complete()
+            
+            # Update our local flag for consistency
+            self._model_loaded = True
+            
+        except Exception as e:
+            # Reflect error in state if available, then propagate
+            if getattr(self.frame_processor, "state", None) is not None:
+                self.frame_processor.state.set_error(str(e))
+            raise
 
     async def _on_protocol_error(self, error_type: str, exception: Optional[Exception] = None):
         """Handle protocol errors and shutdown events."""
