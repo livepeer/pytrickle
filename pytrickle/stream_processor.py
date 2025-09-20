@@ -68,9 +68,8 @@ class StreamProcessor:
         self.frame_skip_config = frame_skip_config
         self.server_kwargs = server_kwargs
         
-        # Add lock for model loading protection
-        self._model_load_lock = asyncio.Lock()
-        self._model_loaded = False
+        # Track background tasks to prevent memory leaks
+        self._background_tasks = set()
         
         # Create internal frame processor
         self._frame_processor = _InternalFrameProcessor(
@@ -100,26 +99,10 @@ class StreamProcessor:
 
         # Register server startup hook to preload model on same event loop
         async def _on_startup(_app):
-            # Schedule non-blocking background preload so server can accept /health immediately
-            async def _background_preload():
-                try:
-                    self._frame_processor.state.set_state(PipelineState.LOADING)
-                    
-                    # Use the thread-safe wrapper
-                    await self._frame_processor.ensure_model_loaded()
-                    
-                    self._frame_processor.state.set_startup_complete()
-                    
-                    # Update our local flag for consistency
-                    self._model_loaded = True
-                    logger.info(f"StreamProcessor '{self.name}' model preloaded on server startup")
-                    
-                except Exception as e:
-                    self._frame_processor.state.set_error(str(e))
-                    logger.error(f"Error preloading model on startup: {e}")
-
             try:
-                asyncio.get_running_loop().create_task(_background_preload())
+                task = asyncio.create_task(self._preload_model_background())
+                self._background_tasks.add(task)
+                task.add_done_callback(self._background_tasks.discard)
             except Exception as e:
                 logger.error(f"Failed to schedule background preload: {e}")
 
@@ -127,6 +110,22 @@ class StreamProcessor:
             self.server.app.on_startup.append(_on_startup)
         except Exception as e:
             logger.error(f"Failed to register startup hook: {e}")
+    
+    async def _preload_model_background(self):
+        """Background model preloading with proper error handling."""
+        try:
+            self._frame_processor.state.set_state(PipelineState.LOADING)
+            
+            # Use the thread-safe wrapper
+            await self._frame_processor.ensure_model_loaded()
+            
+            self._frame_processor.state.set_startup_complete()
+            
+            logger.info(f"StreamProcessor '{self.name}' model preloaded on server startup")
+            
+        except Exception as e:
+            self._frame_processor.state.set_error(str(e))
+            logger.error(f"Error preloading model on startup: {e}")
     
     async def send_data(self, data: str):
         """Send data to the server."""
@@ -171,9 +170,23 @@ class StreamProcessor:
             logger.error(f"Error sending input frame: {e}")
             return False
 
+    async def cleanup(self):
+        """Cancel all background tasks to prevent memory leaks."""
+        if self._background_tasks:
+            logger.info(f"Cancelling {len(self._background_tasks)} background tasks")
+            for task in self._background_tasks.copy():
+                if not task.done():
+                    task.cancel()
+            # Wait for tasks to complete cancellation
+            await asyncio.gather(*self._background_tasks, return_exceptions=True)
+            self._background_tasks.clear()
+    
     async def run_forever(self):
         """Run the stream processor server forever."""
-        await self.server.run_forever()
+        try:
+            await self.server.run_forever()
+        finally:
+            await self.cleanup()
     
     def run(self):
         """Run the stream processor server (blocking)."""
