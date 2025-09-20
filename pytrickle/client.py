@@ -90,7 +90,7 @@ class TrickleClient:
         await self.protocol.start()
         
         # Ensure model is loaded on the same event loop/thread before processing
-        await self._ensure_model_loaded()
+        await self.frame_processor.ensure_model_loaded()
         
         # Start processing loops
         self.running = True
@@ -178,23 +178,6 @@ class TrickleClient:
             self.frame_skipper.set_target_fps(target_fps)
         else:
             logger.warning("Frame skipping is disabled")
-
-    async def _ensure_model_loaded(self):
-        """Load the model once on the same event loop before processing begins."""
-        # Transition to LOADING while model warms up, if state is available
-        try:
-            self.frame_processor.state.set_state(PipelineState.LOADING)
-            
-            # Use the thread-safe wrapper (handles its own state management)
-            await self.frame_processor.ensure_model_loaded()
-            
-            # Mark startup complete; this moves LOADING → IDLE per state machine
-            self.frame_processor.state.set_startup_complete()
-            
-        except Exception as e:
-            # Reflect error in state if available, then propagate
-            self.frame_processor.state.set_error(str(e))
-            raise
 
     async def _on_protocol_error(self, error_type: str, exception: Optional[Exception] = None):
         """Handle protocol errors and shutdown events."""

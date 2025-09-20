@@ -59,7 +59,6 @@ class FrameProcessor(ABC):
         
         # Model loading protection
         self._model_load_lock = asyncio.Lock()
-        self._model_loaded = False
 
     def attach_state(self, state: StreamState) -> None:
         """Attach a pipeline state manager and set IDLE if model already loaded."""
@@ -68,9 +67,9 @@ class FrameProcessor(ABC):
     async def ensure_model_loaded(self, **kwargs):
         """Thread-safe wrapper that ensures model is loaded exactly once."""
         async with self._model_load_lock:
-            if not self._model_loaded:
+            if not self.state.get_state() == PipelineState.LOADING:
                 await self.load_model(**kwargs)
-                self._model_loaded = True
+                self.state.set_startup_complete()
                 logger.debug(f"Model loaded for {self.__class__.__name__}")
             else:
                 logger.debug(f"Model already loaded for {self.__class__.__name__}")
