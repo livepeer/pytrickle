@@ -103,22 +103,19 @@ class StreamProcessor:
             # Schedule non-blocking background preload so server can accept /health immediately
             async def _background_preload():
                 try:
-                    if getattr(self._frame_processor, "state", None) is not None:
-                        self._frame_processor.state.set_state(PipelineState.LOADING)
+                    self._frame_processor.state.set_state(PipelineState.LOADING)
                     
                     # Use the thread-safe wrapper
                     await self._frame_processor.ensure_model_loaded()
                     
-                    if getattr(self._frame_processor, "state", None) is not None:
-                        self._frame_processor.state.set_startup_complete()
+                    self._frame_processor.state.set_startup_complete()
                     
                     # Update our local flag for consistency
                     self._model_loaded = True
                     logger.info(f"StreamProcessor '{self.name}' model preloaded on server startup")
                     
                 except Exception as e:
-                    if getattr(self._frame_processor, "state", None) is not None:
-                        self._frame_processor.state.set_error(str(e))
+                    self._frame_processor.state.set_error(str(e))
                     logger.error(f"Error preloading model on startup: {e}")
 
             try:
