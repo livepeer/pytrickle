@@ -68,6 +68,10 @@ class StreamProcessor:
         self.frame_skip_config = frame_skip_config
         self.server_kwargs = server_kwargs
         
+        # Add lock for model loading protection
+        self._model_load_lock = asyncio.Lock()
+        self._model_loaded = False
+        
         # Create internal frame processor
         self._frame_processor = _InternalFrameProcessor(
             video_processor=video_processor,
@@ -92,7 +96,7 @@ class StreamProcessor:
             self._frame_processor.attach_state(self.server.state)
         except Exception:
             # If attach fails for any reason, log and continue (non-fatal)
-            logger.debug("Failed to attach server state to frame processor")
+            logger.warning("Failed to attach server state to frame processor")
 
         # Register server startup hook to preload model on same event loop
         async def _on_startup(_app):
@@ -101,10 +105,17 @@ class StreamProcessor:
                 try:
                     if getattr(self._frame_processor, "state", None) is not None:
                         self._frame_processor.state.set_state(PipelineState.LOADING)
-                    await self._frame_processor.load_model()
+                    
+                    # Use the thread-safe wrapper
+                    await self._frame_processor.ensure_model_loaded()
+                    
                     if getattr(self._frame_processor, "state", None) is not None:
                         self._frame_processor.state.set_startup_complete()
+                    
+                    # Update our local flag for consistency
+                    self._model_loaded = True
                     logger.info(f"StreamProcessor '{self.name}' model preloaded on server startup")
+                    
                 except Exception as e:
                     if getattr(self._frame_processor, "state", None) is not None:
                         self._frame_processor.state.set_error(str(e))
