@@ -67,7 +67,7 @@ class FrameProcessor(ABC):
     async def ensure_model_loaded(self, **kwargs):
         """Thread-safe wrapper that ensures model is loaded exactly once."""
         async with self._model_load_lock:
-            if not self.state.get_state() == PipelineState.LOADING:
+            if not self.state.get_state() == PipelineState.IDLE:
                 await self.load_model(**kwargs)
                 self.state.set_startup_complete()
                 logger.debug(f"Model loaded for {self.__class__.__name__}")
