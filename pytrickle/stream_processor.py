@@ -114,12 +114,9 @@ class StreamProcessor:
     async def _preload_model_background(self):
         """Background model preloading with proper error handling."""
         try:
-            self._frame_processor.state.set_state(PipelineState.LOADING)
             
             # Use the thread-safe wrapper
             await self._frame_processor.ensure_model_loaded()
-            
-            self._frame_processor.state.set_startup_complete()
             
             logger.info(f"StreamProcessor '{self.name}' model preloaded on server startup")
             
