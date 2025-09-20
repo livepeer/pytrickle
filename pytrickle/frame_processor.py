@@ -55,7 +55,7 @@ class FrameProcessor(ABC):
             **init_kwargs: Additional kwargs passed to load_model() method
         """
         self.error_callback = error_callback
-        self.state: StreamState()
+        self.state = StreamState()
         
         # Model loading protection
         self._model_load_lock = asyncio.Lock()
