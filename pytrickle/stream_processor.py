@@ -100,27 +100,27 @@ class StreamProcessor:
             logger.error(f"Error sending data: {e}")
             return False
 
-    async def send_frame(self, frame: Union[VideoFrame, AudioFrame]):
-        """Send a video or audio frame to the server."""
+    async def send_input_frame(self, frame: Union[VideoFrame, AudioFrame]):
+        """Send a video or audio frame to the input processing pipeline."""
         if self.server.current_client is None:
-            logger.debug("No active client connection, cannot send frame")
+            logger.debug("No active client connection, cannot send input frame")
             return False
 
         client = self.server.current_client
         # Check if client is in error state or stopping
         if client.error_event.is_set() or client.stop_event.is_set():
-            logger.debug("Client is in error/stop state, not sending frame")
+            logger.debug("Client is in error/stop state, not sending input frame")
             return False
 
         try:
-            logger.debug("sending frame to client")
+            logger.debug("sending input frame to client")
             if isinstance(frame, VideoFrame):
-                await client.send_output(VideoOutput(frame, self.server.current_client.request_id))
+                await client.video_input_queue.put(frame)
             elif isinstance(frame, AudioFrame):
-                await client.send_output(AudioOutput(frame, self.server.current_client.request_id))
+                await client.audio_input_queue.put(frame)
             return True
         except Exception as e:
-            logger.error(f"Error sending frame: {e}")
+            logger.error(f"Error sending input frame: {e}")
             return False
 
     async def run_forever(self):
