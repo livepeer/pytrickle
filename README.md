@@ -108,6 +108,105 @@ async def main():
 
 For a complete working example with green tint processing, see `examples/async_processor_example.py`.
 
+## Decorators: auto-wired handlers
+
+PyTrickle provides a set of decorators that make it easy to implement stream handlers as plain methods on a class. The decorators:
+
+- Mark methods for auto-discovery and wiring into the stream processor
+- Bridge sync functions into async (run sync code in a thread pool)
+- Normalize return values so your code can stay simple
+
+### Available decorators
+
+- `@video_handler`
+  - Signature: `(self, frame: VideoFrame) -> Optional[VideoFrame | torch.Tensor | numpy.ndarray | None]`
+  - Return normalization:
+    - `None` → pass-through original frame
+    - `VideoFrame` → used as-is
+    - `torch.Tensor` / `numpy.ndarray` → replaces the frame's tensor via `frame.replace_tensor(...)`
+
+- `@audio_handler`
+  - Signature: `(self, frame: AudioFrame) -> Optional[List[AudioFrame] | AudioFrame | torch.Tensor | numpy.ndarray | None]`
+  - Return normalization:
+    - `None` → `[original frame]`
+    - `AudioFrame` → `[that frame]`
+    - `List[AudioFrame]` → returned as-is
+    - `torch.Tensor` / `numpy.ndarray` → replaces samples via `frame.replace_samples(...)`, returning `[frame]`
+
+- `@model_loader`
+  - Signature: any (sync or async), called once during model/resource loading.
+
+- `@param_updater` (optionally `@param_updater(model=MyParamsModel)`)
+  - Signature: `(self, params)` where `params` is a `dict` or a validated Pydantic model instance if `model=...` is provided.
+  - If you pass a Pydantic `BaseModel`, incoming params are validated and parsed before your method runs.
+
+- `@on_stream_stop`
+  - Signature: `() -> None` (sync or async). Invoked when a stream stops for cleanup.
+
+All of the above decorators produce async wrappers internally, so they can be awaited by the framework even if your implementation is synchronous.
+
+### Using decorators with StreamProcessor
+
+```python
+from pytrickle.decorators import video_handler, audio_handler, model_loader, param_updater, on_stream_stop
+from pytrickle.stream_processor import StreamProcessor
+from pytrickle.frames import VideoFrame, AudioFrame
+from typing import List, Optional
+
+class MyHandler:
+    @model_loader
+    async def load(self):
+        # Load models/resources here
+        ...
+
+    @video_handler
+    def handle_video(self, frame: VideoFrame):
+        # Return None to pass through, VideoFrame, or a tensor/ndarray replacement
+        return None
+
+    @audio_handler
+    def handle_audio(self, frame: AudioFrame):
+        # Return None/[frame]/AudioFrame/List[AudioFrame] or tensor/ndarray samples
+        return None
+
+    @param_updater
+    async def update(self, params: dict):
+        # Update runtime parameters
+        ...
+
+    @on_stream_stop
+    def cleanup(self):
+        # Release resources
+        ...
+
+# Auto-discover decorated handlers and run
+sp = StreamProcessor.from_handlers(MyHandler(), port=8000)
+sp.run()  # blocking
+```
+
+### Parameter validation with Pydantic (optional)
+
+```python
+from pydantic import BaseModel
+from pytrickle.decorators import param_updater
+
+class Params(BaseModel):
+    threshold: float = 0.5
+    enabled: bool = True
+
+class Handler:
+    @param_updater(model=Params)
+    async def update(self, params: Params):
+        # params is a validated model instance
+        ...
+```
+
+### Error handling and sync bridging
+
+- Decorators create async wrappers that run sync code in a thread (`asyncio.to_thread`) so the event loop stays responsive.
+- If your handler raises, the framework logs the error and falls back to pass-through behavior to keep the stream alive.
+- When constructing `StreamProcessor` directly (without decorators), all handlers must be true async callables. Using decorators is recommended because they ensure async wrappers and return normalization.
+
 ## HTTP API
 
 PyTrickle automatically provides a REST API for your video processor:
