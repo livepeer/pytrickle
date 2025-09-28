@@ -25,6 +25,11 @@ from .stream_processor import StreamProcessor
 from .fps_meter import FPSMeter
 from .frame_skipper import FrameSkipConfig
 
+# Video utilities
+from .video_utils import (
+    create_loading_frame,
+)
+
 from . import api
 
 from .version import __version__
@@ -54,5 +59,6 @@ __all__ = [
     "FrameProcessor",
     "FPSMeter",
     "FrameSkipConfig",
+    "create_loading_frame",
     "__version__"
 ] 
