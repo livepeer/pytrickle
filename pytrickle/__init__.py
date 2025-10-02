@@ -29,6 +29,7 @@ from .frame_processor import FrameProcessor
 from .stream_processor import StreamProcessor
 from .fps_meter import FPSMeter
 from .frame_skipper import FrameSkipConfig
+from .security import SecurityConfig, create_security_middleware_stack
 
 from . import api
 
@@ -59,5 +60,7 @@ __all__ = [
     "FrameProcessor",
     "FPSMeter",
     "FrameSkipConfig",
+    "SecurityConfig",
+    "create_security_middleware_stack",
     "__version__"
 ] 
