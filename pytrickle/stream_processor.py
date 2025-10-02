@@ -18,6 +18,59 @@ ParamUpdater = Callable[[Dict[str, Any]], Awaitable[None]]
 OnStreamStop = Callable[[], Awaitable[None]]
 
 class StreamProcessor:
+    @classmethod
+    def from_handlers(
+        cls,
+        handler_instance,
+        send_data_interval: Optional[float] = 0.333,
+        name: str = "stream-processor",
+        port: int = 8000,
+        frame_skip_config: Optional[FrameSkipConfig] = None,
+        **server_kwargs
+    ):
+        """
+        Create StreamProcessor from decorated handler methods.
+
+        Args:
+            handler_instance: Instance with @trickle_handler decorated methods
+            send_data_interval: Interval for sending data
+            name: Processor name
+            port: Server port
+            frame_skip_config: Optional frame skipping configuration
+            **server_kwargs: Additional arguments passed to StreamServer
+
+        Returns:
+            StreamProcessor instance configured with the decorated handlers
+        """
+        handlers = {}
+
+        # Find all decorated handler methods
+        for attr_name in dir(handler_instance):
+            attr = getattr(handler_instance, attr_name)
+            if hasattr(attr, '_trickle_handler'):
+                handler_type = attr._trickle_handler_type
+                handlers[handler_type] = attr
+
+        # Extract handlers directly without conversion
+        video_processor = handlers.get('video')
+        audio_processor = handlers.get('audio')
+        model_loader = handlers.get('model_loader')
+        param_updater = handlers.get('param_updater')
+        on_stream_stop = handlers.get('stream_stop')
+
+        return cls(
+            video_processor=video_processor,
+            audio_processor=audio_processor,
+            model_loader=model_loader,
+            param_updater=param_updater,
+            on_stream_stop=on_stream_stop,
+            send_data_interval=send_data_interval,
+            name=name,
+            port=port,
+            frame_skip_config=frame_skip_config,
+            **server_kwargs
+        )
+
     def __init__(
         self,
         video_processor: Optional[VideoProcessor] = None,
