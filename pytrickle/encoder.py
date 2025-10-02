@@ -99,6 +99,7 @@ def encode_av(
         # Add a new stream to the output using the desired video codec
         target_width = video_meta.get('target_width', DEFAULT_WIDTH)
         target_height = video_meta.get('target_height', DEFAULT_HEIGHT)
+        logger.info(f"Encoding video to {target_width}x{target_height} using codec {video_codec}")
         video_opts = {'video_size': f'{target_width}x{target_height}', 'bf': '0'}
         if video_codec == 'libx264':
             video_opts = video_opts | {'preset': 'superfast', 'tune': 'zerolatency', 'forced-idr': '1'}
@@ -303,7 +304,7 @@ def _log_frame_timestamps(frame_type: str, frame: InputFrame):
     log_duration('post_process_frame', 'frame_end')
     log_duration('frame_init', 'frame_end') 
 
-def default_output_metadata(height: int, width: int):
+def default_output_metadata(width: int, height: int):
     """Generate default metadata for output streams."""
     return {
         'video': {
