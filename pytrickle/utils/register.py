@@ -92,6 +92,7 @@ class RegisterCapability:
         orch_secret: Optional[str] = None,
         capability_name: Optional[str] = None,
         capability_desc: Optional[str] = None,
+        capability_url: Optional[str] = None,
         capability_capacity: Optional[int] = None,
         capability_price_per_unit: Optional[int] = None,
         capability_price_scaling: Optional[int] = None,
@@ -110,7 +111,7 @@ class RegisterCapability:
         - ORCH_SECRET: Orchestrator secret
         - CAPABILITY_NAME: Capability name
         - CAPABILITY_DESCRIPTION: Capability description 
-        - CAPABILITY_URL: Capability URL (always from environment, cannot be overridden)
+        - CAPABILITY_URL: Capability URL
         - CAPABILITY_CAPACITY: Max concurrent streams
         - CAPABILITY_PRICE_PER_UNIT: Price per unit 
         - CAPABILITY_PRICE_SCALING: Price scaling
@@ -128,7 +129,7 @@ class RegisterCapability:
         orch_secret = orch_secret or os.environ.get("ORCH_SECRET", "")
         capability_name = capability_name or os.environ.get("CAPABILITY_NAME", "pytrickle-worker")
         capability_desc = capability_desc or os.environ.get("CAPABILITY_DESCRIPTION", "PyTrickle video processing worker")
-        capability_url = os.environ.get("CAPABILITY_URL", "http://localhost:8000")
+        capability_url = capability_url or os.environ.get("CAPABILITY_URL", "http://localhost:8000")
         capability_capacity = capability_capacity or int(os.environ.get("CAPABILITY_CAPACITY", 1))
         capability_price_per_unit = capability_price_per_unit or int(os.environ.get("CAPABILITY_PRICE_PER_UNIT", 0))
         capability_price_scaling = capability_price_scaling or int(os.environ.get("CAPABILITY_PRICE_SCALING", 1))
@@ -170,7 +171,7 @@ class RegisterCapability:
         
         Args:
             logger: Optional logger instance
-            **kwargs: Any parameters to override (same as register_capability, except capability_url which always comes from CAPABILITY_URL env var)
+            **kwargs: Any parameters to override (same as register_capability)
             
         Returns:
             The registered capability URL (as ParseResult object) if registration succeeded, False otherwise
