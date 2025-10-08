@@ -109,6 +109,18 @@ class FrameProcessor(ABC):
         """
         pass
 
+    async def on_stream_start(self):
+        """
+        Called when a stream starts or client connects.
+        
+        Override this method to perform initialization operations like:
+        - Starting background tasks
+        - Initializing state
+        - Setting up resources
+        - Starting timers or loops
+        """
+        pass
+
     async def on_stream_stop(self):
         """
         Called when a stream stops or client disconnects.

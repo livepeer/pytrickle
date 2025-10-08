@@ -87,6 +87,14 @@ class TrickleClient:
         # Start the protocol
         await self.protocol.start()
         
+        # Call the optional on_stream_start callback after protocol starts
+        if self.frame_processor.on_stream_start:
+            try:
+                await self.frame_processor.on_stream_start()
+                logger.info("Stream start callback executed successfully")
+            except Exception as e:
+                logger.error(f"Error in stream start callback: {e}")
+        
         # Start processing loops
         self.running = True
         

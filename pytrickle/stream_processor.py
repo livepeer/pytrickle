@@ -15,6 +15,7 @@ VideoProcessor = Callable[[VideoFrame], Awaitable[Optional[VideoFrame]]]
 AudioProcessor = Callable[[AudioFrame], Awaitable[Optional[List[AudioFrame]]]]
 ModelLoader = Callable[[Dict[str, Any]], Awaitable[None]]
 ParamUpdater = Callable[[Dict[str, Any]], Awaitable[None]]
+OnStreamStart = Callable[[], Awaitable[None]]
 OnStreamStop = Callable[[], Awaitable[None]]
 
 class StreamProcessor:
@@ -24,6 +25,7 @@ class StreamProcessor:
         audio_processor: Optional[AudioProcessor] = None,
         model_loader: Optional[ModelLoader] = None,
         param_updater: Optional[ParamUpdater] = None,
+        on_stream_start: Optional[OnStreamStart] = None,
         on_stream_stop: Optional[OnStreamStop] = None,
         send_data_interval: Optional[float] = 0.333,
         name: str = "stream-processor",
@@ -39,6 +41,8 @@ class StreamProcessor:
             audio_processor: Async function that processes AudioFrame objects  
             model_loader: Optional async function called during load_model phase
             param_updater: Optional async function called when parameters update
+            on_stream_start: Optional async function called when stream starts
+            on_stream_stop: Optional async function called when stream stops
             send_data_interval: Interval for sending data
             name: Processor name
             port: Server port
@@ -55,6 +59,7 @@ class StreamProcessor:
         self.audio_processor = audio_processor
         self.model_loader = model_loader
         self.param_updater = param_updater
+        self.on_stream_start = on_stream_start
         self.on_stream_stop = on_stream_stop
         self.send_data_interval = send_data_interval
         self.name = name
@@ -68,6 +73,7 @@ class StreamProcessor:
             audio_processor=audio_processor,
             model_loader=model_loader,
             param_updater=param_updater,
+            on_stream_start=on_stream_start,
             on_stream_stop=on_stream_stop,
             name=name
         )
@@ -140,6 +146,7 @@ class _InternalFrameProcessor(FrameProcessor):
         audio_processor: Optional[AudioProcessor] = None,
         model_loader: Optional[ModelLoader] = None,
         param_updater: Optional[ParamUpdater] = None,
+        on_stream_start: Optional[OnStreamStart] = None,
         on_stream_stop: Optional[OnStreamStop] = None,
         name: str = "internal-processor"
     ):
@@ -148,7 +155,8 @@ class _InternalFrameProcessor(FrameProcessor):
         self.audio_processor = audio_processor
         self.model_loader = model_loader
         self.param_updater = param_updater
-        self.on_stream_stop = on_stream_stop
+        self.on_stream_start_callback = on_stream_start
+        self.on_stream_stop_callback = on_stream_stop
         self.name = name
         
         # Frame skipping is handled at TrickleClient level
@@ -207,3 +215,21 @@ class _InternalFrameProcessor(FrameProcessor):
                 logger.info(f"Parameters updated: {params}")
             except Exception as e:
                 logger.error(f"Error updating parameters: {e}")
+    
+    async def on_stream_start(self):
+        """Call user-provided on_stream_start callback."""
+        if self.on_stream_start_callback:
+            try:
+                await self.on_stream_start_callback()
+                logger.info(f"StreamProcessor '{self.name}' stream start callback executed successfully")
+            except Exception as e:
+                logger.error(f"Error in stream start callback: {e}")
+    
+    async def on_stream_stop(self):
+        """Call user-provided on_stream_stop callback."""
+        if self.on_stream_stop_callback:
+            try:
+                await self.on_stream_stop_callback()
+                logger.info(f"StreamProcessor '{self.name}' stream stop callback executed successfully")
+            except Exception as e:
+                logger.error(f"Error in stream stop callback: {e}")
