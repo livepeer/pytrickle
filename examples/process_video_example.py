@@ -80,6 +80,15 @@ async def send_periodic_status():
     except Exception as e:
         logger.error(f"Error in background status task: {e}")
 
+async def on_stream_start():
+    """Called when stream starts - initialize resources."""
+    global background_task_started
+    logger.info("Stream started, initializing resources")
+    
+    # Reset background task flag for new stream
+    background_task_started = False
+    logger.info("Stream initialization complete")
+
 async def on_stream_stop():
     """Called when stream stops - cleanup background tasks."""
     global background_tasks, background_task_started
@@ -206,6 +215,7 @@ if __name__ == "__main__":
         video_processor=process_video,
         model_loader=load_model,
         param_updater=update_params,
+        on_stream_start=on_stream_start,
         on_stream_stop=on_stream_stop,
         name="green-processor",
         port=8000,
