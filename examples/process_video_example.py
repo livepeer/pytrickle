@@ -24,23 +24,20 @@ processor = None
 background_tasks = []
 background_task_started = False
 
-# Static model warmup delay (seconds) so /health stays LOADING until complete
-MODEL_LOAD_DELAY_SECONDS = 3.0
-
 async def load_model(**kwargs):
     """Initialize processor state - called during model loading phase."""
     global intensity, ready, processor
     
-    logger.info("load_model starting (using static warmup delay)")
+    logger.info(f"load_model called with kwargs: {kwargs}")
     
-    # Simulate synchronous warmup so /health stays LOADING during model load
-    if MODEL_LOAD_DELAY_SECONDS > 0:
-        logger.info(f"Simulating model warmup for {MODEL_LOAD_DELAY_SECONDS:.1f}s (server status should be LOADING)")
-        await asyncio.sleep(MODEL_LOAD_DELAY_SECONDS)
+    # Set processor variables from kwargs or use defaults
+    intensity = kwargs.get('intensity', 0.5)
+    intensity = max(0.0, min(1.0, intensity))
     
     # Load the model here if needed
     # model = torch.load('my_model.pth')
     
+    # Note: Cannot start background tasks here as event loop isn't running yet
     # Background task will be started when first frame is processed
     ready = True
     logger.info(f"✅ OpenCV Green processor with horizontal flip ready (intensity: {intensity}, ready: {ready})")
