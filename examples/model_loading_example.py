@@ -5,7 +5,7 @@ Model Loading State Transition Example
 This example demonstrates the sentinel message model loading pattern:
 
 1. Server starts immediately and is available for /health checks
-2. Model loading is triggered automatically via '_load_model' sentinel message
+2. Model loading is triggered automatically via 'load_model' sentinel message
 3. Health endpoint shows LOADING -> IDLE transition during model loading
 4. Uses simple passthrough processing to focus on the model loading behavior
 
@@ -37,7 +37,7 @@ async def load_model(**kwargs):
     """Simulate model loading with realistic delay.
     
     This function is triggered automatically by the StreamProcessor via a 
-    '_load_model' sentinel message sent through the parameter update mechanism.
+    'load_model' sentinel message sent through the parameter update mechanism.
     The server starts immediately and is available for /health checks while 
     this model loading happens in the background.
     """
@@ -94,7 +94,7 @@ async def process_audio(frame: AudioFrame) -> list[AudioFrame]:
 async def update_params(params: dict):
     """Handle parameter updates.
     
-    Note: The '_load_model' sentinel message is automatically filtered out
+    Note: The 'load_model' sentinel message is automatically filtered out
     by the StreamProcessor and won't reach this function.
     """
     logger.info(f"Parameters updated: {params}")

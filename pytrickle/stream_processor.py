@@ -149,7 +149,7 @@ class StreamProcessor:
     async def _trigger_model_loading(self):
         """Trigger model loading via parameter update."""
         try:
-            await self._frame_processor.update_params({"_load_model": True})
+            await self._frame_processor.update_params({"load_model": True})
             logger.debug(f"Model loading triggered via parameter update for '{self.name}'")
         except Exception as e:
             logger.error(f"Failed to trigger model loading: {e}")
@@ -231,7 +231,7 @@ class _InternalFrameProcessor(FrameProcessor):
     async def update_params(self, params: Dict[str, Any]):
         """Update parameters using provided async function."""
         # Handle model loading sentinel message
-        if params.get("_load_model", False):
+        if params.get("load_model", False):
             try:
                 await self.ensure_model_loaded()
                 logger.info(f"Model loaded via parameter update for '{self.name}'")
