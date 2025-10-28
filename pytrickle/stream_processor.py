@@ -7,6 +7,7 @@ from .frames import VideoFrame, AudioFrame, VideoOutput, AudioOutput
 from .frame_processor import FrameProcessor
 from .server import StreamServer
 from .frame_skipper import FrameSkipConfig
+from .security import SecurityConfig
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,8 @@ class StreamProcessor:
         name: str = "stream-processor",
         port: int = 8000,
         frame_skip_config: Optional[FrameSkipConfig] = None,
+        security_config: Optional[SecurityConfig] = None,
+        enable_security: bool = True,
         **server_kwargs
     ):
         """
@@ -47,6 +50,8 @@ class StreamProcessor:
             name: Processor name
             port: Server port
             frame_skip_config: Optional frame skipping configuration (None = no frame skipping)
+            security_config: Optional security configuration (uses defaults if None)
+            enable_security: Whether to enable security middleware (default: True)
             **server_kwargs: Additional arguments passed to StreamServer
         """
         # Validate that processors are async functions
@@ -65,6 +70,8 @@ class StreamProcessor:
         self.name = name
         self.port = port
         self.frame_skip_config = frame_skip_config
+        self.security_config = security_config
+        self.enable_security = enable_security
         self.server_kwargs = server_kwargs
         
         # Create internal frame processor
@@ -83,6 +90,8 @@ class StreamProcessor:
             frame_processor=self._frame_processor,
             port=port,
             frame_skip_config=frame_skip_config,
+            security_config=security_config,
+            enable_security=enable_security,
             **server_kwargs
         )
     

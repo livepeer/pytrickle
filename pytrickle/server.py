@@ -22,6 +22,7 @@ from .frame_processor import FrameProcessor
 from .client import TrickleClient
 from .protocol import TrickleProtocol
 from .frame_skipper import FrameSkipConfig
+from .security import SecurityConfig, create_security_middleware_stack
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,9 @@ class StreamServer:
         app_kwargs: Optional[Dict[str, Any]] = None,
         # Frame skipping configuration
         frame_skip_config: Optional[FrameSkipConfig] = None,
+        # Security configuration
+        security_config: Optional[SecurityConfig] = None,
+        enable_security: bool = True,
 
     ):
         """Initialize StreamServer.
@@ -85,6 +89,8 @@ class StreamServer:
             on_shutdown: List of shutdown handlers
             app_kwargs: Additional kwargs for aiohttp.web.Application
             frame_skip_config: Optional frame skipping configuration (None = no frame skipping)
+            security_config: Optional security configuration (uses defaults if None)
+            enable_security: Whether to enable security middleware (default: True)
         """
         self.frame_processor = frame_processor
         self.port = port
@@ -109,6 +115,10 @@ class StreamServer:
         # Frame skipping configuration
         self.frame_skip_config = frame_skip_config
         
+        # Security configuration
+        self.security_config = security_config
+        self.enable_security = enable_security
+        
         # Stream management - simple and direct
         self.current_client: Optional[TrickleClient] = None
         self.current_params: Optional[StreamStartRequest] = None
@@ -122,7 +132,12 @@ class StreamServer:
             for key, value in app_context.items():
                 self.app[key] = value
 
-        # Setup middleware first (order matters)
+        # Setup security middleware first if enabled
+        if self.enable_security:
+            security_middleware = create_security_middleware_stack(self.security_config)
+            self._setup_middleware(security_middleware)
+        
+        # Setup custom middleware (order matters)
         if middleware:
             self._setup_middleware(middleware)
         
