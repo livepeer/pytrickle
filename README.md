@@ -52,62 +52,63 @@ make build
 
 ## Quick Start
 
-PyTrickle is designed for simplicity. You can create a powerful real-time video processor by providing a few async functions to the `StreamProcessor`. This handles the server, state management, and model loading for you.
+PyTrickle uses the FrameProcessor pattern for building video processing applications. See the complete example in `examples/async_processor_example.py`.
 
-See a complete, runnable example in `examples/model_loading_example.py`.
-
-### Simple Video Processor
-
-Here's how to create a basic video processor that applies a green tint to video frames:
+### Basic FrameProcessor
 
 ```python
-import asyncio
-import logging
-from pytrickle import StreamProcessor
-from pytrickle.frames import VideoFrame
+from pytrickle import FrameProcessor, StreamServer
+from pytrickle.frames import VideoFrame, AudioFrame
+from typing import Optional, List
 
-logging.basicConfig(level=logging.INFO)
+class MyProcessor(FrameProcessor):
+    """Custom video processor with real-time parameter updates."""
+    
+    def __init__(self, intensity: float = 0.5, **kwargs):
+        super().__init__(**kwargs)
+        self.intensity = intensity
+        self.ready = False
+    
+    async def initialize(self):
+        """Initialize and warm up the processor."""
+        # Load your AI model or initialize processing here
+        self.ready = True
+    
+    async def process_video_async(self, frame: VideoFrame) -> Optional[VideoFrame]:
+        """Process video frame asynchronously."""
+        if not self.ready:
+            return frame
+        
+        # Your processing logic here
+        tensor = frame.tensor.clone()
+        # Apply effects, AI models, filters, etc.
+        
+        return frame.replace_tensor(tensor)
+    
+    async def process_audio_async(self, frame: AudioFrame) -> Optional[List[AudioFrame]]:
+        """Process audio frame asynchronously."""
+        return [frame]  # Pass through or process
+    
+    def update_params(self, params: dict):
+        """Update processing parameters in real-time."""
+        if "intensity" in params:
+            self.intensity = float(params["intensity"])
 
-# 1. Define your model loading logic
-async def load_my_model(**kwargs):
-    """Simulate loading a model. Runs in the background without blocking the server."""
-    logging.info("🔄 Model loading started...")
-    await asyncio.sleep(5)  # Simulate a 5-second model load time
-    logging.info("✅ Model loaded successfully!")
-
-# 2. Define your video processing function
-async def apply_green_tint(frame: VideoFrame) -> VideoFrame:
-    """Apply a simple green tint effect to the video."""
-    tensor = frame.tensor.clone()
-    tensor[1] = tensor[1] * 2.0  # Increase green channel
-    return frame.replace_tensor(tensor)
-
-# 3. Define a function to handle real-time parameter updates
-async def handle_parameter_updates(params: dict):
-    """Handle incoming parameters to adjust processing in real-time."""
-    logging.info(f"Parameters updated: {params}")
-
-# 4. Create and run the StreamProcessor
-if __name__ == "__main__":
-    processor = StreamProcessor(
-        video_processor=apply_green_tint,
-        model_loader=load_my_model,
-        param_updater=handle_parameter_updates,
+async def main():
+    # Create and initialize processor
+    processor = MyProcessor(intensity=0.5)
+    await processor.start()
+    
+    # Create app with processor
+    app = StreamServer(
+        frame_processor=processor,
         port=8000,
-        name="green-tint-processor"
+        capability_name="my-video-processor"
     )
-    processor.run()
+    await app.run_forever()
 ```
 
-## Model Loading
-
-PyTrickle features a non-blocking model loading mechanism that allows the server to start immediately and be available for health checks while your model loads in the background.
-
-- **Non-Blocking Startup**: The server starts instantly and responds to `/health` requests with a `LOADING` status.
-- **Automatic Loading**: Your `model_loader` function is triggered automatically after startup.
-- **State Transition**: Once your `model_loader` completes, the server's health status transitions from `LOADING` to `IDLE`, indicating it's ready to process streams.
-
-This robust pattern is ideal for managed environments (like Docker or Kubernetes) where immediate health checks are critical for service orchestration. It is the recommended way to handle model initialization.
+For a complete working example with green tint processing, see [`examples/process_video_example.py`](examples/process_video_example.py) and [`examples/model_loading_example.py`](examples/model_loading_example.py).
 
 ## HTTP API
 
