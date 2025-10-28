@@ -89,7 +89,6 @@ class StreamProcessor:
         # Attach server state to processor for health transitions
         self._frame_processor.attach_state(self.server.state)
     
-    
     async def send_data(self, data: str):
         """Send data to the server."""
         if self.server.current_client is None:
@@ -136,27 +135,24 @@ class StreamProcessor:
     async def run_forever(self):
         """Run the stream processor server forever."""
         try:
-            # Start server first (non-blocking for model loading)
-            server_task = asyncio.create_task(self.server.run_forever())
+            # Trigger model loading immediately (non-blocking due to async lock)
+            # The server will start and be available while model loading happens
+            asyncio.create_task(self._trigger_model_loading())
             
-            # Trigger model loading via parameter update after brief delay
-            async def trigger_model_loading():
-                await asyncio.sleep(0.1)  # Wait for server readiness
-                try:
-                    await self._frame_processor.update_params({"_load_model": True})
-                    logger.debug(f"Model loading triggered via parameter update for '{self.name}'")
-                except Exception as e:
-                    logger.error(f"Failed to trigger model loading: {e}")
-            
-            # Start model loading trigger (fire and forget)
-            asyncio.create_task(trigger_model_loading())
-            
-            # Wait for server to complete
-            await server_task
+            # Run server (this will start immediately and be available for /health checks)
+            await self.server.run_forever()
             
         except Exception as e:
             logger.error(f"Error in StreamProcessor: {e}")
             raise
+    
+    async def _trigger_model_loading(self):
+        """Trigger model loading via parameter update."""
+        try:
+            await self._frame_processor.update_params({"_load_model": True})
+            logger.debug(f"Model loading triggered via parameter update for '{self.name}'")
+        except Exception as e:
+            logger.error(f"Failed to trigger model loading: {e}")
     
     def run(self):
         """Run the stream processor server (blocking)."""

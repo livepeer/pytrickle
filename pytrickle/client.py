@@ -9,7 +9,7 @@ import asyncio
 import logging
 import time
 import json
-from typing import Callable, Optional, Union, Deque, Any
+from typing import Callable, Optional, Deque, Any
 from collections import deque
 
 from .protocol import TrickleProtocol
@@ -17,7 +17,6 @@ from .frames import VideoFrame, AudioFrame, VideoOutput, AudioOutput
 from . import ErrorCallback
 from .frame_processor import FrameProcessor
 from .frame_skipper import AdaptiveFrameSkipper, FrameSkipConfig, FrameProcessingResult
-from .state import PipelineState
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +72,6 @@ class TrickleClient:
             )
         else:
             self.frame_skipper = None
-        
     
     async def start(self, request_id: str = "default"):
         """Start the trickle client."""

@@ -631,8 +631,6 @@ class StreamServer:
         site = web.TCPSite(runner, self.host, self.port)
         await site.start()
         
-        # Do not mark as IDLE here; remain LOADING until model load completes
-        
         logger.info(f"Server started on {self.host}:{self.port}")
         return runner
 
