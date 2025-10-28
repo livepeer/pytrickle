@@ -16,6 +16,12 @@ from pytrickle.state import StreamState, PipelineState
 from pytrickle.test_utils import MockFrameProcessor, create_mock_client
 
 
+def get_stream_route(server, endpoint):
+    """Get the full route path for a streaming endpoint."""
+    prefix = server.route_prefix.rstrip('/')
+    return f"{prefix}/stream/{endpoint}"
+
+
 @pytest_asyncio.fixture
 async def server_with_state():
     """Create a server with state for integration testing."""
@@ -308,7 +314,7 @@ class TestServerStateIntegration:
             client = TestClient(test_server_instance)
             async with client:
                 # Initial state validation
-                resp = await client.get("/api/stream/status")
+                resp = await client.get(get_stream_route(server, "status"))
                 assert resp.status == 200
                 data = await resp.json()
                 assert data["client_active"] is False
@@ -323,7 +329,7 @@ class TestServerStateIntegration:
                 server.current_client = mock_client
                 
                 # Validate state changes are reflected
-                resp = await client.get("/api/stream/status")
+                resp = await client.get(get_stream_route(server, "status"))
                 assert resp.status == 200
                 data = await resp.json()
                 assert data["client_active"] is True
@@ -334,7 +340,7 @@ class TestServerStateIntegration:
                 server.state.set_active_client(False)
                 server.state.update_active_streams(0)
                 
-                resp = await client.get("/api/stream/status")
+                resp = await client.get(get_stream_route(server, "status"))
                 assert resp.status == 200
                 data = await resp.json()
                 assert data["client_active"] is False
