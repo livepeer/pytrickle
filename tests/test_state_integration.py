@@ -183,9 +183,9 @@ class TestFrameProcessorStateIntegration:
         processor = MockFrameProcessor()
         state = StreamState()
         
-        # Initially has default state
+        # Initially has no state attached
         assert hasattr(processor, 'state')
-        assert processor.state is not None
+        assert processor.state is None
         
         # Attach new state
         processor.attach_state(state)

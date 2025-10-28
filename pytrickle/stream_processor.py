@@ -1,13 +1,12 @@
 import asyncio
 import inspect
 import logging
-from typing import Optional, Callable, Dict, Any, List, Union, Awaitable, Coroutine
+from typing import Optional, Callable, Dict, Any, List, Union, Awaitable
 
-from .frames import VideoFrame, AudioFrame, VideoOutput, AudioOutput
+from .frames import VideoFrame, AudioFrame
 from .frame_processor import FrameProcessor
 from .server import StreamServer
 from .frame_skipper import FrameSkipConfig
-from .state import PipelineState
 
 logger = logging.getLogger(__name__)
 
@@ -68,9 +67,6 @@ class StreamProcessor:
         self.frame_skip_config = frame_skip_config
         self.server_kwargs = server_kwargs
         
-        # Track background tasks to prevent memory leaks
-        self._background_tasks = set()
-        
         # Create internal frame processor
         self._frame_processor = _InternalFrameProcessor(
             video_processor=video_processor,
@@ -90,39 +86,9 @@ class StreamProcessor:
             **server_kwargs
         )
 
-        # Ensure state coherence: attach server state to processor for health transitions
-        try:
-            self._frame_processor.attach_state(self.server.state)
-        except Exception:
-            # If attach fails for any reason, log and continue (non-fatal)
-            logger.warning("Failed to attach server state to frame processor")
-
-        # Register server startup hook to preload model on same event loop
-        async def _on_startup(_app):
-            try:
-                task = asyncio.create_task(self._preload_model_background())
-                self._background_tasks.add(task)
-                task.add_done_callback(self._background_tasks.discard)
-            except Exception as e:
-                logger.error(f"Failed to schedule background preload: {e}")
-
-        try:
-            self.server.app.on_startup.append(_on_startup)
-        except Exception as e:
-            logger.error(f"Failed to register startup hook: {e}")
+        # Attach server state to processor for health transitions
+        self._frame_processor.attach_state(self.server.state)
     
-    async def _preload_model_background(self):
-        """Background model preloading with proper error handling."""
-        try:
-            
-            # Use the thread-safe wrapper
-            await self._frame_processor.ensure_model_loaded()
-            
-            logger.info(f"StreamProcessor '{self.name}' model preloaded on server startup")
-            
-        except Exception as e:
-            self._frame_processor.state.set_error(str(e))
-            logger.error(f"Error preloading model on startup: {e}")
     
     async def send_data(self, data: str):
         """Send data to the server."""
@@ -167,23 +133,30 @@ class StreamProcessor:
             logger.error(f"Error sending input frame: {e}")
             return False
 
-    async def cleanup(self):
-        """Cancel all background tasks to prevent memory leaks."""
-        if self._background_tasks:
-            logger.info(f"Cancelling {len(self._background_tasks)} background tasks")
-            for task in self._background_tasks.copy():
-                if not task.done():
-                    task.cancel()
-            # Wait for tasks to complete cancellation
-            await asyncio.gather(*self._background_tasks, return_exceptions=True)
-            self._background_tasks.clear()
-    
     async def run_forever(self):
         """Run the stream processor server forever."""
         try:
-            await self.server.run_forever()
-        finally:
-            await self.cleanup()
+            # Start server first (non-blocking for model loading)
+            server_task = asyncio.create_task(self.server.run_forever())
+            
+            # Trigger model loading via parameter update after brief delay
+            async def trigger_model_loading():
+                await asyncio.sleep(0.1)  # Wait for server readiness
+                try:
+                    await self._frame_processor.update_params({"_load_model": True})
+                    logger.debug(f"Model loading triggered via parameter update for '{self.name}'")
+                except Exception as e:
+                    logger.error(f"Failed to trigger model loading: {e}")
+            
+            # Start model loading trigger (fire and forget)
+            asyncio.create_task(trigger_model_loading())
+            
+            # Wait for server to complete
+            await server_task
+            
+        except Exception as e:
+            logger.error(f"Error in StreamProcessor: {e}")
+            raise
     
     def run(self):
         """Run the stream processor server (blocking)."""
@@ -261,6 +234,17 @@ class _InternalFrameProcessor(FrameProcessor):
     
     async def update_params(self, params: Dict[str, Any]):
         """Update parameters using provided async function."""
+        # Handle model loading sentinel message
+        if params.get("_load_model", False):
+            try:
+                await self.ensure_model_loaded()
+                logger.info(f"Model loaded via parameter update for '{self.name}'")
+                return  # Don't pass sentinel to user param_updater
+            except Exception as e:
+                logger.error(f"Error loading model via parameter update: {e}")
+                raise
+        
+        # Normal parameter updates
         if self.param_updater:
             try:
                 await self.param_updater(params)

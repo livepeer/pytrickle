@@ -10,7 +10,7 @@ from abc import ABC, abstractmethod
 from typing import Optional, Any, Dict, List
 from .frames import VideoFrame, AudioFrame
 from . import ErrorCallback
-from .state import StreamState, PipelineState
+from .state import StreamState
 
 logger = logging.getLogger(__name__)
 
@@ -55,21 +55,22 @@ class FrameProcessor(ABC):
             **init_kwargs: Additional kwargs passed to load_model() method
         """
         self.error_callback = error_callback
-        self.state = StreamState()
-        
-        # Model loading protection
+        self.state: Optional[StreamState] = None
+        self._model_loaded = False
         self._model_load_lock = asyncio.Lock()
 
     def attach_state(self, state: StreamState) -> None:
-        """Attach a pipeline state manager and set IDLE if model already loaded."""
+        """Attach a pipeline state manager."""
         self.state = state
 
     async def ensure_model_loaded(self, **kwargs):
         """Thread-safe wrapper that ensures model is loaded exactly once."""
         async with self._model_load_lock:
-            if not self.state.get_state() == PipelineState.IDLE:
+            if not self._model_loaded:
                 await self.load_model(**kwargs)
-                self.state.set_startup_complete()
+                self._model_loaded = True
+                if self.state:
+                    self.state.set_startup_complete()
                 logger.debug(f"Model loaded for {self.__class__.__name__}")
             else:
                 logger.debug(f"Model already loaded for {self.__class__.__name__}")
