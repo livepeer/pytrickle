@@ -2,6 +2,9 @@
 Loading utilities for PyTrickle - Video loading overlay generation.
 
 This module provides utilities for creating loading overlay frames for video processing.
+
+Loading overlay inspired by ai-runner feature (Credit to @victorges):
+https://github.com/livepeer/ai-runner/blob/main/runner/app/live/process/loading_overlay.py
 """
 
 import math
