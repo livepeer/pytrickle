@@ -11,11 +11,11 @@ animated loading overlay frames instead of showing the original video.
 
 import asyncio
 import logging
-import time
 import torch
 from pytrickle import StreamProcessor
 from pytrickle.frames import VideoFrame
 from pytrickle.frame_skipper import FrameSkipConfig
+from pytrickle.utils.register import RegisterCapability
 import numpy as np
 from pytrickle.video_utils import create_loading_frame
 
@@ -27,8 +27,6 @@ show_loading = False
 loading_message = "Loading..."
 ready = False
 processor = None
-background_tasks = []
-background_task_started = False
 
 # Loading animation state
 frame_counter = 0
@@ -47,70 +45,20 @@ async def load_model(**kwargs):
         logger.info("Simulating model loading...")
         await asyncio.sleep(2)  # Simulate loading time
     
-    # Note: Cannot start background tasks here as event loop isn't running yet
-    # Background task will be started when first frame is processed
     ready = True
     logger.info(f"✅ Loading Overlay processor ready (show_loading: {show_loading}, ready: {ready})")
 
-def start_background_task():
-    """Start the background task if not already started."""
-    global background_task_started, background_tasks
-    
-    if not background_task_started and processor:
-        task = asyncio.create_task(send_periodic_status())
-        background_tasks.append(task)
-        background_task_started = True
-        logger.info("Started background status task")
-
-async def send_periodic_status():
-    """Background task that sends periodic status updates."""
-    global processor
-    counter = 0
-    try:
-        while True:
-            await asyncio.sleep(5.0)  # Send status every 5 seconds
-            counter += 1
-            if processor:
-                status_data = {
-                    "type": "status_update",
-                    "counter": counter,
-                    "show_loading": show_loading,
-                    "loading_message": loading_message,
-                    "ready": ready,
-                    "timestamp": time.time()
-                }
-                success = await processor.send_data(str(status_data))
-                if success:
-                    logger.info(f"Sent status update #{counter}")
-                else:
-                    logger.warning(f"Failed to send status update #{counter}, stopping background task")
-                    break  # Exit the loop if sending fails
-    except asyncio.CancelledError:
-        logger.info("Background status task cancelled")
-        raise
-    except Exception as e:
-        logger.error(f"Error in background status task: {e}")
-
 async def on_stream_stop():
-    """Called when stream stops - cleanup background tasks."""
-    global background_tasks, background_task_started
-    logger.info("Stream stopped, cleaning up background tasks")
-    
-    for task in background_tasks:
-        if not task.done():
-            task.cancel()
-            logger.info("Cancelled background task")
-    
-    background_tasks.clear()
-    background_task_started = False  # Reset flag for next stream
-    logger.info("All background tasks cleaned up")
+    """Called when stream stops - cleanup resources."""
+    logger.info("Stream stopped, cleaning up resources")
+    # Reset frame counter for next stream
+    global frame_counter
+    frame_counter = 0
+    logger.info("Resources cleaned up")
 
 async def process_video(frame: VideoFrame) -> VideoFrame:
     """Process video frame - show loading overlay if enabled, otherwise passthrough."""
     global show_loading, ready, frame_counter, loading_message
-    
-    # Start background task on first frame (when event loop is running)
-    start_background_task()
     
     # Increment frame counter for animations
     frame_counter += 1
@@ -146,8 +94,8 @@ async def process_video(frame: VideoFrame) -> VideoFrame:
         logger.error(f"Unexpected tensor shape: {frame_tensor.shape}")
         return frame
     
-    # Create loading overlay frame using utility
-    loading_frame = create_loading_frame(width, height, loading_message, frame_counter)
+    # Create loading overlay frame using utility (RGB format to match tensor expectations)
+    loading_frame = create_loading_frame(width, height, loading_message, frame_counter, color_format="RGB")
     
     # Convert to tensor format matching input
     loading_tensor = torch.from_numpy(loading_frame.astype(np.float32))
@@ -186,6 +134,15 @@ async def update_params(params: dict):
         if old != loading_message:
             logger.info(f"Loading message: {old} → {loading_message}")
 
+async def register_with_orchestrator(app):
+    """Register this capability with the orchestrator on startup."""
+    registrar = RegisterCapability(logger)
+    result = await registrar.register_capability()
+    if result:
+        logger.info(f"✅ Successfully registered capability with orchestrator: {result}")
+    else:
+        logger.info("ℹ️  Orchestrator registration skipped (no ORCH_URL/ORCH_SECRET provided)")
+
 # Create and run StreamProcessor
 if __name__ == "__main__":
     logger.info("Starting Loading Overlay Processor")
@@ -205,5 +162,8 @@ if __name__ == "__main__":
         name="loading-overlay",
         port=8001,  # Different port from process_video_example
         frame_skip_config=FrameSkipConfig(),
+        # Add orchestrator registration on startup
+        on_startup=[register_with_orchestrator],
+        route_prefix="/"
     )
     processor.run()
