@@ -7,11 +7,35 @@ import inspect
 import logging
 from dataclasses import dataclass
 from functools import wraps
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional, TYPE_CHECKING, Union, overload, Protocol
+
+if TYPE_CHECKING:
+    from .frames import VideoFrame, AudioFrame
 
 logger = logging.getLogger(__name__)
 
 HandlerFn = Callable[..., Any]
+
+# Protocol definitions for decorated handler signatures
+class VideoHandlerProtocol(Protocol):
+    """Protocol for decorated video handler functions."""
+    async def __call__(self, *args: Any, **kwargs: Any) -> Optional["VideoFrame"]: ...
+
+class AudioHandlerProtocol(Protocol):
+    """Protocol for decorated audio handler functions."""
+    async def __call__(self, *args: Any, **kwargs: Any) -> Optional[List["AudioFrame"]]: ...
+
+class ModelLoaderProtocol(Protocol):
+    """Protocol for decorated model loader functions."""
+    async def __call__(self, *args: Any, **kwargs: Any) -> None: ...
+
+class ParamUpdaterProtocol(Protocol):
+    """Protocol for decorated parameter updater functions."""
+    async def __call__(self, *args: Any, **kwargs: Any) -> None: ...
+
+class LifecycleProtocol(Protocol):
+    """Protocol for decorated lifecycle functions (start/stop)."""
+    async def __call__(self, *args: Any, **kwargs: Any) -> None: ...
 
 
 @dataclass
@@ -117,7 +141,6 @@ def _is_coro_fn(func: HandlerFn) -> bool:
 
 async def _maybe_await(func: HandlerFn, *args: Any, **kwargs: Any) -> Any:
     """Await *func* if necessary, running sync call in a thread."""
-
     if _is_coro_fn(func):
         return await func(*args, **kwargs)
     return await asyncio.to_thread(func, *args, **kwargs)
@@ -150,15 +173,28 @@ def _wrap_handler(
     return outer
 
 
+@overload
+def video_handler(
+    func: Callable[..., Any],
+) -> VideoHandlerProtocol: ...
+
+@overload
+def video_handler(
+    func: None = ...,
+    *,
+    description: Optional[str] = ...,
+    validate_signature: bool = ...,
+) -> Callable[[Callable[..., Any]], VideoHandlerProtocol]: ...
+
 def video_handler(
     func: Optional[HandlerFn] = None,
     *,
     description: Optional[str] = None,
     validate_signature: bool = False,
-) -> Callable[[HandlerFn], Callable[..., Awaitable[Any]]]:
+) -> Union[VideoHandlerProtocol, Callable[[Callable[..., Any]], VideoHandlerProtocol]]:
     """Decorator for video frame handlers with output normalisation."""
 
-    def decorate(target: HandlerFn) -> Callable[..., Awaitable[Any]]:
+    def decorate(target: HandlerFn) -> VideoHandlerProtocol:
         from .frames import VideoFrame
         import numpy as np
         import torch
@@ -191,7 +227,7 @@ def video_handler(
 
         setattr(wrapper, "_trickle_handler", True)
         setattr(wrapper, "_trickle_handler_type", "video")
-        setattr(wrapper, "_trickle_handler_info", getattr(target, "_trickle_handler_info"))
+        setattr(wrapper, "_trickle_handler_info", getattr(target, "_trickle_handler_info", None))
         return wrapper
 
     if func is None:
@@ -199,15 +235,28 @@ def video_handler(
     return decorate(func)
 
 
+@overload
+def audio_handler(
+    func: Callable[..., Any],
+) -> AudioHandlerProtocol: ...
+
+@overload
+def audio_handler(
+    func: None = ...,
+    *,
+    description: Optional[str] = ...,
+    validate_signature: bool = ...,
+) -> Callable[[Callable[..., Any]], AudioHandlerProtocol]: ...
+
 def audio_handler(
     func: Optional[HandlerFn] = None,
     *,
     description: Optional[str] = None,
     validate_signature: bool = False,
-) -> Callable[[HandlerFn], Callable[..., Awaitable[Any]]]:
+) -> Union[AudioHandlerProtocol, Callable[[Callable[..., Any]], AudioHandlerProtocol]]:
     """Decorator for audio frame handlers with output normalisation."""
 
-    def decorate(target: HandlerFn) -> Callable[..., Awaitable[Any]]:
+    def decorate(target: HandlerFn) -> AudioHandlerProtocol:
         from .frames import AudioFrame
         import numpy as np
         import torch
@@ -242,7 +291,7 @@ def audio_handler(
 
         setattr(wrapper, "_trickle_handler", True)
         setattr(wrapper, "_trickle_handler_type", "audio")
-        setattr(wrapper, "_trickle_handler_info", getattr(target, "_trickle_handler_info"))
+        setattr(wrapper, "_trickle_handler_info", getattr(target, "_trickle_handler_info", None))
         return wrapper
 
     if func is None:
@@ -250,88 +299,172 @@ def audio_handler(
     return decorate(func)
 
 
+@overload
+def model_loader(
+    func: Callable[..., Any],
+) -> ModelLoaderProtocol: ...
+
+@overload
+def model_loader(
+    func: None = ...,
+    *,
+    description: Optional[str] = ...,
+    validate_signature: bool = ...,
+) -> Callable[[Callable[..., Any]], ModelLoaderProtocol]: ...
+
 def model_loader(
     func: Optional[HandlerFn] = None,
     *,
     description: Optional[str] = None,
     validate_signature: bool = False,
-) -> Callable[[HandlerFn], Callable[..., Awaitable[Any]]]:
+) -> Union[ModelLoaderProtocol, Callable[[Callable[..., Any]], ModelLoaderProtocol]]:
     """Decorator for model loader handlers."""
 
-    def decorate(target: HandlerFn) -> Callable[..., Awaitable[Any]]:
+    def decorate(target: HandlerFn) -> ModelLoaderProtocol:
         base_wrapper = _wrap_handler(
             "model_loader",
             description=description or f"Model loader: {target.__name__}",
             validate_signature=validate_signature,
         )(target)
 
-        return base_wrapper
+        @wraps(target)
+        async def wrapper(*args: Any, **kwargs: Any) -> None:
+            await base_wrapper(*args, **kwargs)
+            return None
+
+        setattr(wrapper, "_trickle_handler", True)
+        setattr(wrapper, "_trickle_handler_type", "model_loader")
+        setattr(wrapper, "_trickle_handler_info", getattr(target, "_trickle_handler_info", None))
+        return wrapper
 
     if func is None:
         return decorate
     return decorate(func)
 
+
+@overload
+def param_updater(
+    func: Callable[..., Any],
+) -> ParamUpdaterProtocol: ...
+
+@overload
+def param_updater(
+    func: None = ...,
+    *,
+    description: Optional[str] = ...,
+    validate_signature: bool = ...,
+) -> Callable[[Callable[..., Any]], ParamUpdaterProtocol]: ...
 
 def param_updater(
     func: Optional[HandlerFn] = None,
     *,
     description: Optional[str] = None,
     validate_signature: bool = False,
-) -> Callable[[HandlerFn], Callable[..., Awaitable[Any]]]:
+) -> Union[ParamUpdaterProtocol, Callable[[Callable[..., Any]], ParamUpdaterProtocol]]:
     """Decorator for parameter update handlers."""
 
-    def decorate(target: HandlerFn) -> Callable[..., Awaitable[Any]]:
+    def decorate(target: HandlerFn) -> ParamUpdaterProtocol:
         base_wrapper = _wrap_handler(
             "param_updater",
             description=description or f"Parameter updater: {target.__name__}",
             validate_signature=validate_signature,
         )(target)
+        @wraps(target)
 
-        return base_wrapper
+        async def wrapper(*args: Any, **kwargs: Any) -> None:
+            await base_wrapper(*args, **kwargs)
+            return None
+
+        setattr(wrapper, "_trickle_handler", True)
+        setattr(wrapper, "_trickle_handler_type", "param_updater")
+        setattr(wrapper, "_trickle_handler_info", getattr(target, "_trickle_handler_info", None))
+        return wrapper
 
     if func is None:
         return decorate
     return decorate(func)
 
+
+@overload
+def on_stream_start(
+    func: Callable[..., Any],
+) -> LifecycleProtocol: ...
+
+@overload
+def on_stream_start(
+    func: None = ...,
+    *,
+    description: Optional[str] = ...,
+    validate_signature: bool = ...,
+) -> Callable[[Callable[..., Any]], LifecycleProtocol]: ...
 
 def on_stream_start(
     func: Optional[HandlerFn] = None,
     *,
     description: Optional[str] = None,
     validate_signature: bool = False,
-) -> Callable[[HandlerFn], Callable[..., Awaitable[Any]]]:
+) -> Union[LifecycleProtocol, Callable[[Callable[..., Any]], LifecycleProtocol]]:
     """Decorator for stream start lifecycle handler."""
 
-    def decorate(target: HandlerFn) -> Callable[..., Awaitable[Any]]:
+    def decorate(target: HandlerFn) -> LifecycleProtocol:
         base_wrapper = _wrap_handler(
             "stream_start",
             description=description or f"Stream start handler: {target.__name__}",
             validate_signature=validate_signature,
         )(target)
+        @wraps(target)
 
-        return base_wrapper
+        async def wrapper(*args: Any, **kwargs: Any) -> None:
+            await base_wrapper(*args, **kwargs)
+            return None
+
+        setattr(wrapper, "_trickle_handler", True)
+        setattr(wrapper, "_trickle_handler_type", "stream_start")
+        setattr(wrapper, "_trickle_handler_info", getattr(target, "_trickle_handler_info", None))
+        return wrapper
 
     if func is None:
         return decorate
     return decorate(func)
 
 
+@overload
+def on_stream_stop(
+    func: Callable[..., Any],
+) -> LifecycleProtocol: ...
+
+@overload
+def on_stream_stop(
+    func: None = ...,
+    *,
+    description: Optional[str] = ...,
+    validate_signature: bool = ...,
+) -> Callable[[Callable[..., Any]], LifecycleProtocol]: ...
+
 def on_stream_stop(
     func: Optional[HandlerFn] = None,
     *,
     description: Optional[str] = None,
     validate_signature: bool = False,
-) -> Callable[[HandlerFn], Callable[..., Awaitable[Any]]]:
+) -> Union[LifecycleProtocol, Callable[[Callable[..., Any]], LifecycleProtocol]]:
     """Decorator for stream stop lifecycle handler."""
 
-    def decorate(target: HandlerFn) -> Callable[..., Awaitable[Any]]:
+    def decorate(target: HandlerFn) -> LifecycleProtocol:
         base_wrapper = _wrap_handler(
             "stream_stop",
             description=description or f"Stream stop handler: {target.__name__}",
             validate_signature=validate_signature,
         )(target)
+        @wraps(target)
+        
+        async def wrapper(*args: Any, **kwargs: Any) -> None:
+            await base_wrapper(*args, **kwargs)
+            return None
 
-        return base_wrapper
+        setattr(wrapper, "_trickle_handler", True)
+        setattr(wrapper, "_trickle_handler_type", "stream_stop")
+        setattr(wrapper, "_trickle_handler_info", getattr(target, "_trickle_handler_info", None))
+        return wrapper
 
     if func is None:
         return decorate
