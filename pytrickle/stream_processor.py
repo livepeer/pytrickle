@@ -1,9 +1,10 @@
 import asyncio
 import inspect
 import logging
-from typing import Optional, Callable, Dict, Any, List, Union, Awaitable, Coroutine
+from typing import Optional, Callable, Dict, Any, List, Union, Awaitable
 
-from .frames import VideoFrame, AudioFrame, VideoOutput, AudioOutput
+from .decorators import HandlerRegistry
+from .frames import VideoFrame, AudioFrame
 from .frame_processor import FrameProcessor
 from .server import StreamServer
 from .frame_skipper import FrameSkipConfig
@@ -13,12 +14,61 @@ logger = logging.getLogger(__name__)
 # Type aliases for processing functions
 VideoProcessor = Callable[[VideoFrame], Awaitable[Optional[VideoFrame]]]
 AudioProcessor = Callable[[AudioFrame], Awaitable[Optional[List[AudioFrame]]]]
-ModelLoader = Callable[[Dict[str, Any]], Awaitable[None]]
+ModelLoader = Callable[..., Awaitable[None]]
 ParamUpdater = Callable[[Dict[str, Any]], Awaitable[None]]
 OnStreamStart = Callable[[], Awaitable[None]]
 OnStreamStop = Callable[[], Awaitable[None]]
 
 class StreamProcessor:
+    @classmethod
+    def from_handlers(
+        cls,
+        handler_instance: Any,
+        *,
+        send_data_interval: Optional[float] = 0.333,
+        name: str = "stream-processor",
+        port: int = 8000,
+        frame_skip_config: Optional[FrameSkipConfig] = None,
+        **server_kwargs
+    ):
+        """Construct a StreamProcessor by discovering handlers on *handler_instance*."""
+
+        registry = HandlerRegistry()
+
+        for attr_name in dir(handler_instance):
+            if attr_name.startswith("_"):
+                continue
+            attr = getattr(handler_instance, attr_name)
+            info = getattr(attr, "_trickle_handler_info", None)
+            if not info:
+                continue
+            registry.register(attr, info)
+
+        video_processor = registry.get("video")
+        audio_processor = registry.get("audio")
+        model_loader = registry.get("model_loader")
+        param_updater = registry.get("param_updater")
+        on_stream_start = registry.get("stream_start")
+        on_stream_stop = registry.get("stream_stop")
+
+        processor = cls(
+            video_processor=video_processor,
+            audio_processor=audio_processor,
+            model_loader=model_loader,
+            param_updater=param_updater,
+            on_stream_start=on_stream_start,
+            on_stream_stop=on_stream_stop,
+            send_data_interval=send_data_interval,
+            name=name,
+            port=port,
+            frame_skip_config=frame_skip_config,
+            **server_kwargs
+        )
+
+        processor._handler_registry = registry
+
+        return processor
+
     def __init__(
         self,
         video_processor: Optional[VideoProcessor] = None,
@@ -50,10 +100,19 @@ class StreamProcessor:
             **server_kwargs: Additional arguments passed to StreamServer
         """
         # Validate that processors are async functions
-        if video_processor is not None and not inspect.iscoroutinefunction(video_processor):
-            raise ValueError("video_processor must be an async function")
-        if audio_processor is not None and not inspect.iscoroutinefunction(audio_processor):
-            raise ValueError("audio_processor must be an async function")
+        for name_label, processor_fn in {
+            "video_processor": video_processor,
+            "audio_processor": audio_processor,
+            "model_loader": model_loader,
+            "param_updater": param_updater,
+            "on_stream_start": on_stream_start,
+            "on_stream_stop": on_stream_stop,
+        }.items():
+            if processor_fn is None:
+                continue
+            candidate = getattr(processor_fn, "__func__", processor_fn)
+            if not inspect.iscoroutinefunction(candidate):
+                raise ValueError(f"{name_label} must be an async function")
             
         self.video_processor = video_processor
         self.audio_processor = audio_processor
@@ -66,6 +125,7 @@ class StreamProcessor:
         self.port = port
         self.frame_skip_config = frame_skip_config
         self.server_kwargs = server_kwargs
+        self._handler_registry: Optional[HandlerRegistry] = None
         
         # Create internal frame processor
         self._frame_processor = _InternalFrameProcessor(
