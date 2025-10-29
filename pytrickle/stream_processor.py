@@ -1,9 +1,9 @@
 import asyncio
 import inspect
 import logging
-from typing import Optional, Callable, Dict, Any, List, Union, Awaitable, Coroutine
+from typing import Optional, Callable, Dict, Any, List, Union, Awaitable
 
-from .frames import VideoFrame, AudioFrame, VideoOutput, AudioOutput
+from .frames import VideoFrame, AudioFrame
 from .frame_processor import FrameProcessor
 from .server import StreamServer
 from .frame_skipper import FrameSkipConfig
@@ -85,6 +85,9 @@ class StreamProcessor:
             frame_skip_config=frame_skip_config,
             **server_kwargs
         )
+
+        # Attach server state to processor for health transitions
+        self._frame_processor.attach_state(self.server.state)
     
     async def send_data(self, data: str):
         """Send data to the server."""
@@ -131,7 +134,25 @@ class StreamProcessor:
 
     async def run_forever(self):
         """Run the stream processor server forever."""
-        await self.server.run_forever()
+        try:
+            # Trigger model loading immediately (non-blocking due to async lock)
+            # The server will start and be available while model loading happens
+            asyncio.create_task(self._trigger_model_loading())
+            
+            # Run server (this will start immediately and be available for /health checks)
+            await self.server.run_forever()
+            
+        except Exception as e:
+            logger.error(f"Error in StreamProcessor: {e}")
+            raise
+    
+    async def _trigger_model_loading(self):
+        """Trigger model loading via parameter update."""
+        try:
+            await self._frame_processor.update_params({"load_model": True})
+            logger.debug(f"Model loading triggered via parameter update for '{self.name}'")
+        except Exception as e:
+            logger.error(f"Failed to trigger model loading: {e}")
     
     def run(self):
         """Run the stream processor server (blocking)."""
@@ -209,6 +230,17 @@ class _InternalFrameProcessor(FrameProcessor):
     
     async def update_params(self, params: Dict[str, Any]):
         """Update parameters using provided async function."""
+        # Handle model loading sentinel message
+        if params.get("load_model", False):
+            try:
+                await self.ensure_model_loaded()
+                logger.info(f"Model loaded via parameter update for '{self.name}'")
+                return  # Don't pass sentinel to user param_updater
+            except Exception as e:
+                logger.error(f"Error loading model via parameter update: {e}")
+                raise
+        
+        # Normal parameter updates
         if self.param_updater:
             try:
                 await self.param_updater(params)
