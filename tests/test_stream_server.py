@@ -12,8 +12,12 @@ from aiohttp.test_utils import TestServer, TestClient
 from unittest.mock import patch, MagicMock, AsyncMock
 
 from pytrickle.server import StreamServer
-from pytrickle.state import PipelineState
 from pytrickle.test_utils import MockFrameProcessor, create_mock_client
+
+def get_stream_route(server, endpoint):
+    """Get the full route path for a streaming endpoint."""
+    prefix = server.route_prefix.rstrip('/')
+    return f"{prefix}/stream/{endpoint}"
 
 
 @pytest_asyncio.fixture
@@ -71,7 +75,7 @@ class TestStreamingEndpoints:
                 }
             }
             
-            resp = await client.post("/api/stream/start", json=payload)
+            resp = await client.post(get_stream_route(server, "start"), json=payload)
             assert resp.status == 200
             
             data = await resp.json()
@@ -109,7 +113,7 @@ class TestStreamingEndpoints:
         assert server.state.active_client is True
         
         # Verify this reflects in status endpoint
-        resp = await client.get("/api/stream/status")
+        resp = await client.get(get_stream_route(server, "status"))
         assert resp.status == 200
         data = await resp.json()
         assert data["active_streams"] == 1
@@ -138,7 +142,7 @@ class TestStreamingEndpoints:
             # Missing publish_url and gateway_request_id
         }
         
-        resp = await client.post("/api/stream/start", json=payload)
+        resp = await client.post(get_stream_route(server, "start"), json=payload)
         assert resp.status == 400
         
         # Verify state wasn't changed
@@ -160,7 +164,7 @@ class TestStreamingEndpoints:
         
         payload = {"intensity": 0.9}
         
-        resp = await client.post("/api/stream/params", json=payload)
+        resp = await client.post(get_stream_route(server, "params"), json=payload)
         assert resp.status == 200
         
         data = await resp.json()
@@ -182,7 +186,7 @@ class TestStreamingEndpoints:
         
         payload = {"intensity": 0.9}
         
-        resp = await client.post("/api/stream/params", json=payload)
+        resp = await client.post(get_stream_route(server, "params"), json=payload)
         assert resp.status == 400
         
         data = await resp.json()
@@ -194,7 +198,7 @@ class TestStreamingEndpoints:
         """Test status endpoint when no client is active."""
         client, server = test_server
         
-        resp = await client.get("/api/stream/status")
+        resp = await client.get(get_stream_route(server, "status"))
         assert resp.status == 200
         
         data = await resp.json()
@@ -218,7 +222,7 @@ class TestStreamingEndpoints:
             gateway_request_id="status-test"
         )
         
-        resp = await client.get("/api/stream/status")
+        resp = await client.get(get_stream_route(server, "status"))
         assert resp.status == 200
         
         data = await resp.json()
@@ -243,7 +247,7 @@ class TestStreamingEndpoints:
         server.state.set_active_client(True)
         server.state.update_active_streams(1)
         
-        resp = await client.post("/api/stream/stop", json={})
+        resp = await client.post(get_stream_route(server, "stop"), json={})
         assert resp.status == 200
         
         data = await resp.json()
@@ -267,7 +271,7 @@ class TestStreamingEndpoints:
         """Test stop stream when no stream is active."""
         client, server = test_server
         
-        resp = await client.post("/api/stream/stop", json={})
+        resp = await client.post(get_stream_route(server, "stop"), json={})
         assert resp.status == 400
         
         data = await resp.json()
@@ -287,7 +291,7 @@ class TestStateManagement:
         server.state.update_active_streams(1)
         server.state.set_active_client(True)
         
-        resp = await client.get("/api/stream/status")
+        resp = await client.get(get_stream_route(server, "status"))
         assert resp.status == 200
         data = await resp.json()
         assert data["active_streams"] == 1
@@ -296,7 +300,7 @@ class TestStateManagement:
         server.state.update_active_streams(0)
         server.state.set_active_client(False)
         
-        resp = await client.get("/api/stream/status")
+        resp = await client.get(get_stream_route(server, "status"))
         assert resp.status == 200
         data = await resp.json()
         assert data["active_streams"] == 0
@@ -316,7 +320,7 @@ class TestStateManagement:
         assert data == {"status": "ERROR"}
         
         # Verify status endpoint reflects error
-        resp = await client.get("/api/stream/status")
+        resp = await client.get(get_stream_route(server, "status"))
         assert resp.status == 200
         data = await resp.json()
         assert server.state.is_error()
@@ -329,6 +333,78 @@ class TestStateManagement:
         assert resp.status == 200
         data = await resp.json()
         assert data["status"] in ["IDLE", "LOADING"]  # Should be back to normal
+
+
+class TestDynamicRoutes:
+    """Test dynamic route functionality with different prefixes."""
+
+    @pytest.mark.parametrize("route_prefix", ["/", "/api", "/v1", "/custom"])
+    @pytest.mark.asyncio
+    async def test_routes_with_different_prefixes(self, route_prefix):
+        """Test that routes work with different prefixes."""
+        processor = MockFrameProcessor()
+        
+        server = StreamServer(
+            frame_processor=processor,
+            port=0,
+            route_prefix=route_prefix,
+            capability_name="test-model",
+            pipeline="test-pipeline",
+            version="1.0.0",
+        )
+        
+        # Attach state and mark ready
+        processor.attach_state(server.state)
+        server.state.set_startup_complete()
+        
+        # Test that routes are constructed correctly
+        expected_start_route = f"{route_prefix.rstrip('/')}/stream/start"
+        actual_start_route = get_stream_route(server, "start")
+        assert actual_start_route == expected_start_route
+        
+        expected_status_route = f"{route_prefix.rstrip('/')}/stream/status"
+        actual_status_route = get_stream_route(server, "status")
+        assert actual_status_route == expected_status_route
+        
+        expected_params_route = f"{route_prefix.rstrip('/')}/stream/params"
+        actual_params_route = get_stream_route(server, "params")
+        assert actual_params_route == expected_params_route
+        
+        expected_stop_route = f"{route_prefix.rstrip('/')}/stream/stop"
+        actual_stop_route = get_stream_route(server, "stop")
+        assert actual_stop_route == expected_stop_route
+
+    @pytest.mark.asyncio
+    async def test_functional_test_with_custom_prefix(self):
+        """Test that endpoints actually work with a custom prefix."""
+        processor = MockFrameProcessor()
+        
+        server = StreamServer(
+            frame_processor=processor,
+            port=0,
+            route_prefix="/api/v2",
+            capability_name="test-model",
+            pipeline="test-pipeline",
+            version="1.0.0",
+        )
+        
+        # Attach state and mark ready
+        processor.attach_state(server.state)
+        server.state.set_startup_complete()
+
+        app = server.get_app()
+        test_server_instance = TestServer(app)
+        
+        async with test_server_instance:
+            client = TestClient(test_server_instance)
+            async with client:
+                # Test status endpoint with custom prefix
+                resp = await client.get(get_stream_route(server, "status"))
+                assert resp.status == 200
+                
+                data = await resp.json()
+                assert data["client_active"] is False
+                assert data["active_streams"] == 0
 
 
 class TestErrorHandling:
@@ -351,7 +427,7 @@ class TestErrorHandling:
                 "gateway_request_id": "error-test"
             }
             
-            resp = await client.post("/api/stream/start", json=payload)
+            resp = await client.post(get_stream_route(server, "start"), json=payload)
             # API call succeeds, but client will fail in background
             assert resp.status == 200
             
@@ -385,7 +461,7 @@ class TestErrorHandling:
             
             # Send multiple concurrent requests
             tasks = [
-                client.post("/api/stream/start", json=payload)
+                client.post(get_stream_route(server, "start"), json=payload)
                 for _ in range(3)
             ]
             

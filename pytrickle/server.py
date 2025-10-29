@@ -52,7 +52,7 @@ class StreamServer:
         app_context: Optional[Dict[str, Any]] = None,
         health_check_interval: float = 5.0,
         enable_default_routes: bool = True,
-        route_prefix: str = "/api",
+        route_prefix: str = "/",
         host: str = "0.0.0.0",
         # Startup/shutdown hooks
         on_startup: Optional[List[Callable]] = None,
