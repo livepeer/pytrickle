@@ -158,7 +158,7 @@ async def main() -> None:
     processor = StreamProcessor.from_handlers(
         handlers,
         name="grayscale-chipmunk-demo",
-        port=8001,
+        port=8000,
     )
     
     # Explicitly call load_model to initialize the handlers
