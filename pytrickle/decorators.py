@@ -7,10 +7,9 @@ import inspect
 import logging
 from dataclasses import dataclass
 from functools import wraps
-from typing import Any, Awaitable, Callable, Dict, List, Optional, TYPE_CHECKING, Union, overload, Protocol
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Union, overload, Protocol
 
-if TYPE_CHECKING:
-    from .frames import VideoFrame, AudioFrame
+from .frames import VideoFrame, AudioFrame
 
 logger = logging.getLogger(__name__)
 
@@ -19,11 +18,11 @@ HandlerFn = Callable[..., Any]
 # Protocol definitions for decorated handler signatures
 class VideoHandlerProtocol(Protocol):
     """Protocol for decorated video handler functions."""
-    async def __call__(self, *args: Any, **kwargs: Any) -> Optional["VideoFrame"]: ...
+    async def __call__(self, *args: Any, **kwargs: Any) -> Optional[VideoFrame]: ...
 
 class AudioHandlerProtocol(Protocol):
     """Protocol for decorated audio handler functions."""
-    async def __call__(self, *args: Any, **kwargs: Any) -> Optional[List["AudioFrame"]]: ...
+    async def __call__(self, *args: Any, **kwargs: Any) -> Optional[List[AudioFrame]]: ...
 
 class ModelLoaderProtocol(Protocol):
     """Protocol for decorated model loader functions."""
@@ -195,7 +194,6 @@ def video_handler(
     """Decorator for video frame handlers with output normalisation."""
 
     def decorate(target: HandlerFn) -> VideoHandlerProtocol:
-        from .frames import VideoFrame
         import numpy as np
         import torch
 
@@ -257,7 +255,6 @@ def audio_handler(
     """Decorator for audio frame handlers with output normalisation."""
 
     def decorate(target: HandlerFn) -> AudioHandlerProtocol:
-        from .frames import AudioFrame
         import numpy as np
         import torch
 
