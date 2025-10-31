@@ -45,11 +45,11 @@ class GrayscaleChipmunkHandlers:
     def __init__(self) -> None:
         self.config = EffectConfig()
 
-    @model_loader(description="Warm up any dependencies before streaming")
+    @model_loader
     async def load(self, **_: dict) -> None:
         logger.info("Model loader invoked; nothing to warm up for this demo.")
 
-    @video_handler(description="Convert frames to grayscale")
+    @video_handler
     async def handle_video(self, frame: VideoFrame) -> VideoFrame:
         """Apply a grayscale conversion while keeping the tensor layout intact."""
 
@@ -78,7 +78,7 @@ class GrayscaleChipmunkHandlers:
 
         return frame.replace_tensor(grayscale_rgb)
 
-    @audio_handler(description="Pitch-shift audio for a chipmunk effect")
+    @audio_handler
     async def handle_audio(self, frame: AudioFrame) -> List[AudioFrame]:
         """Raise audio pitch by compressing the time axis and resampling to original length."""
 
@@ -135,8 +135,8 @@ class GrayscaleChipmunkHandlers:
         chipmunk_frame = frame.replace_samples(processed)
         return [chipmunk_frame]
 
-    @param_updater(description="Update grayscale or pitch settings")
-    async def update_config(self, params: dict) -> None:
+    @param_updater
+    async def update_config(self, params: dict ) -> None:
         if "grayscale" in params:
             self.config.grayscale_enabled = bool(params["grayscale"])
         if "chipmunk_factor" in params:
@@ -147,7 +147,7 @@ class GrayscaleChipmunkHandlers:
             except (TypeError, ValueError):
                 logger.warning("Invalid chipmunk_factor %s; keeping %s", params["chipmunk_factor"], self.config.chipmunk_factor)
 
-    @on_stream_stop(description="Reset runtime state when the stream ends")
+    @on_stream_stop
     async def on_stop(self) -> None:
         logger.info("Stream stopped; restoring defaults.")
         self.config = EffectConfig()
