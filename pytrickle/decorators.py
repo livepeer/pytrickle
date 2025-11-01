@@ -226,10 +226,9 @@ def video_handler(
         if frame is None or not isinstance(frame, VideoFrame):
             return None
 
-        original_frame: VideoFrame = frame
         # Validate basic shape compatibility
         try:
-            original_frame: VideoFrame = frame
+            original_frame = frame
             orig = original_frame.tensor
 
             orig_ndim = orig.dim() if hasattr(orig, "dim") else getattr(orig, "ndim", -1)
