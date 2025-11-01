@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Literal, Optional, overload
+from typing import Any, Callable, Dict, Literal, Optional, overload, Protocol, List, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .frames import VideoFrame, AudioFrame
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +28,26 @@ HandlerKind = Literal[
     "stream_stop",
 ]
 
+# Protocol definitions for decorated handler signatures
+class VideoHandlerProtocol(Protocol):
+    """Protocol for decorated video handler functions."""
+    async def __call__(self, *args: VideoFrame) -> Optional[VideoFrame]: ...
+
+class AudioHandlerProtocol(Protocol):
+    """Protocol for decorated audio handler functions."""
+    async def __call__(self, *args: AudioFrame) -> Optional[List[AudioFrame]]: ...
+
+class ModelLoaderProtocol(Protocol):
+    """Protocol for decorated model loader functions."""
+    async def __call__(self, *args: Any, **kwargs: Any) -> None: ...
+
+class ParamUpdaterProtocol(Protocol):
+    """Protocol for decorated parameter updater functions."""
+    async def __call__(self, params: Dict[str, Any]) -> None: ...
+
+class LifecycleProtocol(Protocol):
+    """Protocol for decorated lifecycle functions (start/stop)."""
+    async def __call__(self) -> None: ...    
 
 @dataclass
 class HandlerInfo:
@@ -61,21 +84,22 @@ class HandlerRegistry:
 
     # Overloads for typed lookups
     @overload
-    def get(self, handler_type: Literal["video"]) -> Optional[HandlerFn]: ...
+    def get(self, handler_type: Literal["video"]) -> Optional[VideoHandlerProtocol]: ...
 
     @overload
-    def get(self, handler_type: Literal["audio"]) -> Optional[HandlerFn]: ...
+    def get(self, handler_type: Literal["audio"]) -> Optional[AudioHandlerProtocol]: ...
 
     @overload
-    def get(self, handler_type: Literal["model_loader"]) -> Optional[HandlerFn]: ...
+    def get(self, handler_type: Literal["model_loader"]) -> Optional[ModelLoaderProtocol]: ...
 
     @overload
-    def get(self, handler_type: Literal["param_updater"]) -> Optional[HandlerFn]: ...
+    def get(self, handler_type: Literal["param_updater"]) -> Optional[ParamUpdaterProtocol]: ...
 
     @overload
     def get(
         self, handler_type: Literal["stream_start", "stream_stop"]
-    ) -> Optional[HandlerFn]: ...
+    ) -> Optional[LifecycleProtocol]: ...
 
     def get(self, handler_type: HandlerKind) -> Optional[HandlerFn]:
         return self._handlers.get(handler_type)
+

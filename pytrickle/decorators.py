@@ -10,47 +10,31 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    Dict,
+    Concatenate,
     List,
     Optional,
-    overload,
-    Protocol,
-    get_type_hints,
     ParamSpec,
-    cast,
-    Concatenate,
     TypeVar,
+    get_type_hints,
+    overload,
 )
 
-from .frames import VideoFrame, AudioFrame
-from .registry import HandlerFn, HandlerInfo, HandlerKind
+from .frames import AudioFrame, VideoFrame
+from .registry import (
+    AudioHandlerProtocol,
+    HandlerFn,
+    HandlerInfo,
+    HandlerKind,
+    LifecycleProtocol,
+    ModelLoaderProtocol,
+    ParamUpdaterProtocol,
+    VideoHandlerProtocol,
+)
 
 logger = logging.getLogger(__name__)
 
 P = ParamSpec("P")
 T = TypeVar("T")
-
-# Protocol definitions for decorated handler signatures
-class VideoHandlerProtocol(Protocol):
-    """Protocol for decorated video handler functions."""
-    async def __call__(self, *args: VideoFrame) -> Optional[VideoFrame]: ...
-
-class AudioHandlerProtocol(Protocol):
-    """Protocol for decorated audio handler functions."""
-    async def __call__(self, *args: AudioFrame) -> Optional[List[AudioFrame]]: ...
-
-class ModelLoaderProtocol(Protocol):
-    """Protocol for decorated model loader functions."""
-    async def __call__(self, *args: Any, **kwargs: Any) -> None: ...
-
-class ParamUpdaterProtocol(Protocol):
-    """Protocol for decorated parameter updater functions."""
-    async def __call__(self, params: Dict[str, Any]) -> None: ...
-
-class LifecycleProtocol(Protocol):
-    """Protocol for decorated lifecycle functions (start/stop)."""
-    async def __call__(self) -> None: ...
-
 
 def _validate_signature(func: HandlerFn, handler_type: HandlerKind) -> None:
     signature = inspect.signature(func)
@@ -165,16 +149,16 @@ def _wrap_handler(
 @overload
 def video_handler(
     func: Callable[Concatenate[VideoFrame, P], Any],
-) -> Callable[Concatenate[VideoFrame, P], Awaitable[Optional[VideoFrame]]]: ...
+) -> VideoHandlerProtocol: ...
 
 @overload
 def video_handler(
     func: Callable[Concatenate[T, VideoFrame, P], Any],
-) -> Callable[Concatenate[T, VideoFrame, P], Awaitable[Optional[VideoFrame]]]: ...
+) -> VideoHandlerProtocol: ...
 
 def video_handler(
     func: HandlerFn,
-) -> Any:
+) -> VideoHandlerProtocol:
     """Decorator for video frame handlers with output normalisation.
     
     The decorated function must have a VideoFrame parameter (named 'frame' or type-annotated).
@@ -255,21 +239,21 @@ def video_handler(
     setattr(wrapper, "_trickle_handler", True)
     setattr(wrapper, "_trickle_handler_type", "video")
     setattr(wrapper, "_trickle_handler_info", getattr(func, "_trickle_handler_info", None))
-    return cast(Callable[..., Awaitable[Optional[VideoFrame]]], wrapper)
+    return wrapper
 
 @overload
 def audio_handler(
     func: Callable[Concatenate[AudioFrame, P], Any],
-) -> Callable[Concatenate[AudioFrame, P], Awaitable[Optional[List[AudioFrame]]]]: ...
+) -> AudioHandlerProtocol: ...
 
 @overload
 def audio_handler(
     func: Callable[Concatenate[T, AudioFrame, P], Any],
-) -> Callable[Concatenate[T, AudioFrame, P], Awaitable[Optional[List[AudioFrame]]]]: ...
+) -> AudioHandlerProtocol: ...
 
 def audio_handler(
     func: HandlerFn,
-) -> Any:
+) -> AudioHandlerProtocol:
     """Decorator for audio frame handlers with output normalisation.
     
     The decorated function must have an AudioFrame parameter (named 'frame' or type-annotated).
@@ -338,7 +322,7 @@ def audio_handler(
     setattr(wrapper, "_trickle_handler", True)
     setattr(wrapper, "_trickle_handler_type", "audio")
     setattr(wrapper, "_trickle_handler_info", getattr(func, "_trickle_handler_info", None))
-    return cast(Callable[..., Awaitable[Optional[List[AudioFrame]]]], wrapper)
+    return wrapper
 
 
 def model_loader(

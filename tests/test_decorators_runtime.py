@@ -1,5 +1,4 @@
 import logging
-from fractions import Fraction
 
 import numpy as np
 import pytest
