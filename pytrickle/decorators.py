@@ -5,111 +5,86 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-from dataclasses import dataclass
 from functools import wraps
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Union, overload, Protocol
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Concatenate,
+    List,
+    Optional,
+    ParamSpec,
+    TypeVar,
+    get_type_hints,
+    overload,
+)
 
-from .frames import VideoFrame, AudioFrame
+from .frames import AudioFrame, VideoFrame
+from .registry import (
+    AudioHandlerProtocol,
+    HandlerFn,
+    HandlerInfo,
+    HandlerKind,
+    LifecycleProtocol,
+    ModelLoaderProtocol,
+    ParamUpdaterProtocol,
+    VideoHandlerProtocol,
+)
 
 logger = logging.getLogger(__name__)
 
-HandlerFn = Callable[..., Any]
+P = ParamSpec("P")
+T = TypeVar("T")
 
-# Protocol definitions for decorated handler signatures
-class VideoHandlerProtocol(Protocol):
-    """Protocol for decorated video handler functions."""
-    async def __call__(self, *args: Any, **kwargs: Any) -> Optional[VideoFrame]: ...
-
-class AudioHandlerProtocol(Protocol):
-    """Protocol for decorated audio handler functions."""
-    async def __call__(self, *args: Any, **kwargs: Any) -> Optional[List[AudioFrame]]: ...
-
-class ModelLoaderProtocol(Protocol):
-    """Protocol for decorated model loader functions."""
-    async def __call__(self, *args: Any, **kwargs: Any) -> None: ...
-
-class ParamUpdaterProtocol(Protocol):
-    """Protocol for decorated parameter updater functions."""
-    async def __call__(self, *args: Any, **kwargs: Any) -> None: ...
-
-class LifecycleProtocol(Protocol):
-    """Protocol for decorated lifecycle functions (start/stop)."""
-    async def __call__(self, *args: Any, **kwargs: Any) -> None: ...
-
-
-@dataclass
-class HandlerInfo:
-    """Metadata captured for each registered handler."""
-
-    handler_type: str
-    function_name: str
-    description: Optional[str] = None
-    signature: Optional[str] = None
-
-
-class HandlerRegistry:
-    """Registry that stores the active handlers for a component."""
-
-    def __init__(self) -> None:
-        self._handlers: Dict[str, HandlerFn] = {}
-        self._info: Dict[str, HandlerInfo] = {}
-
-    def register(self, handler: HandlerFn, info: HandlerInfo) -> None:
-        """Register a handler, warning if another handler is replaced."""
-
-        if info.handler_type in self._handlers:
-            previous = self._info[info.handler_type].function_name
-            logger.warning(
-                "Overwriting handler '%s': %s -> %s",
-                info.handler_type,
-                previous,
-                info.function_name,
-            )
-        self._handlers[info.handler_type] = handler
-        self._info[info.handler_type] = info
-
-    def get(self, handler_type: str) -> Optional[HandlerFn]:
-        """Return the handler for the given type, if registered."""
-
-        return self._handlers.get(handler_type)
-
-
-def _validate_signature(func: HandlerFn, handler_type: str) -> None:
-    """Log a warning if the handler signature looks unexpected."""
-
+def _validate_signature(func: HandlerFn, handler_type: HandlerKind) -> None:
     signature = inspect.signature(func)
-    parameters = list(signature.parameters.keys())
+    parameters = list(signature.parameters.values())
 
-    expected_args: Dict[str, List[str]] = {
-        "video": ["frame"],
-        "audio": ["frame"],
-        "model_loader": [],
-        "param_updater": ["params"],
-        "stream_start": [],
-        "stream_stop": [],
-    }
-    expected = expected_args.get(handler_type, [])
+    # Strip self if method handler
+    if parameters and parameters[0].name == "self":
+        parameters = parameters[1:]
 
-    if parameters and parameters[0] == "self":
-        expected = ["self", *expected]
+    if handler_type in ("video", "audio"):
+        expected_type = VideoFrame if handler_type == "video" else AudioFrame
 
-    missing = [name for name in expected if name not in parameters]
-    if missing:
-        logger.warning(
-            "Handler '%s' (%s) missing params %s. Expected %s, got %s",
-            func.__name__,
-            handler_type,
-            missing,
-            expected,
-            parameters,
+        # Try annotations
+        try:
+            hints = get_type_hints(func)
+        except Exception:
+            hints = {}
+
+        type_ok = any(
+            hints.get(p.name) is expected_type
+            for p in parameters
         )
+
+        name_ok = any(
+            p.name == "frame" for p in parameters
+        )
+
+        if not (type_ok or name_ok):
+            logger.warning(
+                "%s handler '%s' has no parameter matching VideoFrame/AudioFrame. "
+                "Expected a param annotated as %s or named 'frame'. Got: %s",
+                handler_type,
+                func.__name__,
+                expected_type.__name__,
+                [p.name for p in parameters],
+            )
+
+    # param_updater
+    elif handler_type == "param_updater":
+        if not parameters:
+            logger.warning(
+                "Param updater '%s' has no parameters. Expected something like (params: dict).",
+                func.__name__,
+            )
 
 
 def trickle_handler(
-    handler_type: str,
-    *,
+    handler_type: HandlerKind,
     description: Optional[str] = None,
-    validate_signature: bool = False,
+    validate_signature: bool = True,
 ) -> Callable[[HandlerFn], HandlerFn]:
     """Base decorator that tags a function as a PyTrickle handler."""
 
@@ -117,10 +92,10 @@ def trickle_handler(
         if validate_signature:
             _validate_signature(func, handler_type)
 
+        desc = description or f"{handler_type} handler: {func.__name__}"
         info = HandlerInfo(
             handler_type=handler_type,
-            function_name=func.__name__,
-            description=description,
+            description=desc,
             signature=str(inspect.signature(func)),
         )
 
@@ -146,10 +121,9 @@ async def _maybe_await(func: HandlerFn, *args: Any, **kwargs: Any) -> Any:
 
 
 def _wrap_handler(
-    handler_type: str,
-    *,
+    handler_type: HandlerKind,
     description: Optional[str] = None,
-    validate_signature: bool = False,
+    validate_signature: bool = True,
 ) -> Callable[[Callable[..., Any]], Callable[..., Awaitable[Any]]]:
     """Common decorator factory for handler wrappers."""
 
@@ -174,295 +148,274 @@ def _wrap_handler(
 
 @overload
 def video_handler(
-    func: Callable[..., Any],
+    func: Callable[Concatenate[VideoFrame, P], Any],
 ) -> VideoHandlerProtocol: ...
 
 @overload
 def video_handler(
-    func: None = ...,
-    *,
-    description: Optional[str] = ...,
-    validate_signature: bool = ...,
-) -> Callable[[Callable[..., Any]], VideoHandlerProtocol]: ...
+    func: Callable[Concatenate[T, VideoFrame, P], Any],
+) -> VideoHandlerProtocol: ...
 
 def video_handler(
-    func: Optional[HandlerFn] = None,
-    *,
-    description: Optional[str] = None,
-    validate_signature: bool = False,
-) -> Union[VideoHandlerProtocol, Callable[[Callable[..., Any]], VideoHandlerProtocol]]:
-    """Decorator for video frame handlers with output normalisation."""
+    func: HandlerFn,
+) -> VideoHandlerProtocol:
+    """Decorator for video frame handlers with output normalisation.
+    
+    The decorated function must have a VideoFrame parameter (named 'frame' or type-annotated).
+    The description is automatically generated from the function name.
+    
+    Type checking: This decorator enforces that the decorated function has a VideoFrame
+    parameter. Type checkers will report errors if you use AudioFrame or other types.
+    
+    Examples:
+        @video_handler
+        async def process(frame: VideoFrame) -> VideoFrame:
+            ...
+        
+        @video_handler
+        async def blur(self, frame: VideoFrame) -> VideoFrame:
+            ...
+    """
+    import numpy as np
+    import torch
 
-    def decorate(target: HandlerFn) -> VideoHandlerProtocol:
-        import numpy as np
-        import torch
+    base_wrapper = _wrap_handler(
+        "video",
+        description=f"Video handler: {func.__name__}",
+        validate_signature=True,
+    )(func)
 
-        base_wrapper = _wrap_handler(
-            "video",
-            description=description or f"Video handler: {target.__name__}",
-            validate_signature=validate_signature,
-        )(target)
+    shape_warn_count = 0
 
-        @wraps(target)
-        async def wrapper(*args: Any, **kwargs: Any) -> Optional[VideoFrame]:
-            frame = kwargs.get("frame") if "frame" in kwargs else (args[-1] if args else None)
-            result = await base_wrapper(*args, **kwargs)
+    def _maybe_warn_shape_mismatch(result_shape: Any, orig_shape: Any) -> None:
+        nonlocal shape_warn_count
+        shape_warn_count += 1
+        # Rate-limit warnings: first 3 occurrences, then every 100th
+        if shape_warn_count <= 3 or shape_warn_count % 100 == 0:
+            logger.warning(
+                "Video handler '%s' returned output with unexpected shape %s; "
+                "expected same ndim and channels in (1, 3) as input %s. (seen=%d)",
+                func.__name__, result_shape, orig_shape, shape_warn_count,
+            )
 
-            if result is None:
-                return None
-            if isinstance(result, VideoFrame):
-                return result
-            if frame is None or not isinstance(frame, VideoFrame):
-                return None
+    @wraps(func)
+    async def wrapper(*args: Any, **kwargs: Any) -> Optional[VideoFrame]:
+        frame = kwargs.get("frame") if "frame" in kwargs else (args[-1] if args else None)
+        result = await base_wrapper(*args, **kwargs)
 
-            original_frame: VideoFrame = frame
-            if isinstance(result, torch.Tensor):
-                return original_frame.replace_tensor(result)
-            if isinstance(result, np.ndarray):
-                tensor = torch.from_numpy(result)
-                return original_frame.replace_tensor(tensor)
+        if result is None:
+            return None
+        if isinstance(result, VideoFrame):
+            return result
+        if frame is None or not isinstance(frame, VideoFrame):
             return None
 
-        setattr(wrapper, "_trickle_handler", True)
-        setattr(wrapper, "_trickle_handler_type", "video")
-        setattr(wrapper, "_trickle_handler_info", getattr(target, "_trickle_handler_info", None))
-        return wrapper
+        # Validate basic shape compatibility
+        try:
+            original_frame = frame
+            orig = original_frame.tensor
 
-    if func is None:
-        return decorate
-    return decorate(func)
+            orig_ndim = orig.dim() if hasattr(orig, "dim") else getattr(orig, "ndim", -1)
 
+            if torch is not None and torch.is_tensor(result):
+                if result.dim() == getattr(orig, "dim", lambda: -1)() and result.shape[-1] in (1, 3):
+                    return original_frame.replace_tensor(result)
+                _maybe_warn_shape_mismatch(getattr(result, "shape", None), getattr(orig, "shape", None))
+                return None
+            if np is not None and isinstance(result, np.ndarray):
+                if result.ndim == orig_ndim and result.shape[-1] in (1, 3):
+                    if torch is not None:
+                        return original_frame.replace_tensor(torch.from_numpy(result))
+                    # Torch not available: cannot produce a Tensor for replace_tensor
+                    logger.warning("Received numpy array but torch is unavailable; dropping frame")
+                    return None
+                _maybe_warn_shape_mismatch(getattr(result, "shape", None), getattr(orig, "shape", None))
+                return None
+        except Exception:
+            logger.exception("Error normalizing video handler output")
+            return None
+        return None
+
+    setattr(wrapper, "_trickle_handler", True)
+    setattr(wrapper, "_trickle_handler_type", "video")
+    setattr(wrapper, "_trickle_handler_info", getattr(func, "_trickle_handler_info", None))
+    return wrapper
 
 @overload
 def audio_handler(
-    func: Callable[..., Any],
+    func: Callable[Concatenate[AudioFrame, P], Any],
 ) -> AudioHandlerProtocol: ...
 
 @overload
 def audio_handler(
-    func: None = ...,
-    *,
-    description: Optional[str] = ...,
-    validate_signature: bool = ...,
-) -> Callable[[Callable[..., Any]], AudioHandlerProtocol]: ...
+    func: Callable[Concatenate[T, AudioFrame, P], Any],
+) -> AudioHandlerProtocol: ...
 
 def audio_handler(
-    func: Optional[HandlerFn] = None,
-    *,
-    description: Optional[str] = None,
-    validate_signature: bool = False,
-) -> Union[AudioHandlerProtocol, Callable[[Callable[..., Any]], AudioHandlerProtocol]]:
-    """Decorator for audio frame handlers with output normalisation."""
+    func: HandlerFn,
+) -> AudioHandlerProtocol:
+    """Decorator for audio frame handlers with output normalisation.
+    
+    The decorated function must have an AudioFrame parameter (named 'frame' or type-annotated).
+    The description is automatically generated from the function name.
+    
+    Type checking: This decorator enforces that the decorated function has an AudioFrame
+    parameter. Type checkers will report errors if you use VideoFrame or other types.
+    
+    Examples:
+        @audio_handler
+        async def process(frame: AudioFrame) -> List[AudioFrame]:
+            ...
+        
+        @audio_handler
+        async def echo(self, frame: AudioFrame) -> List[AudioFrame]:
+            ...
+    """
+    import numpy as np
+    import torch
 
-    def decorate(target: HandlerFn) -> AudioHandlerProtocol:
-        import numpy as np
-        import torch
+    base_wrapper = _wrap_handler(
+        "audio",
+        description=f"Audio handler: {func.__name__}",
+        validate_signature=True,
+    )(func)
 
-        base_wrapper = _wrap_handler(
-            "audio",
-            description=description or f"Audio handler: {target.__name__}",
-            validate_signature=validate_signature,
-        )(target)
+    type_warn_count = 0
 
-        @wraps(target)
-        async def wrapper(*args: Any, **kwargs: Any) -> Optional[List[AudioFrame]]:
-            frame = kwargs.get("frame") if "frame" in kwargs else (args[-1] if args else None)
-            result = await base_wrapper(*args, **kwargs)
+    def _maybe_warn_invalid_type(result: Any) -> None:
+        nonlocal type_warn_count
+        type_warn_count += 1
+        if type_warn_count <= 3 or type_warn_count % 100 == 0:
+            logger.warning(
+                "Audio handler '%s' returned unsupported type %s; expected List[AudioFrame], AudioFrame, torch.Tensor, or numpy.ndarray. (seen=%d)",
+                func.__name__, type(result).__name__, type_warn_count,
+            )
 
-            if result is None:
-                return None
-            if isinstance(result, list):
-                return result
-            if isinstance(result, AudioFrame):
-                return [result]
-            if frame is None or not isinstance(frame, AudioFrame):
-                return None
+    @wraps(func)
+    async def wrapper(*args: Any, **kwargs: Any) -> Optional[List[AudioFrame]]:
+        frame = kwargs.get("frame") if "frame" in kwargs else (args[-1] if args else None)
+        result = await base_wrapper(*args, **kwargs)
 
+        if result is None:
+            return None
+        if isinstance(result, list):
+            return result
+        if isinstance(result, AudioFrame):
+            return [result]
+        if frame is None or not isinstance(frame, AudioFrame):
+            return None
+
+        try:
             original_frame: AudioFrame = frame
-            if isinstance(result, torch.Tensor):
+            if torch is not None and torch.is_tensor(result):
                 samples = result.detach().cpu().numpy()
                 return [original_frame.replace_samples(samples)]
-            if isinstance(result, np.ndarray):
+            if np is not None and isinstance(result, np.ndarray):
                 return [original_frame.replace_samples(result)]
+            # Unsupported type: issue a rate-limited warning for parity with video handler
+            _maybe_warn_invalid_type(result)
+        except Exception:
+            logger.exception("Error normalizing audio handler output")
             return None
+        return None
 
-        setattr(wrapper, "_trickle_handler", True)
-        setattr(wrapper, "_trickle_handler_type", "audio")
-        setattr(wrapper, "_trickle_handler_info", getattr(target, "_trickle_handler_info", None))
-        return wrapper
+    setattr(wrapper, "_trickle_handler", True)
+    setattr(wrapper, "_trickle_handler_type", "audio")
+    setattr(wrapper, "_trickle_handler_info", getattr(func, "_trickle_handler_info", None))
+    return wrapper
 
-    if func is None:
-        return decorate
-    return decorate(func)
-
-
-@overload
-def model_loader(
-    func: Callable[..., Any],
-) -> ModelLoaderProtocol: ...
-
-@overload
-def model_loader(
-    func: None = ...,
-    *,
-    description: Optional[str] = ...,
-    validate_signature: bool = ...,
-) -> Callable[[Callable[..., Any]], ModelLoaderProtocol]: ...
 
 def model_loader(
-    func: Optional[HandlerFn] = None,
-    *,
-    description: Optional[str] = None,
-    validate_signature: bool = False,
-) -> Union[ModelLoaderProtocol, Callable[[Callable[..., Any]], ModelLoaderProtocol]]:
-    """Decorator for model loader handlers."""
+    func: HandlerFn,
+) -> ModelLoaderProtocol:
+    """Decorator for model loader handlers.
+    
+    The description is automatically generated from the function name.
+    """
+    base_wrapper = _wrap_handler(
+        "model_loader",
+        description=f"Model loader: {func.__name__}",
+        validate_signature=True,
+    )(func)
 
-    def decorate(target: HandlerFn) -> ModelLoaderProtocol:
-        base_wrapper = _wrap_handler(
-            "model_loader",
-            description=description or f"Model loader: {target.__name__}",
-            validate_signature=validate_signature,
-        )(target)
+    @wraps(func)
+    async def wrapper(*args: Any, **kwargs: Any) -> None:
+        await base_wrapper(*args, **kwargs)
+        return None
 
-        @wraps(target)
-        async def wrapper(*args: Any, **kwargs: Any) -> None:
-            await base_wrapper(*args, **kwargs)
-            return None
+    setattr(wrapper, "_trickle_handler", True)
+    setattr(wrapper, "_trickle_handler_type", "model_loader")
+    setattr(wrapper, "_trickle_handler_info", getattr(func, "_trickle_handler_info", None))
+    return wrapper
 
-        setattr(wrapper, "_trickle_handler", True)
-        setattr(wrapper, "_trickle_handler_type", "model_loader")
-        setattr(wrapper, "_trickle_handler_info", getattr(target, "_trickle_handler_info", None))
-        return wrapper
-
-    if func is None:
-        return decorate
-    return decorate(func)
-
-
-@overload
-def param_updater(
-    func: Callable[..., Any],
-) -> ParamUpdaterProtocol: ...
-
-@overload
-def param_updater(
-    func: None = ...,
-    *,
-    description: Optional[str] = ...,
-    validate_signature: bool = ...,
-) -> Callable[[Callable[..., Any]], ParamUpdaterProtocol]: ...
 
 def param_updater(
-    func: Optional[HandlerFn] = None,
-    *,
-    description: Optional[str] = None,
-    validate_signature: bool = False,
-) -> Union[ParamUpdaterProtocol, Callable[[Callable[..., Any]], ParamUpdaterProtocol]]:
-    """Decorator for parameter update handlers."""
+    func: HandlerFn,
+) -> ParamUpdaterProtocol:
+    """Decorator for parameter update handlers.
+    
+    The description is automatically generated from the function name.
+    """
+    base_wrapper = _wrap_handler(
+        "param_updater",
+        description=f"Parameter updater: {func.__name__}",
+        validate_signature=True,
+    )(func)
 
-    def decorate(target: HandlerFn) -> ParamUpdaterProtocol:
-        base_wrapper = _wrap_handler(
-            "param_updater",
-            description=description or f"Parameter updater: {target.__name__}",
-            validate_signature=validate_signature,
-        )(target)
-        @wraps(target)
+    @wraps(func)
+    async def wrapper(*args: Any, **kwargs: Any) -> None:
+        await base_wrapper(*args, **kwargs)
+        return None
 
-        async def wrapper(*args: Any, **kwargs: Any) -> None:
-            await base_wrapper(*args, **kwargs)
-            return None
+    setattr(wrapper, "_trickle_handler", True)
+    setattr(wrapper, "_trickle_handler_type", "param_updater")
+    setattr(wrapper, "_trickle_handler_info", getattr(func, "_trickle_handler_info", None))
+    return wrapper
 
-        setattr(wrapper, "_trickle_handler", True)
-        setattr(wrapper, "_trickle_handler_type", "param_updater")
-        setattr(wrapper, "_trickle_handler_info", getattr(target, "_trickle_handler_info", None))
-        return wrapper
-
-    if func is None:
-        return decorate
-    return decorate(func)
-
-
-@overload
-def on_stream_start(
-    func: Callable[..., Any],
-) -> LifecycleProtocol: ...
-
-@overload
-def on_stream_start(
-    func: None = ...,
-    *,
-    description: Optional[str] = ...,
-    validate_signature: bool = ...,
-) -> Callable[[Callable[..., Any]], LifecycleProtocol]: ...
 
 def on_stream_start(
-    func: Optional[HandlerFn] = None,
-    *,
-    description: Optional[str] = None,
-    validate_signature: bool = False,
-) -> Union[LifecycleProtocol, Callable[[Callable[..., Any]], LifecycleProtocol]]:
-    """Decorator for stream start lifecycle handler."""
+    func: HandlerFn,
+) -> LifecycleProtocol:
+    """Decorator for stream start lifecycle handler.
+    
+    The description is automatically generated from the function name.
+    """
+    base_wrapper = _wrap_handler(
+        "stream_start",
+        description=f"Stream start handler: {func.__name__}",
+        validate_signature=True,
+    )(func)
 
-    def decorate(target: HandlerFn) -> LifecycleProtocol:
-        base_wrapper = _wrap_handler(
-            "stream_start",
-            description=description or f"Stream start handler: {target.__name__}",
-            validate_signature=validate_signature,
-        )(target)
-        @wraps(target)
+    @wraps(func)
+    async def wrapper(*args: Any, **kwargs: Any) -> None:
+        await base_wrapper(*args, **kwargs)
+        return None
 
-        async def wrapper(*args: Any, **kwargs: Any) -> None:
-            await base_wrapper(*args, **kwargs)
-            return None
+    setattr(wrapper, "_trickle_handler", True)
+    setattr(wrapper, "_trickle_handler_type", "stream_start")
+    setattr(wrapper, "_trickle_handler_info", getattr(func, "_trickle_handler_info", None))
+    return wrapper
 
-        setattr(wrapper, "_trickle_handler", True)
-        setattr(wrapper, "_trickle_handler_type", "stream_start")
-        setattr(wrapper, "_trickle_handler_info", getattr(target, "_trickle_handler_info", None))
-        return wrapper
-
-    if func is None:
-        return decorate
-    return decorate(func)
-
-
-@overload
-def on_stream_stop(
-    func: Callable[..., Any],
-) -> LifecycleProtocol: ...
-
-@overload
-def on_stream_stop(
-    func: None = ...,
-    *,
-    description: Optional[str] = ...,
-    validate_signature: bool = ...,
-) -> Callable[[Callable[..., Any]], LifecycleProtocol]: ...
 
 def on_stream_stop(
-    func: Optional[HandlerFn] = None,
-    *,
-    description: Optional[str] = None,
-    validate_signature: bool = False,
-) -> Union[LifecycleProtocol, Callable[[Callable[..., Any]], LifecycleProtocol]]:
-    """Decorator for stream stop lifecycle handler."""
+    func: HandlerFn,
+) -> LifecycleProtocol:
+    """Decorator for stream stop lifecycle handler.
+    
+    The description is automatically generated from the function name.
+    """
+    base_wrapper = _wrap_handler(
+        "stream_stop",
+        description=f"Stream stop handler: {func.__name__}",
+        validate_signature=True,
+    )(func)
 
-    def decorate(target: HandlerFn) -> LifecycleProtocol:
-        base_wrapper = _wrap_handler(
-            "stream_stop",
-            description=description or f"Stream stop handler: {target.__name__}",
-            validate_signature=validate_signature,
-        )(target)
-        @wraps(target)
-        
-        async def wrapper(*args: Any, **kwargs: Any) -> None:
-            await base_wrapper(*args, **kwargs)
-            return None
+    @wraps(func)
+    async def wrapper(*args: Any, **kwargs: Any) -> None:
+        await base_wrapper(*args, **kwargs)
+        return None
 
-        setattr(wrapper, "_trickle_handler", True)
-        setattr(wrapper, "_trickle_handler_type", "stream_stop")
-        setattr(wrapper, "_trickle_handler_info", getattr(target, "_trickle_handler_info", None))
-        return wrapper
-
-    if func is None:
-        return decorate
-    return decorate(func)
+    setattr(wrapper, "_trickle_handler", True)
+    setattr(wrapper, "_trickle_handler_type", "stream_stop")
+    setattr(wrapper, "_trickle_handler_info", getattr(func, "_trickle_handler_info", None))
+    return wrapper
