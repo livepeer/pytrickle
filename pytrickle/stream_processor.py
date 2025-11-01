@@ -50,7 +50,7 @@ class StreamProcessor:
                 func_obj = getattr(attr, "__func__", attr)
                 func_obj = inspect.unwrap(func_obj)
                 info = getattr(func_obj, "_trickle_handler_info", None)
-            if not info:    
+            if not info:
                 continue
             registry.register(attr, info)
 
