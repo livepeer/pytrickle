@@ -3,7 +3,7 @@ import inspect
 import logging
 from typing import Optional, Callable, Dict, Any, List, Union, Awaitable
 
-from .decorators import HandlerRegistry
+from .registry import HandlerRegistry
 from .frames import VideoFrame, AudioFrame
 from .frame_processor import FrameProcessor
 from .server import StreamServer
@@ -14,7 +14,12 @@ logger = logging.getLogger(__name__)
 # Type aliases for processing functions
 VideoProcessor = Callable[[VideoFrame], Awaitable[Optional[VideoFrame]]]
 AudioProcessor = Callable[[AudioFrame], Awaitable[Optional[List[AudioFrame]]]]
+
+# Using var-args here provides flexibility for future configuration expansion
+# without breaking existing handler implementations. Once a stable configuration
+# contract is agreed upon, we can replace this with a TypedDict/Protocol.
 ModelLoader = Callable[..., Awaitable[None]]
+
 ParamUpdater = Callable[[Dict[str, Any]], Awaitable[None]]
 OnStreamStart = Callable[[], Awaitable[None]]
 OnStreamStop = Callable[[], Awaitable[None]]
@@ -29,6 +34,7 @@ class StreamProcessor:
         name: str = "stream-processor",
         port: int = 8000,
         frame_skip_config: Optional[FrameSkipConfig] = None,
+        validate_signature: bool = True,
         **server_kwargs
     ):
         """Construct a StreamProcessor by discovering handlers on *handler_instance*."""
@@ -40,6 +46,10 @@ class StreamProcessor:
                 continue
             attr = getattr(handler_instance, attr_name)
             info = getattr(attr, "_trickle_handler_info", None)
+            if not info:
+                func_obj = getattr(attr, "__func__", attr)
+                func_obj = inspect.unwrap(func_obj)
+                info = getattr(func_obj, "_trickle_handler_info", None)
             if not info:
                 continue
             registry.register(attr, info)
@@ -62,6 +72,7 @@ class StreamProcessor:
             name=name,
             port=port,
             frame_skip_config=frame_skip_config,
+            validate_signature=validate_signature,
             **server_kwargs
         )
 
@@ -81,6 +92,7 @@ class StreamProcessor:
         name: str = "stream-processor",
         port: int = 8000,
         frame_skip_config: Optional[FrameSkipConfig] = None,
+        validate_signature: bool = True,
         **server_kwargs
     ):
         """
@@ -110,9 +122,13 @@ class StreamProcessor:
         }.items():
             if processor_fn is None:
                 continue
+            # unwrap descriptors/wrappers and validate coroutine-ness
             candidate = getattr(processor_fn, "__func__", processor_fn)
+            candidate = inspect.unwrap(candidate)
             if not inspect.iscoroutinefunction(candidate):
                 raise ValueError(f"{name_label} must be an async function")
+            if validate_signature:
+                self._validate_signature_shape(name_label, processor_fn)
             
         self.video_processor = video_processor
         self.audio_processor = audio_processor
@@ -196,6 +212,41 @@ class StreamProcessor:
     def run(self):
         """Run the stream processor server (blocking)."""
         asyncio.run(self.run_forever())
+
+    @staticmethod
+    def _validate_signature_shape(name_label: str, fn: Callable[..., Any]) -> None:
+        """Best-effort validation of handler signatures.
+
+        - video_processor(frame: VideoFrame) -> Awaitable[Optional[VideoFrame]]
+        - audio_processor(frame: AudioFrame) -> Awaitable[Optional[List[AudioFrame]]]
+        - model_loader(...) -> Awaitable[None]
+        - param_updater(params: Dict[str, Any]) -> Awaitable[None]
+        - on_stream_start() -> Awaitable[None]
+        - on_stream_stop() -> Awaitable[None]
+        """
+        try:
+            base_fn = getattr(fn, "__func__", fn)
+            sig = inspect.signature(base_fn)
+            params = list(sig.parameters.values())
+
+            if params and params[0].name == "self":
+                params = params[1:]
+
+            if name_label in {"on_stream_start", "on_stream_stop", "model_loader"}:
+                # allow any for model_loader; strict zero-arg for lifecycle
+                if name_label.startswith("on_stream") and any(p.kind == p.POSITIONAL_OR_KEYWORD for p in params):
+                    logger.warning("%s expected no parameters, got %s", name_label, [p.name for p in params])
+                return
+            if name_label == "param_updater":
+                if not params:
+                    logger.warning("param_updater expected a 'params' argument")
+                return
+            if name_label in {"video_processor", "audio_processor"}:
+                if not params:
+                    logger.warning("%s expected a 'frame' argument", name_label)
+                return
+        except Exception:
+            logger.debug("Could not validate signature for %s", name_label, exc_info=True)
 
 class _InternalFrameProcessor(FrameProcessor):
     """Internal frame processor that wraps user-provided functions."""
