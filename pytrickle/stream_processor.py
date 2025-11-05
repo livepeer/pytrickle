@@ -1,9 +1,10 @@
 import asyncio
 import inspect
 import logging
-from typing import Optional, Callable, Dict, Any, List, Union, Awaitable, Coroutine
+from typing import Optional, Callable, Dict, Any, List, Union, Awaitable
 
-from .frames import VideoFrame, AudioFrame, VideoOutput, AudioOutput
+from .registry import HandlerRegistry
+from .frames import VideoFrame, AudioFrame
 from .frame_processor import FrameProcessor
 from .server import StreamServer
 from .frame_skipper import FrameSkipConfig
@@ -13,12 +14,72 @@ logger = logging.getLogger(__name__)
 # Type aliases for processing functions
 VideoProcessor = Callable[[VideoFrame], Awaitable[Optional[VideoFrame]]]
 AudioProcessor = Callable[[AudioFrame], Awaitable[Optional[List[AudioFrame]]]]
-ModelLoader = Callable[[Dict[str, Any]], Awaitable[None]]
+
+# Using var-args here provides flexibility for future configuration expansion
+# without breaking existing handler implementations. Once a stable configuration
+# contract is agreed upon, we can replace this with a TypedDict/Protocol.
+ModelLoader = Callable[..., Awaitable[None]]
+
 ParamUpdater = Callable[[Dict[str, Any]], Awaitable[None]]
 OnStreamStart = Callable[[], Awaitable[None]]
 OnStreamStop = Callable[[], Awaitable[None]]
 
 class StreamProcessor:
+    @classmethod
+    def from_handlers(
+        cls,
+        handler_instance: Any,
+        *,
+        send_data_interval: Optional[float] = 0.333,
+        name: str = "stream-processor",
+        port: int = 8000,
+        frame_skip_config: Optional[FrameSkipConfig] = None,
+        validate_signature: bool = True,
+        **server_kwargs
+    ):
+        """Construct a StreamProcessor by discovering handlers on *handler_instance*."""
+
+        registry = HandlerRegistry()
+
+        for attr_name in dir(handler_instance):
+            if attr_name.startswith("_"):
+                continue
+            attr = getattr(handler_instance, attr_name)
+            info = getattr(attr, "_trickle_handler_info", None)
+            if not info:
+                func_obj = getattr(attr, "__func__", attr)
+                func_obj = inspect.unwrap(func_obj)
+                info = getattr(func_obj, "_trickle_handler_info", None)
+            if not info:
+                continue
+            registry.register(attr, info)
+
+        video_processor = registry.get("video")
+        audio_processor = registry.get("audio")
+        model_loader = registry.get("model_loader")
+        param_updater = registry.get("param_updater")
+        on_stream_start = registry.get("stream_start")
+        on_stream_stop = registry.get("stream_stop")
+
+        processor = cls(
+            video_processor=video_processor,
+            audio_processor=audio_processor,
+            model_loader=model_loader,
+            param_updater=param_updater,
+            on_stream_start=on_stream_start,
+            on_stream_stop=on_stream_stop,
+            send_data_interval=send_data_interval,
+            name=name,
+            port=port,
+            frame_skip_config=frame_skip_config,
+            validate_signature=validate_signature,
+            **server_kwargs
+        )
+
+        processor._handler_registry = registry
+
+        return processor
+
     def __init__(
         self,
         video_processor: Optional[VideoProcessor] = None,
@@ -31,6 +92,7 @@ class StreamProcessor:
         name: str = "stream-processor",
         port: int = 8000,
         frame_skip_config: Optional[FrameSkipConfig] = None,
+        validate_signature: bool = True,
         **server_kwargs
     ):
         """
@@ -50,10 +112,23 @@ class StreamProcessor:
             **server_kwargs: Additional arguments passed to StreamServer
         """
         # Validate that processors are async functions
-        if video_processor is not None and not inspect.iscoroutinefunction(video_processor):
-            raise ValueError("video_processor must be an async function")
-        if audio_processor is not None and not inspect.iscoroutinefunction(audio_processor):
-            raise ValueError("audio_processor must be an async function")
+        for name_label, processor_fn in {
+            "video_processor": video_processor,
+            "audio_processor": audio_processor,
+            "model_loader": model_loader,
+            "param_updater": param_updater,
+            "on_stream_start": on_stream_start,
+            "on_stream_stop": on_stream_stop,
+        }.items():
+            if processor_fn is None:
+                continue
+            # unwrap descriptors/wrappers and validate coroutine-ness
+            candidate = getattr(processor_fn, "__func__", processor_fn)
+            candidate = inspect.unwrap(candidate)
+            if not inspect.iscoroutinefunction(candidate):
+                raise ValueError(f"{name_label} must be an async function")
+            if validate_signature:
+                self._validate_signature_shape(name_label, processor_fn)
             
         self.video_processor = video_processor
         self.audio_processor = audio_processor
@@ -66,6 +141,7 @@ class StreamProcessor:
         self.port = port
         self.frame_skip_config = frame_skip_config
         self.server_kwargs = server_kwargs
+        self._handler_registry: Optional[HandlerRegistry] = None
         
         # Create internal frame processor
         self._frame_processor = _InternalFrameProcessor(
@@ -136,6 +212,41 @@ class StreamProcessor:
     def run(self):
         """Run the stream processor server (blocking)."""
         asyncio.run(self.run_forever())
+
+    @staticmethod
+    def _validate_signature_shape(name_label: str, fn: Callable[..., Any]) -> None:
+        """Best-effort validation of handler signatures.
+
+        - video_processor(frame: VideoFrame) -> Awaitable[Optional[VideoFrame]]
+        - audio_processor(frame: AudioFrame) -> Awaitable[Optional[List[AudioFrame]]]
+        - model_loader(...) -> Awaitable[None]
+        - param_updater(params: Dict[str, Any]) -> Awaitable[None]
+        - on_stream_start() -> Awaitable[None]
+        - on_stream_stop() -> Awaitable[None]
+        """
+        try:
+            base_fn = getattr(fn, "__func__", fn)
+            sig = inspect.signature(base_fn)
+            params = list(sig.parameters.values())
+
+            if params and params[0].name == "self":
+                params = params[1:]
+
+            if name_label in {"on_stream_start", "on_stream_stop", "model_loader"}:
+                # allow any for model_loader; strict zero-arg for lifecycle
+                if name_label.startswith("on_stream") and any(p.kind == p.POSITIONAL_OR_KEYWORD for p in params):
+                    logger.warning("%s expected no parameters, got %s", name_label, [p.name for p in params])
+                return
+            if name_label == "param_updater":
+                if not params:
+                    logger.warning("param_updater expected a 'params' argument")
+                return
+            if name_label in {"video_processor", "audio_processor"}:
+                if not params:
+                    logger.warning("%s expected a 'frame' argument", name_label)
+                return
+        except Exception:
+            logger.debug("Could not validate signature for %s", name_label, exc_info=True)
 
 class _InternalFrameProcessor(FrameProcessor):
     """Internal frame processor that wraps user-provided functions."""
