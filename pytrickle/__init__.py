@@ -10,6 +10,7 @@ from .protocol import TrickleProtocol
 from .frames import (
     VideoFrame, AudioFrame, VideoOutput, AudioOutput,
     FrameBuffer,
+    build_loading_overlay_frame,
 )
 from .state import StreamState
 from .base import TrickleComponent, ComponentState, ErrorCallback
@@ -24,11 +25,7 @@ from .frame_processor import FrameProcessor
 from .stream_processor import StreamProcessor
 from .fps_meter import FPSMeter
 from .frame_skipper import FrameSkipConfig
-
-# Video utilities
-from .video_utils import (
-    create_loading_frame,
-)
+from .warmup_config import WarmupConfig, WarmupMode
 
 from . import api
 
@@ -59,6 +56,8 @@ __all__ = [
     "FrameProcessor",
     "FPSMeter",
     "FrameSkipConfig",
-    "create_loading_frame",
+    "WarmupConfig",
+    "WarmupMode",
+    "build_loading_overlay_frame",
     "__version__"
 ] 

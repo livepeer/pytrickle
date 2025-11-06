@@ -24,13 +24,10 @@ To test:
 import asyncio
 import logging
 import time
-import torch
 from pytrickle import StreamProcessor
-from pytrickle.frames import VideoFrame, AudioFrame
+from pytrickle.frames import VideoFrame, AudioFrame, build_loading_overlay_frame
 from pytrickle.frame_skipper import FrameSkipConfig
 from pytrickle.utils.register import RegisterCapability
-import numpy as np
-from pytrickle.video_utils import create_loading_frame
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -86,10 +83,11 @@ async def on_stream_start():
 async def on_stream_stop():
     """Called when stream stops - cleanup resources."""
     logger.info("🛑 Stream stopped, cleaning up resources")
-    # Reset frame counter for next stream
-    global frame_counter
+    # Reset frame counter and loading state for next stream
+    global frame_counter, show_loading
     frame_counter = 0
-    logger.info("✅ Resources cleaned up")
+    show_loading = False
+    logger.info("✅ Resources cleaned up (show_loading reset to False)")
 
 async def process_video(frame: VideoFrame) -> VideoFrame:
     """
@@ -109,54 +107,11 @@ async def process_video(frame: VideoFrame) -> VideoFrame:
         return frame
     
     # Loading overlay mode - replace frame with loading animation
-    frame_tensor = frame.tensor
-    
-    # Track if we need to add batch dimension back
-    had_batch_dim = False
-    
-    # Handle both 3D and 4D tensors (with batch dimension)
-    if len(frame_tensor.shape) == 4:
-        if frame_tensor.shape[0] == 1:
-            frame_tensor = frame_tensor.squeeze(0)
-            had_batch_dim = True
-        else:
-            logger.error(f"Unexpected batch size: {frame_tensor.shape[0]}")
-            return frame
-    
-    # Get frame dimensions
-    if len(frame_tensor.shape) == 3:
-        if frame_tensor.shape[0] == 3:  # CHW format
-            height, width = frame_tensor.shape[1], frame_tensor.shape[2]
-            was_chw = True
-        else:  # HWC format
-            height, width = frame_tensor.shape[0], frame_tensor.shape[1]
-            was_chw = False
-    else:
-        logger.error(f"Unexpected tensor shape: {frame_tensor.shape}")
-        return frame
-    
-    # Create loading overlay frame using utility (RGB format to match tensor expectations)
-    loading_frame = create_loading_frame(width, height, loading_message, frame_counter, color_format="RGB")
-    
-    # Convert to tensor format matching input
-    loading_tensor = torch.from_numpy(loading_frame.astype(np.float32))
-    
-    # Check if input was normalized (0-1) or (0-255)
-    if frame_tensor.max() <= 1.0:
-        loading_tensor = loading_tensor / 255.0
-    
-    # Convert to original tensor format
-    if was_chw:
-        loading_tensor = loading_tensor.permute(2, 0, 1)  # HWC to CHW
-    
-    # Add batch dimension back if needed
-    if had_batch_dim:
-        loading_tensor = loading_tensor.unsqueeze(0)
-    
-    # Move to same device as original tensor
-    loading_tensor = loading_tensor.to(frame.tensor.device)
-    
-    return frame.replace_tensor(loading_tensor)
+    return build_loading_overlay_frame(
+        original_frame=frame,
+        message=loading_message,
+        frame_counter=frame_counter
+    )
 
 async def process_audio(frame: AudioFrame) -> list[AudioFrame]:
     """Pass-through audio processing."""
