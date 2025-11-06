@@ -26,26 +26,21 @@ def _get_examples_dir() -> Path:
     try:
         if files is not None:
             # Get the path from importlib.resources
+            # Use "pytrickle.examples" since that's our package name (mapped to root examples/)
             examples_path = files("pytrickle.examples")
             # Convert to Path - handling different return types
             if hasattr(examples_path, '__fspath__'):
                 return Path(examples_path)
-            # For older Python versions, may need to use a different approach
             return Path(str(examples_path))
-    except (ModuleNotFoundError, AttributeError):
+    except (ModuleNotFoundError, AttributeError, TypeError):
         pass
     
-    # Fallback: read from filesystem (works in development mode)
-    cli_dir = Path(__file__).parent
-    examples_dir = cli_dir / "examples"
+    # Fallback: examples dir at repo root (works in development mode)
+    # cli.py is in pytrickle/, so parent.parent gets us to repo root
+    examples_dir = Path(__file__).parent.parent / "examples"
     
     if examples_dir.exists() and examples_dir.is_dir():
         return examples_dir
-    
-    # Last resort: check parent directory structure
-    alt_examples_dir = cli_dir.parent / "examples"
-    if alt_examples_dir.exists() and alt_examples_dir.is_dir():
-        return alt_examples_dir
     
     raise FileNotFoundError(
         "Could not find examples directory. "
