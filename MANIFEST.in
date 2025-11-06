@@ -1,7 +1,7 @@
 # Include requirements files for dynamic dependencies
 include requirements.txt
 include requirements-dev.txt
-include pytrickle/examples/requirements.txt
+include examples/requirements.txt
 
 # Include README and other documentation
 include README.md
