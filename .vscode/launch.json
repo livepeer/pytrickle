@@ -25,14 +25,21 @@
             "python": "${command:python.interpreterPath}"
         },
         {
-            "name": "Model Loading Example",
+            "name": "Loading Example",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/examples/model_loading_example.py",
+            "program": "${workspaceFolder}/examples/loading_overlay.py",
             "console": "integratedTerminal",
-            "cwd": "${workspaceFolder}",
+            "cwd": "${workspaceFolder}/examples",
             "env": {
-                "PYTHONPATH": "${workspaceFolder}"
+                "ORCH_URL": "https://localhost:9995",
+                "ORCH_SECRET": "orch-secret",
+                "CAPABILITY_NAME": "comfystream",
+                "CAPABILITY_DESCRIPTION": "Loading overlay processor with animated progress bars",
+                "CAPABILITY_URL": "http://localhost:8000",
+                "CAPABILITY_PRICE_PER_UNIT": "0",
+                "CAPABILITY_PRICE_SCALING": "1",
+                "CAPABILITY_CAPACITY": "1"
             },
             "justMyCode": true,
             "python": "${command:python.interpreterPath}"
