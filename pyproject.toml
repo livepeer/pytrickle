@@ -36,6 +36,9 @@ Homepage = "https://github.com/livepeer/pytrickle"
 Repository = "https://github.com/livepeer/pytrickle"
 Issues = "https://github.com/livepeer/pytrickle/issues"
 
+[project.scripts]
+pytrickle = "pytrickle.cli:main"
+
 [tool.setuptools]
 include-package-data = true
 
