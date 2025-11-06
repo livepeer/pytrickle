@@ -44,16 +44,16 @@ include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["pytrickle*", "examples*"]
+include = ["pytrickle*"]
 exclude = ["tests*"]
 
 [tool.setuptools.package-data]
-pytrickle = ["*.py"]
+pytrickle = ["*.py", "examples/*.py"]
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}
 optional-dependencies.dev = {file = ["requirements-dev.txt"]}
-optional-dependencies.examples = {file = ["examples/requirements.txt"]}
+optional-dependencies.examples = {file = ["pytrickle/examples/requirements.txt"]}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
