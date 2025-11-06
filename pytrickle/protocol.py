@@ -11,7 +11,7 @@ import queue
 import logging
 from typing import Optional, AsyncGenerator
 
-from .base import TrickleComponent, ComponentState, setup_asyncio_exception_handler
+from .base import TrickleComponent, ComponentState, ErrorCallback, setup_asyncio_exception_handler
 from .subscriber import TrickleSubscriber
 from .publisher import TricklePublisher
 from .media import run_subscribe, run_publish
@@ -20,7 +20,6 @@ from .decoder import DEFAULT_MAX_FRAMERATE
 from .encoder import default_output_metadata
 from .cache import LastValueCache
 from .fps_meter import FPSMeter
-from . import ErrorCallback
 
 logger = logging.getLogger(__name__)
 
