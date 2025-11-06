@@ -143,9 +143,6 @@ class StreamProcessor:
         self.server_kwargs = server_kwargs
         self._handler_registry: Optional[HandlerRegistry] = None
         
-        # Track background tasks to prevent memory leaks
-        self._background_tasks = set()
-        
         # Create internal frame processor
         self._frame_processor = _InternalFrameProcessor(
             video_processor=video_processor,
@@ -214,9 +211,13 @@ class StreamProcessor:
     async def run_forever(self):
         """Run the stream processor server forever."""
         try:
-            # Trigger model loading immediately (non-blocking due to async lock)
-            # The server will start and be available while model loading happens
-            asyncio.create_task(self._trigger_model_loading())
+            if self.model_loader:
+                # Trigger model loading for processors with models (non-blocking due to async lock)
+                # The server will start and be available while model loading happens
+                asyncio.create_task(self._trigger_model_loading())
+            else:
+                # For processors without models, mark startup complete immediately
+                self.server.state.set_startup_complete()
             
             # Run server (this will start immediately and be available for /health checks)
             await self.server.run_forever()
@@ -226,12 +227,18 @@ class StreamProcessor:
             raise
     
     async def _trigger_model_loading(self):
-        """Trigger model loading via parameter update."""
+        """Trigger model loading via parameter update.
+        
+        If model loading fails, the error is logged and propagated to ensure
+        the server state reflects the failure properly.
+        """
         try:
             await self._frame_processor.update_params({"load_model": True})
             logger.debug(f"Model loading triggered via parameter update for '{self.name}'")
         except Exception as e:
             logger.error(f"Failed to trigger model loading: {e}")
+            self.server.state.set_error(f"Model loading failed: {e}")
+            raise
     
     def run(self):
         """Run the stream processor server (blocking)."""
@@ -343,19 +350,24 @@ class _InternalFrameProcessor(FrameProcessor):
             return [frame]
     
     async def update_params(self, params: Dict[str, Any]):
-        """Update parameters using provided async function."""
-        # Handle model loading sentinel message
-        if params.get("load_model", False):
+        """Update parameters using provided async function.
+        
+        Handles the 'load_model' sentinel parameter internally by extracting it
+        and triggering model loading, while passing through all other parameters
+        to the user's param_updater callback.
+        """
+        # Handle model loading sentinel message (extract it with pop)
+        if params.pop("load_model", False):
             try:
                 await self.ensure_model_loaded()
                 logger.info(f"Model loaded via parameter update for '{self.name}'")
-                return  # Don't pass sentinel to user param_updater
+                # Fall through to process remaining params (if any)
             except Exception as e:
                 logger.error(f"Error loading model via parameter update: {e}")
                 raise
         
-        # Normal parameter updates
-        if self.param_updater:
+        # Normal parameter updates (will include other params even if load_model was present)
+        if self.param_updater and params:
             try:
                 await self.param_updater(params)
                 logger.info(f"Parameters updated: {params}")
