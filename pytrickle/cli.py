@@ -72,11 +72,8 @@ TEMPLATE = dedent(
             if not self.cfg.enabled:
                 return frame
 
-            # Example: passthrough with optional grayscale (disabled by default)
-            x = frame.tensor
-            if x.dim() == 3 and x.shape[-1] == 3:
-                # no-op example; replace with your logic
-                return frame
+            # Example: passthrough video
+            # no-op example; replace with your logic
 
             return frame
 
@@ -109,7 +106,7 @@ TEMPLATE = dedent(
             port=$port,
         )
 
-        # Optionally pre-load models, then run forever
+        # Run the processor event loop until interrupted
         await processor.run_forever()
 
 
