@@ -87,9 +87,6 @@ class TrickleClient:
         # Start the protocol
         await self.protocol.start()
         
-        # Ensure model is loaded on the same event loop/thread before processing
-        await self.frame_processor.ensure_model_loaded()
-        
         # Call the optional on_stream_start callback after protocol starts
         if self.frame_processor.on_stream_start:
             try:

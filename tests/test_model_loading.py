@@ -261,7 +261,7 @@ class TestModelLoading:
 
     @pytest.mark.asyncio
     async def test_mixed_sentinel_and_normal_params(self):
-        """Test that normal parameters are ignored when sentinel is present."""
+        """Test that normal parameters are passed through even when sentinel is present."""
         normal_params_received = []
         model_load_count = 0
         async def test_model_loader(**kwargs):
@@ -278,7 +278,7 @@ class TestModelLoading:
             port=8009
         )
 
-        # This call should only trigger model loading; other params are ignored.
+        # This call should trigger model loading AND pass through other params.
         await processor._frame_processor.update_params({
             "load_model": True,
             "intensity": 0.7,
@@ -288,8 +288,9 @@ class TestModelLoading:
 
         assert model_load_count == 1
         assert processor._frame_processor._model_loaded
-        assert len(normal_params_received) == 1
-        assert normal_params_received[0] == {"intensity": 0.9}
+        assert len(normal_params_received) == 2
+        assert normal_params_received[0] == {"intensity": 0.7}
+        assert normal_params_received[1] == {"intensity": 0.9}
 
     @pytest.mark.asyncio
     async def test_concurrent_sentinel_messages_are_thread_safe(self):
