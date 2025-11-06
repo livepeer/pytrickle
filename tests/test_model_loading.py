@@ -188,8 +188,11 @@ class TestModelLoading:
         async def user_param_updater(params):
             user_params_received.append(params)
 
+        async def test_model_loader(**kwargs):
+            await asyncio.sleep(0.05)
+
         processor = StreamProcessor(
-            model_loader=lambda **kwargs: asyncio.sleep(0.05),
+            model_loader=test_model_loader,
             param_updater=user_param_updater,
             name="test-sentinel-filter",
             port=8006
