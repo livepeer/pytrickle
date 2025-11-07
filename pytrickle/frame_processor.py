@@ -81,9 +81,13 @@ class FrameProcessor(ABC):
             if not self._model_loaded:
                 await self.load_model(**kwargs)
                 self._model_loaded = True
+                
+                # After load_model completes, mark startup complete
                 if self.state:
                     self.state.set_startup_complete()
-                logger.debug(f"Model loaded for {self.__class__.__name__}")
+                    logger.debug(f"Model loaded - startup complete for {self.__class__.__name__}")
+                else:
+                    logger.debug(f"Model loaded for {self.__class__.__name__}")
             else:
                 logger.debug(f"Model already loaded for {self.__class__.__name__}")
 
@@ -169,13 +173,11 @@ class FrameProcessor(ABC):
         """
         try:
             # Cancel any existing warmup task
+            # Note: We don't await here since this is not an async function
+            # The task will be cleaned up by asyncio when the new task starts
             if self._warmup_task and not self._warmup_task.done():
+                logger.debug("Cancelling existing warmup task (will be replaced)")
                 self._warmup_task.cancel()
-                try:
-                    # Don't await here, just cancel and move on
-                    pass
-                except Exception:
-                    logger.debug("Previous warmup task cleanup error", exc_info=True)
         except Exception:
             logger.debug("Error cancelling prior warmup task", exc_info=True)
         
@@ -184,14 +186,23 @@ class FrameProcessor(ABC):
         self._loading_active = True
         self._warmup_done.clear()
         
+        logger.info(f"Starting warmup sequence (loading_active=True, warmup_done=False)")
+        
         async def _warmup_and_finish():
             try:
                 await warmup_coro
-            except Exception:
-                logger.debug("Warmup failed while running warmup sequence", exc_info=True)
+                logger.info("Warmup completed successfully")
+            except Exception as e:
+                logger.warning(f"Warmup failed: {e}", exc_info=True)
             finally:
                 self._loading_active = False
                 self._warmup_done.set()
+                logger.info(f"Warmup sequence finished (loading_active=False, warmup_done=True)")
+                
+                # Don't manage state transitions here - let the wrapper handle it
+                # This allows both FrameProcessor subclasses and plain functions to work
+                # For plain functions: _InternalFrameProcessor will handle state
+                # For FrameProcessor subclasses: they can manage their own state if needed
         
         # Create and store the warmup task
         self._warmup_task = asyncio.create_task(_warmup_and_finish())
