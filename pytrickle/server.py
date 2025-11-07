@@ -609,8 +609,12 @@ class StreamServer:
             self.state.set_active_client(False)
             self.state.update_active_streams(0)
     
-    async def stop(self):
-        """Stop the server and clean up resources."""
+    async def stop(self, app: Optional[web.Application] = None):
+        """Stop the server and clean up resources.
+
+        Args:
+            app: Optional aiohttp application passed when used as a shutdown signal.
+        """
         # Stop current client if running
         if self.current_client:
             await self.current_client.stop()
