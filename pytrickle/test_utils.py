@@ -7,6 +7,7 @@ Provides simple helpers for creating test doubles that work with the simplified 
 import asyncio
 from typing import Optional, Dict, Any
 from unittest.mock import MagicMock, AsyncMock
+from pytrickle.examples.process_video_example import load_model, process_video, update_params
 
 from .frame_processor import FrameProcessor
 
@@ -83,8 +84,6 @@ def create_test_server_for_endpoints(
     
     # Import example functions for a real processor
     try:
-        from examples.process_video_example import load_model, process_video, update_params
-        
         processor = _InternalFrameProcessor(
             video_processor=process_video,
             audio_processor=None,
