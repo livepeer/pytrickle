@@ -9,7 +9,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Optional, Any, Dict, List
 from .frames import VideoFrame, AudioFrame
-from .base import ErrorCallback
+from . import ErrorCallback
 from .state import StreamState
 from .warmup_config import WarmupConfig, WarmupMode
 
