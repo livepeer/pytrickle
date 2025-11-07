@@ -149,10 +149,10 @@ class StreamState:
         self.startup_complete = True
         # When startup completes, transition to IDLE (ready state)
         if self._state == PipelineState.LOADING:
-            logger.info("State transition: LOADING → IDLE")
+            logger.debug("State transition: LOADING → IDLE")
             self.set_state(PipelineState.IDLE)
         else:
-            logger.info(f"State already {self._state.name}, not transitioning")
+            logger.warning(f"State already {self._state.name}, not transitioning")
 
     def update_active_streams(self, count: int) -> None:
         """Update number of active streams for health/status reporting."""
