@@ -40,6 +40,10 @@ class ModelLoadingTestProcessor(FrameProcessor):
         await asyncio.sleep(self.load_delay)
         self.load_end_time = time.time()
 
+    async def warmup(self, **kwargs):
+        """Warmup (no-op for test)."""
+        pass
+
     async def process_video_async(self, frame):
         return frame
 
