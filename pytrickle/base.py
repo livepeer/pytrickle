@@ -10,9 +10,10 @@ import aiohttp
 import logging
 import time
 from enum import Enum
-from typing import Optional, List
+from typing import Any, Callable, Coroutine, List, Optional
 
-from . import ErrorCallback
+# Type alias for error callback functions (async only)
+ErrorCallback = Callable[[str, Optional[Exception]], Coroutine[Any, Any, None]]
 
 logger = logging.getLogger(__name__)
 
