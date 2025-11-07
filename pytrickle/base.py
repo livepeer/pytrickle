@@ -10,12 +10,11 @@ import aiohttp
 import logging
 import time
 from enum import Enum
-from typing import Optional, List, Callable, Coroutine, Any
+from typing import Optional, List
+
+from . import ErrorCallback
 
 logger = logging.getLogger(__name__)
-
-# Type alias for error callback functions (async only)
-ErrorCallback = Callable[[str, Optional[Exception]], Coroutine[Any, Any, None]]
 
 class ComponentState(Enum):
     """States for trickle protocol components.

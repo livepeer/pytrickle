@@ -10,7 +10,8 @@ import aiohttp
 import logging
 from typing import Optional, List
 
-from .base import TrickleComponent, ErrorCallback
+from . import ErrorCallback
+from .base import TrickleComponent
 
 logger = logging.getLogger(__name__)
 

@@ -12,7 +12,7 @@ import json
 from typing import Callable, Optional, Deque, Any
 from collections import deque
 
-from .base import ErrorCallback
+from . import ErrorCallback
 from .protocol import TrickleProtocol
 from .frames import VideoFrame, AudioFrame, VideoOutput, AudioOutput
 from .frame_processor import FrameProcessor

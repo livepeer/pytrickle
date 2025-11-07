@@ -4,32 +4,37 @@ Trickle App - A Python package for high-performance video streaming over trickle
 Provides functionality to subscribe to and publish video streams with real-time processing.
 """
 
-from .base import TrickleComponent, ComponentState, ErrorCallback
-from .client import TrickleClient
-from .server import StreamServer
-from .protocol import TrickleProtocol
-from .frames import (
+from typing import Callable, Optional, Coroutine, Any
+
+# Type alias for error callback functions (async only)
+ErrorCallback = Callable[[str, Optional[Exception]], Coroutine[Any, Any, None]]
+
+from .base import TrickleComponent, ComponentState  # noqa: E402
+from .client import TrickleClient  # noqa: E402
+from .server import StreamServer  # noqa: E402
+from .protocol import TrickleProtocol  # noqa: E402
+from .frames import (  # noqa: E402
     VideoFrame, AudioFrame, VideoOutput, AudioOutput,
     FrameBuffer,
     build_loading_overlay_frame,
-)
-from .state import StreamState
-from .publisher import TricklePublisher
-from .subscriber import TrickleSubscriber
-from .manager import BaseStreamManager, TrickleStreamManager, StreamHandler
-from .stream_handler import TrickleStreamHandler
-from .utils.register import RegisterCapability
+)  # noqa: E402
+from .state import StreamState  # noqa: E402
+from .publisher import TricklePublisher  # noqa: E402
+from .subscriber import TrickleSubscriber  # noqa: E402
+from .manager import BaseStreamManager, TrickleStreamManager, StreamHandler  # noqa: E402
+from .stream_handler import TrickleStreamHandler  # noqa: E402
+from .utils.register import RegisterCapability  # noqa: E402
 
 # Processing utilities
-from .frame_processor import FrameProcessor
-from .stream_processor import StreamProcessor
-from .fps_meter import FPSMeter
-from .frame_skipper import FrameSkipConfig
-from .warmup_config import WarmupConfig, WarmupMode
+from .frame_processor import FrameProcessor  # noqa: E402
+from .stream_processor import StreamProcessor  # noqa: E402
+from .fps_meter import FPSMeter  # noqa: E402
+from .frame_skipper import FrameSkipConfig  # noqa: E402
+from .warmup_config import WarmupConfig, WarmupMode  # noqa: E402
 
-from . import api
+from . import api  # noqa: E402
 
-from .version import __version__
+from .version import __version__  # noqa: E402
 
 __all__ = [
     "TrickleClient",
