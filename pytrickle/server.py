@@ -354,6 +354,8 @@ class StreamServer:
             # Set params if provided
             if params.params:
                 try:
+                    # Clear input queues before setting params to avoid stale frames
+                    await self.current_client.clear_input_queues()
                     await self.frame_processor.update_params(params.params)
                 except Exception as e:
                     logger.warning(f"Failed to set params: {e}")
@@ -428,6 +430,7 @@ class StreamServer:
         """Handle control messages from trickle protocol.
         
         Routes control messages to the frame processor's update_params method.
+        Clears input queues before updating to avoid processing stale frames.
         """
         try:
             # Clear input queues to avoid processing stale frames with new parameters
