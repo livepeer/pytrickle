@@ -41,19 +41,19 @@ pytrickle = "pytrickle.cli:main"
 
 [tool.setuptools]
 include-package-data = true
+packages = ["pytrickle", "pytrickle.examples"]
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["pytrickle*"]
-exclude = ["tests*"]
+[tool.setuptools.package-dir]
+"pytrickle.examples" = "examples"
 
 [tool.setuptools.package-data]
-pytrickle = ["*.py", "examples/*.py"]
+pytrickle = ["*.py"]
+"pytrickle.examples" = ["*.py", "*.txt", "Dockerfile.*"]
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}
 optional-dependencies.dev = {file = ["requirements-dev.txt"]}
-optional-dependencies.examples = {file = ["pytrickle/examples/requirements.txt"]}
+optional-dependencies.examples = {file = ["examples/requirements.txt"]}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
