@@ -29,6 +29,7 @@ from .registry import (
     ModelLoaderProtocol,
     ParamUpdaterProtocol,
     VideoHandlerProtocol,
+    WarmupProtocol,
 )
 
 logger = logging.getLogger(__name__)
@@ -417,5 +418,29 @@ def on_stream_stop(
 
     setattr(wrapper, "_trickle_handler", True)
     setattr(wrapper, "_trickle_handler_type", "stream_stop")
+    setattr(wrapper, "_trickle_handler_info", getattr(func, "_trickle_handler_info", None))
+    return wrapper
+
+
+def warmup(
+    func: HandlerFn,
+) -> WarmupProtocol:
+    """Decorator for warmup handlers.
+    
+    The description is automatically generated from the function name.
+    """
+    base_wrapper = _wrap_handler(
+        "warmup",
+        description=f"Warmup handler: {func.__name__}",
+        validate_signature=True,
+    )(func)
+
+    @wraps(func)
+    async def wrapper(*args: Any, **kwargs: Any) -> None:
+        await base_wrapper(*args, **kwargs)
+        return None
+
+    setattr(wrapper, "_trickle_handler", True)
+    setattr(wrapper, "_trickle_handler_type", "warmup")
     setattr(wrapper, "_trickle_handler_info", getattr(func, "_trickle_handler_info", None))
     return wrapper

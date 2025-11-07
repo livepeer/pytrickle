@@ -82,14 +82,47 @@ class FrameProcessor(ABC):
                 await self.load_model(**kwargs)
                 self._model_loaded = True
                 
-                # After load_model completes, mark startup complete
+                # Automatically run warmup if method exists (synchronous for initial load)
+                # This ensures pytrickle's state management works correctly
+                # (state stays LOADING until warmup completes)
+                if hasattr(self, 'warmup') and callable(self.warmup):
+                    if self._is_warmup_active():
+                        logger.info(f"Warmup already active, waiting for completion for {self.__class__.__name__}")
+                        try:
+                            await asyncio.wait_for(self._warmup_done.wait(), timeout=60.0)
+                            logger.info(f"Warmup completed for {self.__class__.__name__}")
+                        except asyncio.TimeoutError:
+                            logger.warning(f"Timeout waiting for warmup to complete for {self.__class__.__name__}")
+                    else:
+                        # No warmup active, run it synchronously
+                        logger.info(f"Running warmup after model load for {self.__class__.__name__}")
+                        try:
+                            await self.warmup()
+                            logger.info(f"Warmup completed for {self.__class__.__name__}")
+                        except Exception as e:
+                            logger.warning(f"Warmup failed for {self.__class__.__name__}: {e}", exc_info=True)
+                
+                # After load_model and warmup complete, mark startup complete
                 if self.state:
                     self.state.set_startup_complete()
-                    logger.debug(f"Model loaded - startup complete for {self.__class__.__name__}")
+                    logger.info(f"Model loaded - startup complete for {self.__class__.__name__}")
                 else:
                     logger.debug(f"Model loaded for {self.__class__.__name__}")
             else:
                 logger.debug(f"Model already loaded for {self.__class__.__name__}")
+
+    @abstractmethod
+    async def warmup(self, **kwargs):
+        """
+        Warm up the model.
+        
+        This method should be implemented to warm up any required models or resources.
+        It is called automatically when needed.
+        
+        Args:
+            **kwargs: Additional parameters for model warmup
+        """
+        pass
 
     @abstractmethod
     async def load_model(self, **kwargs):
