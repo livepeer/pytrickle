@@ -8,6 +8,7 @@ from .frames import VideoFrame, AudioFrame
 from .frame_processor import FrameProcessor
 from .server import StreamServer
 from .frame_skipper import FrameSkipConfig
+from .warmup_config import WarmupConfig
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,13 @@ class StreamProcessor:
         on_stream_start = registry.get("stream_start")
         on_stream_stop = registry.get("stream_stop")
 
+        # If handler_instance is a FrameProcessor, extract its warmup_config
+        warmup_config = None
+        if isinstance(handler_instance, FrameProcessor):
+            warmup_config = getattr(handler_instance, 'warmup_config', None)
+            if warmup_config:
+                logger.debug(f"Extracted warmup_config from {handler_instance.__class__.__name__}")
+
         processor = cls(
             video_processor=video_processor,
             audio_processor=audio_processor,
@@ -72,6 +80,7 @@ class StreamProcessor:
             name=name,
             port=port,
             frame_skip_config=frame_skip_config,
+            warmup_config=warmup_config,
             validate_signature=validate_signature,
             **server_kwargs
         )
@@ -92,6 +101,7 @@ class StreamProcessor:
         name: str = "stream-processor",
         port: int = 8000,
         frame_skip_config: Optional[FrameSkipConfig] = None,
+        warmup_config: Optional[WarmupConfig] = None,
         validate_signature: bool = True,
         **server_kwargs
     ):
@@ -151,7 +161,8 @@ class StreamProcessor:
             param_updater=param_updater,
             on_stream_start=on_stream_start,
             on_stream_stop=on_stream_stop,
-            name=name
+            name=name,
+            warmup_config=warmup_config
         )
         
         # Create and start server
@@ -290,7 +301,8 @@ class _InternalFrameProcessor(FrameProcessor):
         param_updater: Optional[ParamUpdater] = None,
         on_stream_start: Optional[OnStreamStart] = None,
         on_stream_stop: Optional[OnStreamStop] = None,
-        name: str = "internal-processor"
+        name: str = "internal-processor",
+        warmup_config: Optional['WarmupConfig'] = None
     ):
         # Set attributes first before calling parent
         self.video_processor = video_processor
@@ -305,7 +317,8 @@ class _InternalFrameProcessor(FrameProcessor):
         self.frame_skip_config = None
         self.frame_skipper = None
         
-        super().__init__(error_callback=None)
+        # Pass warmup_config to base class so it knows not to call set_startup_complete early
+        super().__init__(error_callback=None, warmup_config=warmup_config)
     
     async def load_model(self, **kwargs):
         """Load model using provided async function."""

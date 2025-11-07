@@ -64,6 +64,9 @@ class TrickleClient:
         self.output_queue = asyncio.Queue(maxsize=200)
         self.data_queue: Deque[Any] = deque(maxlen=1000)
         
+        # Track queue size for clearing
+        self.max_queue_size = max_queue_size
+        
         # Optional frame skipper
         if frame_skip_config is not None:
             self.frame_skipper = AdaptiveFrameSkipper(
@@ -136,6 +139,34 @@ class TrickleClient:
             # Cleanup frame skipper resources
             if self.frame_skipper:
                 self.frame_skipper.reset()
+    
+    async def clear_input_queues(self):
+        """
+        Clear pending frames from input queues.
+        
+        Useful when parameters change and old queued frames become stale.
+        This prevents processing old frames with new parameters.
+        """
+        # Clear video queue
+        cleared_video = 0
+        while not self.video_input_queue.empty():
+            try:
+                self.video_input_queue.get_nowait()
+                cleared_video += 1
+            except asyncio.QueueEmpty:
+                break
+        
+        # Clear audio queue
+        cleared_audio = 0
+        while not self.audio_input_queue.empty():
+            try:
+                self.audio_input_queue.get_nowait()
+                cleared_audio += 1
+            except asyncio.QueueEmpty:
+                break
+        
+        if cleared_video or cleared_audio:
+            logger.info(f"Cleared stale frames from input queues: {cleared_video} video, {cleared_audio} audio")
     
     async def stop(self):
         """Stop the trickle client."""
