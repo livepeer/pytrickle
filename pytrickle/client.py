@@ -178,8 +178,8 @@ class TrickleClient:
         logger.info(f"Protocol event received: {error_type} - {exception}")
         
         # Set appropriate event based on error type
-        if error_type in ("protocol_shutdown", "subscription_ended"):
-            # Clean shutdown - set stop event
+        if error_type in ("protocol_shutdown", "subscription_ended", "stream_not_found"):
+            # Clean shutdown or stream not found - set stop event
             self.stop_event.set()
             logger.debug(f"Set stop_event due to {error_type}")
         else:
