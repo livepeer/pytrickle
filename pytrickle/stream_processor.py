@@ -35,6 +35,7 @@ class StreamProcessor:
         port: int = 8000,
         frame_skip_config: Optional[FrameSkipConfig] = None,
         validate_signature: bool = True,
+        clear_queues_on_update: bool = True,
         **server_kwargs
     ):
         """Construct a StreamProcessor by discovering handlers on *handler_instance*."""
@@ -73,6 +74,7 @@ class StreamProcessor:
             port=port,
             frame_skip_config=frame_skip_config,
             validate_signature=validate_signature,
+            clear_queues_on_update=clear_queues_on_update,
             **server_kwargs
         )
 
@@ -92,6 +94,7 @@ class StreamProcessor:
         name: str = "stream-processor",
         port: int = 8000,
         frame_skip_config: Optional[FrameSkipConfig] = None,
+        clear_queues_on_update: bool = True,
         validate_signature: bool = True,
         **server_kwargs
     ):
@@ -109,6 +112,7 @@ class StreamProcessor:
             name: Processor name
             port: Server port
             frame_skip_config: Optional frame skipping configuration (None = no frame skipping)
+            clear_queues_on_update: Whether to flush client queues before applying updated params
             **server_kwargs: Additional arguments passed to StreamServer
         """
         # Validate that processors are async functions
@@ -140,6 +144,7 @@ class StreamProcessor:
         self.name = name
         self.port = port
         self.frame_skip_config = frame_skip_config
+        self.clear_queues_on_update = clear_queues_on_update
         self.server_kwargs = server_kwargs
         self._handler_registry: Optional[HandlerRegistry] = None
         
@@ -159,6 +164,7 @@ class StreamProcessor:
             frame_processor=self._frame_processor,
             port=port,
             frame_skip_config=frame_skip_config,
+            clear_queues_on_update=clear_queues_on_update,
             **server_kwargs
         )
     
