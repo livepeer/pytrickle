@@ -59,13 +59,14 @@ class RegisterCapability:
                         ssl=False,
                     ) as resp:
                         if resp.status == 200:
-                            self.logger.info("Capability registered successfully")
+                            name = register_req.get("name", "unknown")
+                            self.logger.info(f"Capability {name!r} registered successfully")
                             return urlparse(register_req["url"])
                         elif resp.status == 400:
                             self.logger.error("Orchestrator secret incorrect")
                             return False
                         else:
-                            self.logger.warning(f"Register attempt {attempt} failed: {resp.status} {resp.text}")
+                            self.logger.warning(f"Register attempt {attempt} failed: {resp.status} {await resp.text()}")
 
             except aiohttp.ClientConnectorError as e:
                 # Handle connect call failed without raising
@@ -92,7 +93,6 @@ class RegisterCapability:
         orch_secret: Optional[str] = None,
         capability_name: Optional[str] = None,
         capability_desc: Optional[str] = None,
-        capability_url: Optional[str] = None,
         capability_capacity: Optional[int] = None,
         capability_price_per_unit: Optional[int] = None,
         capability_price_scaling: Optional[int] = None,
@@ -111,7 +111,7 @@ class RegisterCapability:
         - ORCH_SECRET: Orchestrator secret
         - CAPABILITY_NAME: Capability name
         - CAPABILITY_DESCRIPTION: Capability description 
-        - CAPABILITY_URL: Capability URL
+        - CAPABILITY_URL: Capability URL (always from environment, cannot be overridden)
         - CAPABILITY_CAPACITY: Max concurrent streams
         - CAPABILITY_PRICE_PER_UNIT: Price per unit 
         - CAPABILITY_PRICE_SCALING: Price scaling
@@ -126,10 +126,11 @@ class RegisterCapability:
         """
         # Get values from env vars if not provided
         orch_url = orch_url or os.environ.get("ORCH_URL", "")
-        orch_secret = orch_secret or os.environ.get("ORCH_SECRET", "")
+        # Pop secret from environment to reduce exposure
+        orch_secret = orch_secret or os.environ.pop("ORCH_SECRET", "")
         capability_name = capability_name or os.environ.get("CAPABILITY_NAME", "pytrickle-worker")
         capability_desc = capability_desc or os.environ.get("CAPABILITY_DESCRIPTION", "PyTrickle video processing worker")
-        capability_url = capability_url or os.environ.get("CAPABILITY_URL", "http://localhost:8000")
+        capability_url = os.environ.get("CAPABILITY_URL", "http://localhost:8000")
         capability_capacity = capability_capacity or int(os.environ.get("CAPABILITY_CAPACITY", 1))
         capability_price_per_unit = capability_price_per_unit or int(os.environ.get("CAPABILITY_PRICE_PER_UNIT", 0))
         capability_price_scaling = capability_price_scaling or int(os.environ.get("CAPABILITY_PRICE_SCALING", 1))
@@ -150,15 +151,21 @@ class RegisterCapability:
             return False
             
         register_req = self._build_register_request(**values)
-        result = await self._make_registration_request(
-            values["orch_url"], 
-            values["orch_secret"], 
-            register_req, 
-            max_retries, 
-            delay, 
-            timeout
-        )
-        return result
+        try:
+            result = await self._make_registration_request(
+                values["orch_url"], 
+                values["orch_secret"], 
+                register_req, 
+                max_retries, 
+                delay, 
+                timeout
+            )
+            return result
+        finally:
+            # Clear secret from memory
+            if "orch_secret" in values:
+                values["orch_secret"] = None
+            orch_secret = None
     
     @classmethod
     async def register(cls, logger: Optional[logging.Logger] = None, **kwargs) -> Union[ParseResult, bool]:
@@ -171,7 +178,7 @@ class RegisterCapability:
         
         Args:
             logger: Optional logger instance
-            **kwargs: Any parameters to override (same as register_capability)
+            **kwargs: Any parameters to override (same as register_capability, except capability_url which always comes from CAPABILITY_URL env var)
             
         Returns:
             The registered capability URL (as ParseResult object) if registration succeeded, False otherwise

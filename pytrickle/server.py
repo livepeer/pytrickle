@@ -22,6 +22,7 @@ from .frame_processor import FrameProcessor
 from .client import TrickleClient
 from .protocol import TrickleProtocol
 from .frame_skipper import FrameSkipConfig
+from .utils.register import RegisterCapability
 
 logger = logging.getLogger(__name__)
 
@@ -122,14 +123,6 @@ class StreamServer:
             for key, value in app_context.items():
                 self.app[key] = value
 
-        # Setup middleware first (order matters)
-        if middleware:
-            self._setup_middleware(middleware)
-        
-        # Setup CORS if configured
-        if cors_config:
-            self._setup_cors(cors_config)
-        
         # Setup startup/shutdown handlers
         if on_startup:
             for handler in on_startup:
@@ -138,6 +131,21 @@ class StreamServer:
             for handler in on_shutdown:
                 self.app.on_shutdown.append(handler)
 
+        # Automatically register capability if orchestrator is configured
+        if os.environ.get("ORCH_URL") and os.environ.get("ORCH_SECRET"):
+            async def _register_capability(app: Any):
+                await RegisterCapability.register(logger=logger)
+            self.app.on_startup.append(_register_capability)
+        self.app.on_shutdown.append(self.stop)
+        
+        # Setup middleware first (order matters)
+        if middleware:
+            self._setup_middleware(middleware)
+        
+        # Setup CORS if configured
+        if cors_config:
+            self._setup_cors(cors_config)
+        
         # Setup routes
         if enable_default_routes:
             self._setup_routes()
