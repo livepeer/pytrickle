@@ -20,7 +20,7 @@ from .decoder import DEFAULT_MAX_FRAMERATE
 from .encoder import default_output_metadata
 from .cache import LastValueCache
 from .fps_meter import FPSMeter
-from . import ErrorCallback
+from .base import ErrorCallback
 
 logger = logging.getLogger(__name__)
 
