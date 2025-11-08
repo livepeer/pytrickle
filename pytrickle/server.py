@@ -309,6 +309,15 @@ class StreamServer:
     async def _handle_start_stream(self, request: web.Request) -> web.Response:
         """Handle stream start requests."""
         try:
+            # Check if pipeline is ready before allowing stream start
+            if not self.state.startup_complete or not self.state.pipeline_ready:
+                logger.warning("Stream start rejected - pipeline not ready yet")
+                return web.json_response({
+                    "status": "error",
+                    "message": "Pipeline is still initializing. Please wait for IDLE status.",
+                    "current_state": "LOADING"
+                }, status=503)  # 503 Service Unavailable
+            
             # Parse and validate request first
             params = await self._parse_and_validate_request(request, StreamStartRequest)
             
