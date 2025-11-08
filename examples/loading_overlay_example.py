@@ -13,7 +13,7 @@ the model loads in the background. The loading overlay can be toggled
 independently to show visual feedback during processing.
 
 To test:
-1. Run: python examples/loading_overlay.py
+1. Run: python examples/loading_overlay_example.py
 2. Check health: curl http://localhost:8001/health
 3. Update parameters:
    curl -X POST http://localhost:8001/update_params \
@@ -25,7 +25,8 @@ import asyncio
 import logging
 import time
 from pytrickle import StreamProcessor
-from pytrickle.frames import VideoFrame, AudioFrame, build_loading_overlay_frame
+from pytrickle.frames import VideoFrame, AudioFrame
+from pytrickle.utils.loading_overlay import build_loading_overlay_frame
 from pytrickle.frame_skipper import FrameSkipConfig
 from pytrickle.utils.register import RegisterCapability
 
@@ -183,7 +184,7 @@ if __name__ == "__main__":
         on_stream_start=on_stream_start,
         on_stream_stop=on_stream_stop,
         name="model-loading-demo",
-        port=8000,
+        port=8002,
         frame_skip_config=FrameSkipConfig(),
         # Add orchestrator registration on startup
         on_startup=[register_with_orchestrator],

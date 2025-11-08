@@ -10,7 +10,6 @@ from .protocol import TrickleProtocol
 from .frames import (
     VideoFrame, AudioFrame, VideoOutput, AudioOutput,
     FrameBuffer,
-    build_loading_overlay_frame,
 )
 from .state import StreamState
 from .base import TrickleComponent, ComponentState, ErrorCallback
@@ -19,6 +18,7 @@ from .subscriber import TrickleSubscriber
 from .manager import BaseStreamManager, TrickleStreamManager, StreamHandler
 from .stream_handler import TrickleStreamHandler
 from .utils.register import RegisterCapability
+from .utils.loading_overlay import build_loading_overlay_frame
 
 # Processing utilities
 from .frame_processor import FrameProcessor

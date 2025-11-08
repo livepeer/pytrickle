@@ -28,7 +28,7 @@
             "name": "Loading Example",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/examples/loading_overlay.py",
+            "program": "${workspaceFolder}/examples/loading_overlay_example.py",
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}/examples",
             "env": {
