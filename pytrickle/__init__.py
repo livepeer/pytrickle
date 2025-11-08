@@ -21,15 +21,15 @@ from .stream_handler import TrickleStreamHandler
 from .utils.register import RegisterCapability
 
 # Processing utilities
-from .frame_processor import FrameProcessor  # noqa: E402
-from .stream_processor import StreamProcessor  # noqa: E402
-from .fps_meter import FPSMeter  # noqa: E402
-from .frame_skipper import FrameSkipConfig  # noqa: E402
-from .warmup_config import WarmupConfig, WarmupMode  # noqa: E402
+from .frame_processor import FrameProcessor
+from .stream_processor import StreamProcessor
+from .fps_meter import FPSMeter
+from .frame_skipper import FrameSkipConfig
+from .warmup_config import WarmupConfig, WarmupMode
 
-from . import api  # noqa: E402
+from . import api
 
-from .version import __version__  # noqa: E402
+from .version import __version__
 
 __all__ = [
     "TrickleClient",
