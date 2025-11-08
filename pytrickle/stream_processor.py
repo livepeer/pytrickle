@@ -388,6 +388,29 @@ class _InternalFrameProcessor(FrameProcessor):
             logger.error(f"Error in audio processing: {e}")
             return [frame]
     
+    async def _handle_control_sentinels(self, params: Dict[str, Any]) -> None:
+        """Process internal sentinel parameters like load_model and warmup."""
+        if not params:
+            return
+
+        if params.pop("load_model", False):
+            try:
+                await self.ensure_model_loaded()
+                logger.info(f"Model loaded via parameter update for '{self.name}'")
+            except Exception as e:
+                logger.error(f"Error loading model via parameter update: {e}")
+                raise
+
+        warmup_params = params.pop("warmup", None)
+        if warmup_params is not None:
+            kwargs = warmup_params if isinstance(warmup_params, dict) else {}
+            try:
+                await self.trigger_warmup(wait=False, **kwargs)
+                logger.info(f"Warmup triggered via parameter update for '{self.name}'")
+            except Exception as e:
+                logger.error(f"Error triggering warmup: {e}")
+                raise
+    
     async def update_params(self, params: Dict[str, Any]):
         """Update parameters using provided async function.
         
@@ -395,28 +418,8 @@ class _InternalFrameProcessor(FrameProcessor):
         and triggering model loading, while passing through all other parameters
         to the user's param_updater callback.
         """
-        # Handle model loading sentinel message (extract it with pop)
-        if params.pop("load_model", False):
-            try:
-                await self.ensure_model_loaded()
-                logger.info(f"Model loaded via parameter update for '{self.name}'")
-                # Fall through to process remaining params (if any)
-            except Exception as e:
-                logger.error(f"Error loading model via parameter update: {e}")
-                raise
+        await self._handle_control_sentinels(params)
 
-        # Handle warmup sentinel message (extract it with pop)
-        warmup_params = params.pop("warmup", None)
-        if warmup_params is not None:
-            try:
-                # If warmup_params is not a dict, pass empty dict
-                kwargs = warmup_params if isinstance(warmup_params, dict) else {}
-                self._start_warmup_sequence(self.warmup(**kwargs))
-                logger.info(f"Warmup triggered via parameter update for '{self.name}'")
-            except Exception as e:
-                logger.error(f"Error triggering warmup: {e}")
-                raise
-        
         # Normal parameter updates (will include other params even if load_model was present)
         if self.param_updater and params:
             try:
