@@ -2,23 +2,19 @@
 Frame data structures and processing utilities for trickle streaming.
 
 Defines VideoFrame, AudioFrame, their output counterparts, frame processing
-utilities, and streaming utilities for handling media data in the trickle 
+utilities, and streaming utilities for handling media data in the trickle
 streaming pipeline.
-
-Loading overlay inspired by ai-runner feature (Credit to @victorges):
-https://github.com/livepeer/ai-runner/blob/main/runner/app/live/process/loading_overlay.py
 """
 
 import logging
-import math
-import torch
-import numpy as np
-import av
-import cv2
-from typing import Optional, Dict, Union, List, Deque
-from fractions import Fraction
-from collections import deque
 from abc import ABC
+from collections import deque
+from fractions import Fraction
+from typing import Deque, Dict, List, Optional, Union
+
+import av
+import numpy as np
+import torch
 
 logger = logging.getLogger(__name__)
 
@@ -341,168 +337,3 @@ class FrameBuffer:
             "total_received": self.total_frames_received,
             "total_discarded": self.total_frames_discarded
         }
-
-
-# Loading Overlay Utilities
-# ==========================
-
-def _create_loading_frame_numpy(
-    width: int, 
-    height: int, 
-    message: str,
-    frame_counter: int,
-    progress: Optional[float]
-) -> np.ndarray:
-    """
-    Internal helper to create a loading overlay frame as numpy array.
-    
-    Creates an RGB loading overlay with animated progress bar using OpenCV.
-    This is an implementation detail and should not be used directly.
-    """
-    # Input validation
-    if width <= 0 or height <= 0:
-        raise ValueError(f"Width and height must be positive, got {width}x{height}")
-    if progress is not None and not (0.0 <= progress <= 1.0):
-        raise ValueError(f"Progress must be between 0.0 and 1.0, got {progress}")
-    
-    # Create dark background (RGB format)
-    frame = np.zeros((height, width, 3), dtype=np.uint8)
-    dark_bg = (30, 30, 30)
-    overlay_bg = (20, 20, 20)
-    border_color = (60, 60, 60)
-    text_color = (200, 200, 200)
-    progress_color = (100, 150, 255)  # Blue progress bar
-    
-    frame[:] = dark_bg
-    
-    # Calculate center position
-    center_x = width // 2
-    center_y = height // 2
-    
-    # Add overlay panel
-    overlay_width = min(400, width - 40)
-    overlay_height = min(200, height - 40)
-    overlay_x = center_x - overlay_width // 2
-    overlay_y = center_y - overlay_height // 2
-    
-    # Create overlay background
-    frame[overlay_y:overlay_y + overlay_height, overlay_x:overlay_x + overlay_width] = overlay_bg
-    
-    # Add border
-    cv2.rectangle(frame, (overlay_x, overlay_y), 
-                 (overlay_x + overlay_width, overlay_y + overlay_height), 
-                 border_color, 2)
-    
-    # Add loading message in center
-    if message:
-        message_size = 1.2
-        message_thickness = 2
-        message_y = center_y
-        
-        (msg_width, _), _ = cv2.getTextSize(message, cv2.FONT_HERSHEY_SIMPLEX, 
-                                          message_size, message_thickness)
-        message_x = center_x - msg_width // 2
-        
-        cv2.putText(frame, message, (message_x, message_y), 
-                    cv2.FONT_HERSHEY_SIMPLEX, message_size, text_color, message_thickness)
-    
-    # Add progress bar
-    bar_width = overlay_width - 60
-    bar_height = 6
-    bar_x = overlay_x + 30
-    bar_y = center_y + 40
-    
-    # Progress bar background
-    cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_width, bar_y + bar_height), 
-                 (40, 40, 40), -1)
-    
-    # Use controllable progress or animated progress
-    if progress is not None and progress > 0:
-        current_progress = min(1.0, max(0.0, progress))
-    else:
-        # Animated progress (oscillating)
-        current_progress = (math.sin(frame_counter * 0.1) + 1) * 0.5
-    
-    progress_width = int(bar_width * current_progress)
-    
-    if progress_width > 0:
-        cv2.rectangle(frame, (bar_x, bar_y), 
-                     (bar_x + progress_width, bar_y + bar_height), 
-                     progress_color, -1)
-    
-    return frame
-
-
-def build_loading_overlay_frame(
-    original_frame: 'VideoFrame',
-    message: str = "Loading...",
-    frame_counter: int = 0,
-    progress: Optional[float] = None
-) -> 'VideoFrame':
-    """
-    Create a loading overlay VideoFrame with timing preserved from original frame.
-    
-    Replaces the video content with an animated loading overlay while preserving
-    timing information (timestamp, time_base) from the original frame. This is 
-    useful for frame processors that need to show loading state during warmup or
-    processing delays.
-    
-    Args:
-        original_frame: Original VideoFrame to preserve timing and dimensions from
-        message: Loading message to display (default: "Loading...")
-        frame_counter: Current frame number for animations (creates oscillating effect)
-        progress: Optional progress value 0.0-1.0 for static progress bar, 
-                  or None for animated progress
-    
-    Returns:
-        VideoFrame with loading overlay and preserved timing
-    
-    Note:
-        Application-specific data like side_data is NOT copied from the original
-        frame and should be handled by the caller if needed.
-    
-    Example:
-        >>> overlay_frame = build_loading_overlay_frame(
-        ...     original_frame=frame,
-        ...     message="Loading model...",
-        ...     frame_counter=self._frame_counter,
-        ...     progress=0.5
-        ... )
-        >>> # Optionally preserve side_data if needed:
-        >>> overlay_frame.side_data = frame.side_data
-    """
-    # Get dimensions from original frame tensor
-    tensor = original_frame.tensor
-    if tensor.dim() == 4:  # [B, H, W, C] or [B, C, H, W]
-        if tensor.shape[1] == 3:  # [B, C, H, W]
-            height, width = tensor.shape[2], tensor.shape[3]
-        else:  # [B, H, W, C]
-            height, width = tensor.shape[1], tensor.shape[2]
-    elif tensor.dim() == 3:  # [H, W, C] or [C, H, W]
-        if tensor.shape[0] == 3:  # [C, H, W]
-            height, width = tensor.shape[1], tensor.shape[2]
-        else:  # [H, W, C]
-            height, width = tensor.shape[0], tensor.shape[1]
-    else:
-        raise ValueError(f"Unexpected tensor dimensions: {tensor.shape}")
-    
-    # Generate overlay as numpy array (RGB format)
-    overlay_np = _create_loading_frame_numpy(
-        width=width,
-        height=height,
-        message=message,
-        frame_counter=frame_counter,
-        progress=progress
-    )
-    
-    # Convert to av.VideoFrame
-    overlay_av = av.VideoFrame.from_ndarray(overlay_np, format="rgb24")
-    
-    # Preserve timing from original frame
-    overlay_av.pts = original_frame.timestamp
-    overlay_av.time_base = original_frame.time_base
-    
-    # Create VideoFrame using helper that preserves timing
-    overlay_frame = VideoFrame.from_av_frame_with_timing(overlay_av, original_frame)
-    
-    return overlay_frame
