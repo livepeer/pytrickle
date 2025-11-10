@@ -4,11 +4,6 @@ Trickle App - A Python package for high-performance video streaming over trickle
 Provides functionality to subscribe to and publish video streams with real-time processing.
 """
 
-from typing import Callable, Optional, Coroutine, Any
-
-# Type alias for error callback functions (async only)
-ErrorCallback = Callable[[str, Optional[Exception]], Coroutine[Any, Any, None]]
-
 from .client import TrickleClient
 from .server import StreamServer
 from .protocol import TrickleProtocol
@@ -17,7 +12,7 @@ from .frames import (
     FrameBuffer,
 )
 from .state import StreamState
-from .base import TrickleComponent, ComponentState
+from .base import TrickleComponent, ComponentState, ErrorCallback
 from .publisher import TricklePublisher
 from .subscriber import TrickleSubscriber
 from .manager import BaseStreamManager, TrickleStreamManager, StreamHandler

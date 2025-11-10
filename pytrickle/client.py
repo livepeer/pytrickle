@@ -14,7 +14,7 @@ from collections import deque
 
 from .protocol import TrickleProtocol
 from .frames import VideoFrame, AudioFrame, VideoOutput, AudioOutput
-from . import ErrorCallback
+from .base import ErrorCallback
 from .frame_processor import FrameProcessor
 from .frame_skipper import AdaptiveFrameSkipper, FrameSkipConfig, FrameProcessingResult
 
