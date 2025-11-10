@@ -260,9 +260,8 @@ async def main() -> None:
     # Store processor reference for background tasks
     handlers.processor = processor
     
-    logger.info("🚀 Green processor started on port 8000")
-    logger.info("   OpenCV will apply: horizontal flip + green hue")
-    logger.info("   Update params: POST http://localhost:8000/control")
+    logger.info("OpenCV will apply: horizontal flip + green hue")
+    logger.info("Update params: POST http://localhost:8000/control")
     
     await processor.run_forever()
 

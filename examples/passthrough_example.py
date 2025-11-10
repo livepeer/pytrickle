@@ -131,9 +131,8 @@ async def main() -> None:
         port=8000,
     )
     
-    logger.info("🚀 Passthrough processor started on port 8000")
-    logger.info("   Send video to: http://localhost:8000/stream")
-    logger.info("   Update params: POST http://localhost:8000/control")
+    logger.info("Send video to: http://localhost:8000/stream")
+    logger.info("Update params: POST http://localhost:8000/control")
     
     await processor.run_forever()
 
