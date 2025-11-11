@@ -63,6 +63,7 @@ class StreamServer:
         app_kwargs: Optional[Dict[str, Any]] = None,
         # Frame skipping configuration
         frame_skip_config: Optional[FrameSkipConfig] = None,
+        clear_queues_on_update: bool = True,
 
     ):
         """Initialize StreamServer.
@@ -85,6 +86,7 @@ class StreamServer:
             on_shutdown: List of shutdown handlers
             app_kwargs: Additional kwargs for aiohttp.web.Application
             frame_skip_config: Optional frame skipping configuration (None = no frame skipping)
+            clear_queues_on_update: Whether to clear client input queues before updating params
         """
         self.frame_processor = frame_processor
         self.port = port
@@ -108,6 +110,9 @@ class StreamServer:
         
         # Frame skipping configuration
         self.frame_skip_config = frame_skip_config
+        
+        # Parameter update queue management
+        self.clear_queues_on_update = clear_queues_on_update
         
         # Stream management - simple and direct
         self.current_client: Optional[TrickleClient] = None
@@ -349,6 +354,8 @@ class StreamServer:
             # Set params if provided
             if params.params:
                 try:
+                    # Clear input queues before setting params to avoid stale frames
+                    await self.current_client.clear_input_queues()
                     await self.frame_processor.update_params(params.params)
                 except Exception as e:
                     logger.warning(f"Failed to set params: {e}")
@@ -423,8 +430,13 @@ class StreamServer:
         """Handle control messages from trickle protocol.
         
         Routes control messages to the frame processor's update_params method.
+        Clears input queues before updating to avoid processing stale frames.
         """
         try:
+            # Clear input queues to avoid processing stale frames with new parameters
+            if self.clear_queues_on_update and self.current_client:
+                await self.current_client.clear_input_queues()
+            
             await self.frame_processor.update_params(control_data)
             logger.debug("Control message routed to frame processor")
         except Exception as e:
@@ -442,6 +454,10 @@ class StreamServer:
                     "status": "error",
                     "message": "No active stream to update"
                 }, status=400)
+            
+            # Clear input queues before updating to avoid processing stale frames
+            if self.clear_queues_on_update:
+                await self.current_client.clear_input_queues()
             
             # Update frame processor parameters
             await self.frame_processor.update_params(data)
