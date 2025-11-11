@@ -4,8 +4,7 @@ Test utilities for Trickle streaming components.
 Provides simple helpers for creating test doubles that work with the simplified architecture.
 """
 
-import asyncio
-from typing import Optional, Dict, Any
+from typing import Dict, Any
 from unittest.mock import MagicMock, AsyncMock
 from pytrickle.examples.process_video_example import load_model, process_video, update_params
 

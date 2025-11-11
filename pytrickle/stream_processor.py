@@ -58,6 +58,7 @@ class StreamProcessor:
         video_processor = registry.get("video")
         audio_processor = registry.get("audio")
         model_loader = registry.get("model_loader")
+        warmup_handler = registry.get("warmup")
         param_updater = registry.get("param_updater")
         on_stream_start = registry.get("stream_start")
         on_stream_stop = registry.get("stream_stop")
@@ -77,6 +78,7 @@ class StreamProcessor:
             on_stream_start=on_stream_start,
             on_stream_stop=on_stream_stop,
             warmup_handler=warmup_handler,
+            warmup_config=warmup_config,
             send_data_interval=send_data_interval,
             name=name,
             port=port,
@@ -98,6 +100,7 @@ class StreamProcessor:
         on_stream_start: Optional[OnStreamStart] = None,
         on_stream_stop: Optional[OnStreamStop] = None,
         warmup_handler: Optional[WarmupHandler] = None,
+        warmup_config: Optional[Any] = None,
         send_data_interval: Optional[float] = 0.333,
         name: str = "stream-processor",
         port: int = 8000,
