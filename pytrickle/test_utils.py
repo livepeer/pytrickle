@@ -57,7 +57,6 @@ def create_mock_client():
     mock_client.start = AsyncMock(side_effect=mock_start_immediate)
     mock_client.stop = AsyncMock(side_effect=mock_stop)
     mock_client.publish_data = AsyncMock()
-    mock_client.clear_input_queues = AsyncMock()
     
     # Mock protocol with proper monitoring support
     mock_protocol = MagicMock()
