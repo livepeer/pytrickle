@@ -232,11 +232,13 @@ class FrameProcessor(ABC):
         """
         try:
             # Cancel any existing warmup task
-            # Note: We don't await here since this is not an async function
-            # The task will be cleaned up by asyncio when the new task starts
             if self._warmup_task and not self._warmup_task.done():
-                logger.debug("Cancelling existing warmup task (will be replaced)")
                 self._warmup_task.cancel()
+                try:
+                    # Don't await here, just cancel and move on
+                    pass
+                except Exception:
+                    logger.debug("Previous warmup task cleanup error", exc_info=True)
         except Exception:
             logger.debug("Error cancelling prior warmup task", exc_info=True)
         
@@ -250,9 +252,8 @@ class FrameProcessor(ABC):
         async def _warmup_and_finish():
             try:
                 await warmup_coro
-                logger.info("Warmup completed successfully")
-            except Exception as e:
-                logger.warning(f"Warmup failed: {e}", exc_info=True)
+            except Exception:
+                logger.debug("Warmup failed while running warmup sequence", exc_info=True)
             finally:
                 self._loading_active = False
                 self._warmup_done.set()

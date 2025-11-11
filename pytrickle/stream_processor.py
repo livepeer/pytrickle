@@ -8,7 +8,6 @@ from .frames import VideoFrame, AudioFrame
 from .frame_processor import FrameProcessor
 from .server import StreamServer
 from .frame_skipper import FrameSkipConfig
-from .warmup_config import WarmupConfig
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +61,6 @@ class StreamProcessor:
         param_updater = registry.get("param_updater")
         on_stream_start = registry.get("stream_start")
         on_stream_stop = registry.get("stream_stop")
-        warmup_handler = registry.get("warmup")
 
         # If handler_instance is a FrameProcessor, extract its warmup_config
         warmup_config = None
@@ -83,7 +81,6 @@ class StreamProcessor:
             name=name,
             port=port,
             frame_skip_config=frame_skip_config,
-            warmup_config=warmup_config,
             validate_signature=validate_signature,
             **server_kwargs
         )
@@ -105,7 +102,6 @@ class StreamProcessor:
         name: str = "stream-processor",
         port: int = 8000,
         frame_skip_config: Optional[FrameSkipConfig] = None,
-        warmup_config: Optional[WarmupConfig] = None,
         validate_signature: bool = True,
         **server_kwargs
     ):
