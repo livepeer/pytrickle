@@ -14,7 +14,7 @@ from unittest.mock import patch, MagicMock
 from pytrickle.server import StreamServer
 from pytrickle.state import StreamState, PipelineState
 from pytrickle.test_utils import MockFrameProcessor, create_mock_client
-
+from pytrickle.examples.process_video_example import load_model, process_video, update_params
 
 def get_stream_route(server, endpoint):
     """Get the full route path for a streaming endpoint."""
@@ -231,7 +231,6 @@ class TestFrameProcessorStateIntegration:
     async def test_internal_frame_processor_integration(self):
         """Test _InternalFrameProcessor integration with state."""
         from pytrickle.stream_processor import _InternalFrameProcessor
-        from examples.process_video_example import load_model, process_video, update_params
         
         processor = _InternalFrameProcessor(
             video_processor=process_video,
@@ -415,7 +414,6 @@ class TestStateIntegrationWithStreamProcessor:
     async def test_stream_processor_state_integration(self):
         """Test StreamProcessor integration with state."""
         from pytrickle.stream_processor import _InternalFrameProcessor
-        from examples.process_video_example import load_model, process_video, update_params
         
         processor = _InternalFrameProcessor(
             video_processor=process_video,
