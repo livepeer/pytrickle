@@ -57,7 +57,6 @@ class StreamProcessor:
         video_processor = registry.get("video")
         audio_processor = registry.get("audio")
         model_loader = registry.get("model_loader")
-        warmup_handler = registry.get("warmup")
         param_updater = registry.get("param_updater")
         on_stream_start = registry.get("stream_start")
         on_stream_stop = registry.get("stream_stop")
