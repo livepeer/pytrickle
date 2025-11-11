@@ -19,7 +19,6 @@ AudioProcessor = Callable[[AudioFrame], Awaitable[Optional[List[AudioFrame]]]]
 # without breaking existing handler implementations. Once a stable configuration
 # contract is agreed upon, we can replace this with a TypedDict/Protocol.
 ModelLoader = Callable[..., Awaitable[None]]
-WarmupHandler = Callable[..., Awaitable[None]]
 
 ParamUpdater = Callable[[Dict[str, Any]], Awaitable[None]]
 OnStreamStart = Callable[[], Awaitable[None]]
@@ -77,8 +76,6 @@ class StreamProcessor:
             param_updater=param_updater,
             on_stream_start=on_stream_start,
             on_stream_stop=on_stream_stop,
-            warmup_handler=warmup_handler,
-            warmup_config=warmup_config,
             send_data_interval=send_data_interval,
             name=name,
             port=port,
@@ -99,8 +96,6 @@ class StreamProcessor:
         param_updater: Optional[ParamUpdater] = None,
         on_stream_start: Optional[OnStreamStart] = None,
         on_stream_stop: Optional[OnStreamStop] = None,
-        warmup_handler: Optional[WarmupHandler] = None,
-        warmup_config: Optional[Any] = None,
         send_data_interval: Optional[float] = 0.333,
         name: str = "stream-processor",
         port: int = 8000,
@@ -132,7 +127,6 @@ class StreamProcessor:
             "param_updater": param_updater,
             "on_stream_start": on_stream_start,
             "on_stream_stop": on_stream_stop,
-            "warmup_handler": warmup_handler,
         }.items():
             if processor_fn is None:
                 continue
@@ -150,7 +144,6 @@ class StreamProcessor:
         self.param_updater = param_updater
         self.on_stream_start = on_stream_start
         self.on_stream_stop = on_stream_stop
-        self.warmup_handler = warmup_handler
         self.send_data_interval = send_data_interval
         self.name = name
         self.port = port
@@ -166,7 +159,6 @@ class StreamProcessor:
             param_updater=param_updater,
             on_stream_start=on_stream_start,
             on_stream_stop=on_stream_stop,
-            warmup_handler=warmup_handler,
             name=name,
             warmup_config=warmup_config
         )
@@ -268,7 +260,6 @@ class StreamProcessor:
         - video_processor(frame: VideoFrame) -> Awaitable[Optional[VideoFrame]]
         - audio_processor(frame: AudioFrame) -> Awaitable[Optional[List[AudioFrame]]]
         - model_loader(...) -> Awaitable[None]
-        - warmup_handler(...) -> Awaitable[None]
         - param_updater(params: Dict[str, Any]) -> Awaitable[None]
         - on_stream_start() -> Awaitable[None]
         - on_stream_stop() -> Awaitable[None]
@@ -281,7 +272,7 @@ class StreamProcessor:
             if params and params[0].name == "self":
                 params = params[1:]
 
-            if name_label in {"on_stream_start", "on_stream_stop", "model_loader", "warmup_handler"}:
+            if name_label in {"on_stream_start", "on_stream_stop", "model_loader"}:
                 # allow any for model_loader; strict zero-arg for lifecycle
                 if name_label.startswith("on_stream") and any(p.kind == p.POSITIONAL_OR_KEYWORD for p in params):
                     logger.warning("%s expected no parameters, got %s", name_label, [p.name for p in params])
@@ -308,7 +299,6 @@ class _InternalFrameProcessor(FrameProcessor):
         param_updater: Optional[ParamUpdater] = None,
         on_stream_start: Optional[OnStreamStart] = None,
         on_stream_stop: Optional[OnStreamStop] = None,
-        warmup_handler: Optional[WarmupHandler] = None,
         name: str = "internal-processor",
         warmup_config: Optional['WarmupConfig'] = None
     ):
@@ -319,7 +309,6 @@ class _InternalFrameProcessor(FrameProcessor):
         self.param_updater = param_updater
         self.on_stream_start_callback = on_stream_start
         self.on_stream_stop_callback = on_stream_stop
-        self.warmup_handler = warmup_handler
         self.name = name
         
         # Frame skipping is handled at TrickleClient level
@@ -328,17 +317,7 @@ class _InternalFrameProcessor(FrameProcessor):
         
         # Pass warmup_config to base class so it knows not to call set_startup_complete early
         super().__init__(error_callback=None, warmup_config=warmup_config)
-
-    async def warmup(self, **kwargs):
-        """Run warmup using provided async function."""
-        if self.warmup_handler:
-            try:
-                await self.warmup_handler(**kwargs)
-                logger.info(f"StreamProcessor '{self.name}' warmup completed successfully")
-            except Exception as e:
-                logger.error(f"Error in warmup handler: {e}")
-                raise
-
+    
     async def load_model(self, **kwargs):
         """Load model using provided async function."""
         if self.model_loader:
@@ -393,26 +372,7 @@ class _InternalFrameProcessor(FrameProcessor):
             except Exception as e:
                 logger.error(f"Error loading model via parameter update: {e}")
                 raise
-
-        warmup_params = params.pop("warmup", None)
-        if warmup_params is not None:
-            kwargs = warmup_params if isinstance(warmup_params, dict) else {}
-            try:
-                await self.trigger_warmup(wait=False, **kwargs)
-                logger.info(f"Warmup triggered via parameter update for '{self.name}'")
-            except Exception as e:
-                logger.error(f"Error triggering warmup: {e}")
-                raise
-    
-    async def update_params(self, params: Dict[str, Any]):
-        """Update parameters using provided async function.
         
-        Handles the 'load_model' sentinel parameter internally by extracting it
-        and triggering model loading, while passing through all other parameters
-        to the user's param_updater callback.
-        """
-        await self._handle_control_sentinels(params)
-
         # Normal parameter updates (will include other params even if load_model was present)
         if self.param_updater and params:
             try:
