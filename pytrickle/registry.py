@@ -26,7 +26,6 @@ HandlerKind = Literal[
     "param_updater",
     "stream_start",
     "stream_stop",
-    "warmup",
 ]
 
 # Protocol definitions for decorated handler signatures
@@ -49,10 +48,6 @@ class ParamUpdaterProtocol(Protocol):
 class LifecycleProtocol(Protocol):
     """Protocol for decorated lifecycle functions (start/stop)."""
     async def __call__(self) -> None: ...    
-
-class WarmupProtocol(Protocol):
-    """Protocol for decorated warmup functions."""
-    async def __call__(self, **kwargs: Any) -> None: ...
 
 @dataclass
 class HandlerInfo:

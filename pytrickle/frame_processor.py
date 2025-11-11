@@ -82,73 +82,14 @@ class FrameProcessor(ABC):
                 await self.load_model(**kwargs)
                 self._model_loaded = True
                 
-                # Automatically run warmup after model load
-                await self.trigger_warmup(wait=True)
-
-                # After load_model and warmup complete, mark startup complete
+                # After load_model completes, mark startup complete
                 if self.state:
                     self.state.set_startup_complete()
-                    logger.info(f"Model loaded - startup complete for {self.__class__.__name__}")
+                    logger.debug(f"Model loaded - startup complete for {self.__class__.__name__}")
                 else:
                     logger.debug(f"Model loaded for {self.__class__.__name__}")
             else:
                 logger.debug(f"Model already loaded for {self.__class__.__name__}")
-
-    async def trigger_warmup(self, *, wait: bool = False, timeout: float = 60.0, **kwargs) -> None:
-        """
-        Trigger the warmup routine.
-
-        Args:
-            wait: When True, wait for warmup completion (used during initial load).
-            timeout: Maximum time to wait for warmup completion when wait=True.
-            **kwargs: Additional keyword arguments forwarded to the warmup routine.
-        """
-        warmup_callable = getattr(self, "warmup", None)
-        if not callable(warmup_callable):
-            logger.debug(f"No warmup callable defined for {self.__class__.__name__}")
-            return
-
-        kwargs = kwargs or {}
-
-        if wait:
-            if self._is_warmup_active():
-                logger.info(f"Warmup already active, waiting for completion for {self.__class__.__name__}")
-                await self._wait_for_warmup_completion(timeout)
-                return
-
-            logger.info(f"Running warmup after model load for {self.__class__.__name__}")
-            try:
-                await warmup_callable(**kwargs)
-                logger.info(f"Warmup completed for {self.__class__.__name__}")
-            except Exception as exc:
-                logger.warning(f"Warmup failed for {self.__class__.__name__}: {exc}", exc_info=True)
-            finally:
-                self._loading_active = False
-                self._warmup_done.set()
-            return
-
-        self._start_warmup_sequence(warmup_callable(**kwargs))
-
-    async def _wait_for_warmup_completion(self, timeout: float) -> None:
-        """Wait for warmup completion with timeout handling."""
-        try:
-            await asyncio.wait_for(self._warmup_done.wait(), timeout=timeout)
-            logger.info(f"Warmup completed for {self.__class__.__name__}")
-        except asyncio.TimeoutError:
-            logger.warning(f"Timeout waiting for warmup to complete for {self.__class__.__name__}")
-
-    @abstractmethod
-    async def warmup(self, **kwargs):
-        """
-        Warm up the model.
-        
-        This method should be implemented to warm up any required models or resources.
-        It is called automatically when needed.
-        
-        Args:
-            **kwargs: Additional parameters for model warmup
-        """
-        pass
 
     @abstractmethod
     async def load_model(self, **kwargs):
