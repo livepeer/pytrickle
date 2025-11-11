@@ -59,13 +59,14 @@ class RegisterCapability:
                         ssl=False,
                     ) as resp:
                         if resp.status == 200:
-                            self.logger.info("Capability registered successfully")
+                            name = register_req.get("name", "unknown")
+                            self.logger.info(f"Capability {name!r} registered successfully")
                             return urlparse(register_req["url"])
                         elif resp.status == 400:
                             self.logger.error("Orchestrator secret incorrect")
                             return False
                         else:
-                            self.logger.warning(f"Register attempt {attempt} failed: {resp.status} {resp.text}")
+                            self.logger.warning(f"Register attempt {attempt} failed: {resp.status} {await resp.text()}")
 
             except aiohttp.ClientConnectorError as e:
                 # Handle connect call failed without raising
@@ -125,7 +126,8 @@ class RegisterCapability:
         """
         # Get values from env vars if not provided
         orch_url = orch_url or os.environ.get("ORCH_URL", "")
-        orch_secret = orch_secret or os.environ.get("ORCH_SECRET", "")
+        # Pop secret from environment to reduce exposure
+        orch_secret = orch_secret or os.environ.pop("ORCH_SECRET", "")
         capability_name = capability_name or os.environ.get("CAPABILITY_NAME", "pytrickle-worker")
         capability_desc = capability_desc or os.environ.get("CAPABILITY_DESCRIPTION", "PyTrickle video processing worker")
         capability_url = os.environ.get("CAPABILITY_URL", "http://localhost:8000")
@@ -149,15 +151,21 @@ class RegisterCapability:
             return False
             
         register_req = self._build_register_request(**values)
-        result = await self._make_registration_request(
-            values["orch_url"], 
-            values["orch_secret"], 
-            register_req, 
-            max_retries, 
-            delay, 
-            timeout
-        )
-        return result
+        try:
+            result = await self._make_registration_request(
+                values["orch_url"], 
+                values["orch_secret"], 
+                register_req, 
+                max_retries, 
+                delay, 
+                timeout
+            )
+            return result
+        finally:
+            # Clear secret from memory
+            if "orch_secret" in values:
+                values["orch_secret"] = None
+            orch_secret = None
     
     @classmethod
     async def register(cls, logger: Optional[logging.Logger] = None, **kwargs) -> Union[ParseResult, bool]:
