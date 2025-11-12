@@ -17,6 +17,7 @@ from .frames import VideoFrame, AudioFrame, VideoOutput, AudioOutput
 from .base import ErrorCallback
 from .frame_processor import FrameProcessor
 from .frame_skipper import AdaptiveFrameSkipper, FrameSkipConfig, FrameProcessingResult
+from .loading_config import LoadingMode
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,14 @@ class TrickleClient:
             )
         else:
             self.frame_skipper = None
+
+        # Auto-loading overlay coordination
+        self._reset_auto_loading_state()
+
+    def _reset_auto_loading_state(self) -> None:
+        """Reset tracking for the auto-loading overlay coordination."""
+        self._last_video_frame_time = time.monotonic()
+        self._auto_loading_active = False
     
     async def start(self, request_id: str = "default"):
         """Start the trickle client."""
@@ -81,6 +90,7 @@ class TrickleClient:
         self.request_id = request_id
         self.stop_event.clear()
         self.error_event.clear()
+        self._reset_auto_loading_state()
         
         logger.info(f"Starting trickle client with request_id={request_id}")
         
@@ -270,10 +280,51 @@ class TrickleClient:
 
                 frame = frame_or_result
                 
-                processed_frame = await self.frame_processor.process_video_async(frame)
-                if processed_frame:
-                    output = VideoOutput(processed_frame, self.request_id)
-                    await self.output_queue.put(output)
+                handler_output = await self.frame_processor.process_video_async(frame)
+                handler_produced_frame = handler_output is not None
+                processed_frame = handler_output if handler_output is not None else frame
+
+                now = time.monotonic()
+                cfg = self.frame_processor.loading_config
+
+                if handler_produced_frame:
+                    self._last_video_frame_time = now
+                    if (
+                        self._auto_loading_active
+                        or (
+                            cfg
+                            and cfg.enabled
+                            and cfg.mode == LoadingMode.OVERLAY
+                            and cfg.auto_timeout_seconds is not None
+                            and cfg.auto_timeout_seconds >= 0.0
+                            and self.frame_processor._is_loading_active()
+                        )
+                    ):
+                        logger.debug("Auto-loading overlay disabled")
+                        self.frame_processor.set_loading_active(False)
+                        self._auto_loading_active = False
+                else:
+                    # Handler withheld frame - check if overlay should auto-enable
+                    auto_timeout = cfg.auto_timeout_seconds if cfg else None
+                    if (
+                        cfg
+                        and cfg.enabled
+                        and cfg.mode == LoadingMode.OVERLAY
+                        and auto_timeout is not None
+                        and auto_timeout >= 0.0
+                        and (now - self._last_video_frame_time) >= auto_timeout
+                    ):
+                        if not self._auto_loading_active:
+                            logger.debug("Auto-loading overlay enabled (timeout=%s)", auto_timeout)
+                            self.frame_processor.set_loading_active(True)
+                            self._auto_loading_active = True
+
+                final_frame = self.frame_processor.apply_loading_to_video_frame(frame, processed_frame)
+                if final_frame is None:
+                    final_frame = processed_frame
+
+                output = VideoOutput(final_frame, self.request_id)
+                await self.output_queue.put(output)
             except asyncio.TimeoutError:
                 continue
             except asyncio.CancelledError:

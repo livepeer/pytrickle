@@ -22,4 +22,5 @@ class LoadingConfig:
     message: str = "Loading..."              # Loading message to display in overlay
     progress: Optional[float] = None         # Progress value 0.0-1.0 (None = animated)
     enabled: bool = True                     # Whether loading gating is active
+    auto_timeout_seconds: Optional[float] = 1.5  # Seconds without output before overlay auto-enables
 

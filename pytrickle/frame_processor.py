@@ -6,12 +6,14 @@ making it easy to integrate AI models and async pipelines with PyTrickle.
 
 import asyncio
 import logging
+from dataclasses import replace
 from abc import ABC, abstractmethod
 from typing import Optional, Any, Dict, List
 from .frames import VideoFrame, AudioFrame
 from . import ErrorCallback
 from .state import StreamState
 from .loading_config import LoadingConfig, LoadingMode
+from .utils.loading_overlay import build_loading_overlay_frame
 
 logger = logging.getLogger(__name__)
 
@@ -172,7 +174,26 @@ class FrameProcessor(ABC):
         if not self.loading_config or not self.loading_config.enabled:
             return False
         return self._loading_active
-    
+
+    def set_loading_active(self, active: bool, *, message: Optional[str] = None) -> None:
+        """Toggle the active loading state without changing the enable flag."""
+        if not self.loading_config:
+            return
+
+        if active and not self.loading_config.enabled:
+            return
+
+        if message and message != self.loading_config.message:
+            self.loading_config = replace(self.loading_config, message=message)
+
+        if self._loading_active == active:
+            return
+
+        logger.debug("Setting loading active=%s message=%s", active, message)
+
+        self._loading_active = active
+        self._frame_counter = 0
+
     def set_loading_config(self, config: Optional[LoadingConfig]) -> None:
         """
         Update loading configuration dynamically.
@@ -181,6 +202,10 @@ class FrameProcessor(ABC):
             config: New loading configuration, or None to disable loading gating
         """
         self.loading_config = config
+        if not config or not config.enabled:
+            if self._loading_active:
+                self._loading_active = False
+                self._frame_counter = 0
         logger.debug(f"Loading config updated: {config}")
     
     def _should_show_loading_overlay(self) -> bool:
@@ -197,3 +222,44 @@ class FrameProcessor(ABC):
             return False
         
         return self.loading_config.mode == LoadingMode.OVERLAY
+
+    def should_render_loading_overlay(self) -> bool:
+        """Public helper for callers that need to know if overlay frames should be emitted."""
+        return self._should_show_loading_overlay()
+
+    def apply_loading_to_video_frame(
+        self,
+        original_frame: VideoFrame,
+        processed_frame: Optional[VideoFrame],
+    ) -> Optional[VideoFrame]:
+        """
+        Adjust the outgoing video frame based on the active loading configuration.
+
+        Args:
+            original_frame: Frame received from ingress (used for overlay timing).
+            processed_frame: Frame returned by the user handler (may be None).
+
+        Returns:
+            The frame that should be forwarded downstream (overlay or passthrough).
+        """
+        fallback_frame = processed_frame if processed_frame is not None else original_frame
+
+        if not self.loading_config or not self.loading_config.enabled:
+            return fallback_frame
+
+        if not self._loading_active:
+            return fallback_frame
+
+        if self.loading_config.mode == LoadingMode.PASSTHROUGH:
+            return fallback_frame
+
+        if self.loading_config.mode == LoadingMode.OVERLAY:
+            self._frame_counter += 1
+            return build_loading_overlay_frame(
+                original_frame=original_frame,
+                message=self.loading_config.message,
+                frame_counter=self._frame_counter,
+                progress=self.loading_config.progress,
+            )
+
+        return fallback_frame

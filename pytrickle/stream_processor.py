@@ -1,6 +1,7 @@
 import asyncio
 import inspect
 import logging
+from enum import Enum
 from typing import Optional, Callable, Dict, Any, List, Union, Awaitable
 
 from .registry import HandlerRegistry
@@ -9,8 +10,11 @@ from .frame_processor import FrameProcessor
 from .server import StreamServer
 from .frame_skipper import FrameSkipConfig
 from .loading_config import LoadingConfig
-from .utils.loading_overlay import build_loading_overlay_frame
 from dataclasses import replace
+
+class VideoProcessingResult(Enum):
+    """Explicit result to distinguish intentional frame withholding from errors."""
+    WITHHELD = "withheld"  # Intentionally withholding frame to trigger overlay
 
 logger = logging.getLogger(__name__)
 
@@ -334,16 +338,6 @@ class _InternalFrameProcessor(FrameProcessor):
     
     async def process_video_async(self, frame: VideoFrame) -> Optional[VideoFrame]:
         """Process video frame using provided async function."""
-        # Check if we should show loading overlay
-        if self._should_show_loading_overlay():
-            self._frame_counter += 1
-            return build_loading_overlay_frame(
-                original_frame=frame,
-                message=self.loading_config.message if self.loading_config else "Loading...",
-                frame_counter=self._frame_counter,
-                progress=self.loading_config.progress if self.loading_config else None
-            )
-        
         # Normal processing
         if not self.video_processor:
             logger.debug("No video processor defined, passing frame unchanged")
@@ -351,7 +345,12 @@ class _InternalFrameProcessor(FrameProcessor):
             
         try:
             result = await self.video_processor(frame)
-            return result if isinstance(result, VideoFrame) else frame
+            if isinstance(result, VideoFrame):
+                return result
+            if result == VideoProcessingResult.WITHHELD:
+                return None
+            # None from decorators or other failures means pass through
+            return frame
         except Exception as e:
             logger.error(f"Error in video processing: {e}")
             return frame
@@ -395,9 +394,11 @@ class _InternalFrameProcessor(FrameProcessor):
             user_params.pop("load_model", None)
 
         # Handle loading config updates
-        loading_params = {}
+        loading_params: Dict[str, Any] = {}
+        manual_show_loading: Optional[bool] = None
         if "show_loading" in params:
-            loading_params["enabled"] = bool(params["show_loading"])
+            manual_show_loading = bool(params["show_loading"])
+            loading_params["enabled"] = manual_show_loading
         if "loading_message" in params:
             loading_params["message"] = str(params["loading_message"])
         if "loading_mode" in params:
@@ -406,19 +407,36 @@ class _InternalFrameProcessor(FrameProcessor):
             loading_params["mode"] = LoadingMode.OVERLAY if mode_str == "overlay" else LoadingMode.PASSTHROUGH
         if "loading_progress" in params:
             loading_params["progress"] = float(params["loading_progress"])
+        if "loading_auto_timeout" in params:
+            raw_timeout = params["loading_auto_timeout"]
+            loading_params["auto_timeout_seconds"] = None if raw_timeout is None else float(raw_timeout)
         
         if loading_params:
-            # Update or create loading config
+            previous_config = self.loading_config
             if self.loading_config:
-                # Update existing config
                 self.loading_config = replace(self.loading_config, **loading_params)
             else:
-                # Create new config with defaults for unspecified params
                 self.loading_config = LoadingConfig(**loading_params)
             
-            # Set loading active state
-            self._loading_active = self.loading_config.enabled
-            logger.info(f"Loading config updated: enabled={self.loading_config.enabled}, mode={self.loading_config.mode.value}, message='{self.loading_config.message}'")
+            if manual_show_loading is not None:
+                self.set_loading_active(manual_show_loading)
+            elif self.loading_config and not self.loading_config.enabled:
+                self.set_loading_active(False)
+
+            if (
+                previous_config
+                and self._loading_active
+                and previous_config.mode != self.loading_config.mode
+            ):
+                self._frame_counter = 0
+
+            logger.info(
+                "Loading config updated: enabled=%s, mode=%s, message='%s', timeout=%s",
+                self.loading_config.enabled,
+                self.loading_config.mode.value,
+                self.loading_config.message,
+                self.loading_config.auto_timeout_seconds,
+            )
         
         # Normal parameter updates (will include other params even if load_model was present)
         if self.param_updater and user_params:
