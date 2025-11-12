@@ -168,7 +168,7 @@ class TestStreamingEndpoints:
         assert resp.status == 200
         
         data = await resp.json()
-        assert data["status"] == "success"
+        assert data["status"] == "accepted"
         
         # Verify parameters were updated
         assert server.frame_processor.test_params == payload

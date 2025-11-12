@@ -25,7 +25,7 @@ from .frame_processor import FrameProcessor
 from .stream_processor import StreamProcessor
 from .fps_meter import FPSMeter
 from .frame_skipper import FrameSkipConfig
-from .warmup_config import WarmupConfig, WarmupMode
+from .loading_config import LoadingConfig, LoadingMode
 
 from . import api
 
@@ -56,8 +56,8 @@ __all__ = [
     "FrameProcessor",
     "FPSMeter",
     "FrameSkipConfig",
-    "WarmupConfig",
-    "WarmupMode",
+    "LoadingConfig",
+    "LoadingMode",
     "build_loading_overlay_frame",
     "__version__"
 ] 
