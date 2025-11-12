@@ -11,7 +11,7 @@ from typing import Optional, Any, Dict, List
 from .frames import VideoFrame, AudioFrame
 from .base import ErrorCallback
 from .state import StreamState
-from .warmup_config import WarmupConfig, WarmupMode
+from .loading_config import LoadingConfig, LoadingMode
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ class FrameProcessor(ABC):
     def __init__(
         self,
         error_callback: Optional[ErrorCallback] = None,
-        warmup_config: Optional[WarmupConfig] = None,
+        loading_config: Optional[LoadingConfig] = None,
         **init_kwargs
     ):
         """Initialize the frame processor.
@@ -54,8 +54,8 @@ class FrameProcessor(ABC):
         Args:
             error_callback: Optional error callback for processing errors.
                            If None, errors will be logged but not propagated.
-            warmup_config: Optional warmup configuration for loading overlay/passthrough behavior.
-                          If None, no warmup gating is applied.
+            loading_config: Optional loading configuration for loading overlay/passthrough behavior.
+                           If None, no loading gating is applied.
             **init_kwargs: Additional kwargs passed to load_model() method
         """
         self.error_callback = error_callback
@@ -63,13 +63,10 @@ class FrameProcessor(ABC):
         self._model_loaded = False
         self._model_load_lock = asyncio.Lock()
         
-        # Warmup/loading state management
-        self.warmup_config = warmup_config
+        # Loading state management
+        self.loading_config = loading_config
         self._loading_active: bool = False
-        self._warmup_done: asyncio.Event = asyncio.Event()
-        self._warmup_done.set()  # Initially not in warmup state
         self._frame_counter: int = 0
-        self._warmup_task: Optional[asyncio.Task] = None
 
     def attach_state(self, state: StreamState) -> None:
         """Attach a pipeline state manager."""
@@ -164,70 +161,27 @@ class FrameProcessor(ABC):
         """
         pass
     
-    def _start_warmup_sequence(self, warmup_coro) -> None:
-        """
-        Start (or restart) the warmup routine with loading overlay management.
-        
-        Args:
-            warmup_coro: Coroutine that performs the actual warmup work
-        """
-        try:
-            # Cancel any existing warmup task
-            if self._warmup_task and not self._warmup_task.done():
-                self._warmup_task.cancel()
-                try:
-                    # Don't await here, just cancel and move on
-                    pass
-                except Exception:
-                    logger.debug("Previous warmup task cleanup error", exc_info=True)
-        except Exception:
-            logger.debug("Error cancelling prior warmup task", exc_info=True)
-        
-        # Reset state for new warmup
-        self._frame_counter = 0
-        self._loading_active = True
-        self._warmup_done.clear()
-        
-        logger.info("Starting warmup sequence (loading_active=True, warmup_done=False)")
-        
-        async def _warmup_and_finish():
-            try:
-                await warmup_coro
-            except Exception:
-                logger.debug("Warmup failed while running warmup sequence", exc_info=True)
-            finally:
-                self._loading_active = False
-                self._warmup_done.set()
-                logger.info("Warmup sequence finished (loading_active=False, warmup_done=True)")
-                
-                # Don't manage state transitions here - let the wrapper handle it
-                # This allows both FrameProcessor subclasses and plain functions to work
-                # For plain functions: _InternalFrameProcessor will handle state
-                # For FrameProcessor subclasses: they can manage their own state if needed
-        
-        # Create and store the warmup task
-        self._warmup_task = asyncio.create_task(_warmup_and_finish())
     
-    def _is_warmup_active(self) -> bool:
+    def _is_loading_active(self) -> bool:
         """
-        Check if warmup is currently in progress.
+        Check if loading is currently in progress.
         
         Returns:
-            True if warmup is active and not yet complete
+            True if loading is active
         """
-        if not self.warmup_config or not self.warmup_config.enabled:
+        if not self.loading_config or not self.loading_config.enabled:
             return False
-        return self._loading_active and not self._warmup_done.is_set()
+        return self._loading_active
     
-    def set_warmup_config(self, config: Optional[WarmupConfig]) -> None:
+    def set_loading_config(self, config: Optional[LoadingConfig]) -> None:
         """
-        Update warmup configuration dynamically.
+        Update loading configuration dynamically.
         
         Args:
-            config: New warmup configuration, or None to disable warmup gating
+            config: New loading configuration, or None to disable loading gating
         """
-        self.warmup_config = config
-        logger.debug(f"Warmup config updated: {config}")
+        self.loading_config = config
+        logger.debug(f"Loading config updated: {config}")
     
     def _should_show_loading_overlay(self) -> bool:
         """
@@ -236,10 +190,10 @@ class FrameProcessor(ABC):
         Returns:
             True if overlay should be shown, False for passthrough
         """
-        if not self._is_warmup_active():
+        if not self._is_loading_active():
             return False
         
-        if not self.warmup_config:
+        if not self.loading_config:
             return False
         
-        return self.warmup_config.mode == WarmupMode.OVERLAY
+        return self.loading_config.mode == LoadingMode.OVERLAY
