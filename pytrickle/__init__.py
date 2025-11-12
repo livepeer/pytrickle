@@ -22,7 +22,7 @@ from .utils.loading_overlay import build_loading_overlay_frame
 
 # Processing utilities
 from .frame_processor import FrameProcessor
-from .stream_processor import StreamProcessor
+from .stream_processor import StreamProcessor, VideoProcessingResult
 from .fps_meter import FPSMeter
 from .frame_skipper import FrameSkipConfig
 from .loading_config import LoadingConfig, LoadingMode
@@ -35,6 +35,7 @@ __all__ = [
     "TrickleClient",
     "StreamServer",
     "StreamProcessor",
+    "VideoProcessingResult",
     "TrickleProtocol",
     "VideoFrame",
     "AudioFrame", 

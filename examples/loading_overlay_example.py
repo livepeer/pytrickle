@@ -2,32 +2,34 @@
 """
 Model Loading and Loading Overlay Example
 
-This comprehensive example demonstrates:
+Demonstrates:
 1. Non-blocking model loading with configurable delay
 2. Server health state transitions (LOADING -> IDLE)
-3. Automatic animated loading overlay during processing (internalized feature)
-4. Real-time parameter updates to control overlay
+3. Automatic loading overlay during processing delays
+4. Real-time parameter updates
 
 The server starts immediately and is available for /health checks while
-the model loads in the background. The loading overlay is now automatically
-handled by the framework - no manual implementation needed!
+the model loads in the background. The loading overlay automatically appears
+when frames are withheld during processing delays.
 
 To test:
 1. Run: python examples/loading_overlay_example.py
 2. Check health: curl http://localhost:8000/health
-3. Update parameters to enable loading overlay:
+3. Simulate a 15s processing stall:
    curl -X POST http://localhost:8000/update_params \
      -H "Content-Type: application/json" \
-     -d '{"show_loading": true, "loading_message": "Processing..."}'
+     -d '{"processing_delay": 15}'
 """
 
 import asyncio
 import logging
 import time
-from pytrickle.stream_processor import StreamProcessor
+from typing import Optional
 
-from pytrickle.frames import VideoFrame, AudioFrame
+from pytrickle.frames import AudioFrame, VideoFrame
 from pytrickle.frame_skipper import FrameSkipConfig
+from pytrickle.loading_config import LoadingConfig, LoadingMode
+from pytrickle.stream_processor import StreamProcessor, VideoProcessingResult
 from pytrickle.utils.register import RegisterCapability
 
 logging.basicConfig(level=logging.INFO)
@@ -37,6 +39,15 @@ logger = logging.getLogger(__name__)
 MODEL_LOAD_DELAY_SECONDS = 3.0  # Configurable model load delay
 model_loaded = False
 model_load_start_time = None
+
+# Reference to the running StreamProcessor (set in __main__)
+processor: Optional[StreamProcessor] = None
+
+# Delay coordination
+STARTUP_BLOCK_SECONDS = 15.0
+blocked_until: float = 0.0
+pending_startup_block: float = STARTUP_BLOCK_SECONDS
+
 
 async def load_model(**kwargs):
     """
@@ -71,27 +82,29 @@ async def load_model(**kwargs):
 
 async def on_stream_start():
     """Called when a stream starts."""
+    global pending_startup_block, blocked_until
+
     logger.info("🎬 Stream started")
     if not model_loaded:
         logger.warning("⚠️  Model not loaded yet - frames will pass through until ready")
 
-async def on_stream_stop():
-    """Called when stream stops - cleanup resources."""
-    logger.info("🛑 Stream stopped, cleaning up resources")
-    # Note: Loading state is now automatically reset by the framework
-    logger.info("✅ Resources cleaned up")
+    if pending_startup_block > 0:
+        block = pending_startup_block
+        pending_startup_block = 0.0
+        blocked_until = max(blocked_until, time.time() + block)
+        logger.info("Startup block scheduled for %.1fs", block)
 
-async def process_video(frame: VideoFrame) -> VideoFrame:
-    """
-    Process video frame with normal processing logic.
-    
-    The loading overlay is now automatically handled by the framework when enabled
-    via parameter updates (show_loading=true). No manual implementation needed!
-    
-    You can focus on your actual processing logic here.
-    """
-    # Just do your normal video processing here
-    # The framework automatically shows loading overlay when show_loading=true
+async def on_stream_stop():
+    """Called when stream stops."""
+    logger.info("🛑 Stream stopped")
+
+async def process_video(frame: VideoFrame):
+    """Return WITHHELD while blocked to trigger the automatic overlay."""
+    global blocked_until
+
+    if time.time() < blocked_until:
+        return VideoProcessingResult.WITHHELD
+
     return frame
 
 async def process_audio(frame: AudioFrame) -> list[AudioFrame]:
@@ -100,19 +113,31 @@ async def process_audio(frame: AudioFrame) -> list[AudioFrame]:
 
 async def update_params(params: dict):
     """
-    Handle real-time parameter updates from the client.
-    
-    Note: Loading-related parameters (show_loading, loading_message, loading_mode, 
-    loading_progress) are now handled automatically by the framework. They won't
-    appear in this callback.
-    
-    This callback is now only for your custom application parameters.
+    Handle parameter updates.
+
+    Parameters:
+    - processing_delay: seconds to hold video output for the active stream
+    - simulate_startup_block: seconds to hold output for the next stream start
     """
+    global pending_startup_block, blocked_until
+
     logger.info(f"Custom parameters updated: {params}")
-    
-    # Add your custom parameter handling here
-    # e.g., if "threshold" in params: ...
-    pass
+
+    if "simulate_startup_block" in params:
+        pending_startup_block = max(0.0, float(params["simulate_startup_block"]))
+        if pending_startup_block > 0:
+            logger.info("Next stream will withhold frames for %.1fs", pending_startup_block)
+        else:
+            logger.info("Startup block cleared for next stream")
+
+    processing_delay = float(params.get("processing_delay", 0.0))
+    if processing_delay > 0:
+        blocked_until = max(blocked_until, time.time() + processing_delay)
+        logger.info("Simulating processing delay for %.1fs", processing_delay)
+        await asyncio.sleep(processing_delay)
+        logger.info("Processing delay complete")
+
+    # Additional custom parameters can be handled here.
 
 async def register_with_orchestrator(app):
     """Register this capability with the orchestrator on startup."""
@@ -126,30 +151,17 @@ async def register_with_orchestrator(app):
 # Create and run StreamProcessor
 if __name__ == "__main__":
     logger.info("=" * 60)
-    logger.info("Model Loading & Loading Overlay Example (Internalized)")
+    logger.info("Model Loading & Loading Overlay Example")
     logger.info("=" * 60)
     logger.info("")
-    logger.info("This example demonstrates:")
-    logger.info("  1. Non-blocking model loading with health state transitions")
-    logger.info("  2. Automatic loading overlay (internalized in framework)")
-    logger.info("  3. Simple parameter updates to control overlay behavior")
-    logger.info("")
-    logger.info("Server will start immediately on http://localhost:8000")
-    logger.info(f"Model will load in background (~{MODEL_LOAD_DELAY_SECONDS}s delay)")
-    logger.info("")
-    logger.info("✨ NEW: Loading overlay is now built-in! Just enable it with parameters.")
+    logger.info("Server: http://localhost:8000")
+    logger.info(f"Model loading delay: {MODEL_LOAD_DELAY_SECONDS}s")
     logger.info("")
     logger.info("Test endpoints:")
     logger.info("  curl http://localhost:8000/health")
     logger.info("  curl -X POST http://localhost:8000/update_params \\")
     logger.info('    -H "Content-Type: application/json" \\')
-    logger.info('    -d \'{"show_loading": true, "loading_message": "Processing..."}\'')
-    logger.info("")
-    logger.info("Loading overlay parameters (handled automatically):")
-    logger.info("  - show_loading: true/false - Enable/disable loading overlay")
-    logger.info("  - loading_message: string - Custom loading message")
-    logger.info("  - loading_mode: 'overlay'/'passthrough' - Display mode")
-    logger.info("  - loading_progress: 0.0-1.0 - Progress bar (optional)")
+    logger.info('    -d \'{"processing_delay": 15}\'')
     logger.info("")
     
     processor = StreamProcessor(
@@ -162,7 +174,12 @@ if __name__ == "__main__":
         name="model-loading-demo",
         port=8000,
         frame_skip_config=FrameSkipConfig(),
-        # Add orchestrator registration on startup
+        loading_config=LoadingConfig(
+            mode=LoadingMode.OVERLAY,
+            message="Loading...",
+            enabled=True,
+            auto_timeout_seconds=1.0,
+        ),
         on_startup=[register_with_orchestrator],
         route_prefix="/"
     )
