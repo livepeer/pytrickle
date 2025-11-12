@@ -380,26 +380,32 @@ class _InternalFrameProcessor(FrameProcessor):
         if not params:
             return
 
-        if params.pop("load_model", False):
+        load_model_requested = bool(params.get("load_model", False))
+        if load_model_requested:
             try:
                 await self.ensure_model_loaded()
                 logger.info(f"Model loaded via parameter update for '{self.name}'")
             except Exception as e:
                 logger.error(f"Error loading model via parameter update: {e}")
                 raise
-        
+
+        # Prepare parameters for user callbacks (remove only internal sentinels)
+        user_params = dict(params)
+        if load_model_requested:
+            user_params.pop("load_model", None)
+
         # Handle loading config updates
         loading_params = {}
         if "show_loading" in params:
-            loading_params["enabled"] = bool(params.pop("show_loading"))
+            loading_params["enabled"] = bool(params["show_loading"])
         if "loading_message" in params:
-            loading_params["message"] = str(params.pop("loading_message"))
+            loading_params["message"] = str(params["loading_message"])
         if "loading_mode" in params:
             from .loading_config import LoadingMode
-            mode_str = str(params.pop("loading_mode")).lower()
+            mode_str = str(params["loading_mode"]).lower()
             loading_params["mode"] = LoadingMode.OVERLAY if mode_str == "overlay" else LoadingMode.PASSTHROUGH
         if "loading_progress" in params:
-            loading_params["progress"] = float(params.pop("loading_progress"))
+            loading_params["progress"] = float(params["loading_progress"])
         
         if loading_params:
             # Update or create loading config
@@ -415,10 +421,10 @@ class _InternalFrameProcessor(FrameProcessor):
             logger.info(f"Loading config updated: enabled={self.loading_config.enabled}, mode={self.loading_config.mode.value}, message='{self.loading_config.message}'")
         
         # Normal parameter updates (will include other params even if load_model was present)
-        if self.param_updater and params:
+        if self.param_updater and user_params:
             try:
-                await self.param_updater(params)
-                logger.info(f"Parameters updated: {params}")
+                await self.param_updater(user_params)
+                logger.info(f"Parameters updated: {user_params}")
             except Exception as e:
                 logger.error(f"Error updating parameters: {e}")
     

@@ -14,9 +14,9 @@ handled by the framework - no manual implementation needed!
 
 To test:
 1. Run: python examples/loading_overlay_example.py
-2. Check health: curl http://localhost:8002/health
+2. Check health: curl http://localhost:8000/health
 3. Update parameters to enable loading overlay:
-   curl -X POST http://localhost:8002/update_params \
+   curl -X POST http://localhost:8000/update_params \
      -H "Content-Type: application/json" \
      -d '{"show_loading": true, "loading_message": "Processing..."}'
 """
@@ -24,7 +24,7 @@ To test:
 import asyncio
 import logging
 import time
-from pytrickle import StreamProcessor
+from pytrickle.stream_processor import StreamProcessor
 
 from pytrickle.frames import VideoFrame, AudioFrame
 from pytrickle.frame_skipper import FrameSkipConfig
@@ -134,14 +134,14 @@ if __name__ == "__main__":
     logger.info("  2. Automatic loading overlay (internalized in framework)")
     logger.info("  3. Simple parameter updates to control overlay behavior")
     logger.info("")
-    logger.info("Server will start immediately on http://localhost:8002")
+    logger.info("Server will start immediately on http://localhost:8000")
     logger.info(f"Model will load in background (~{MODEL_LOAD_DELAY_SECONDS}s delay)")
     logger.info("")
     logger.info("✨ NEW: Loading overlay is now built-in! Just enable it with parameters.")
     logger.info("")
     logger.info("Test endpoints:")
-    logger.info("  curl http://localhost:8002/health")
-    logger.info("  curl -X POST http://localhost:8002/update_params \\")
+    logger.info("  curl http://localhost:8000/health")
+    logger.info("  curl -X POST http://localhost:8000/update_params \\")
     logger.info('    -H "Content-Type: application/json" \\')
     logger.info('    -d \'{"show_loading": true, "loading_message": "Processing..."}\'')
     logger.info("")

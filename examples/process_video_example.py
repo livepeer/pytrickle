@@ -9,7 +9,7 @@ import time
 import torch
 import cv2
 import numpy as np
-from pytrickle import StreamProcessor
+from pytrickle.stream_processor import StreamProcessor
 from pytrickle.frames import VideoFrame
 from pytrickle.frame_skipper import FrameSkipConfig
 
