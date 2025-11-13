@@ -10,7 +10,7 @@ from dataclasses import replace
 from abc import ABC, abstractmethod
 from typing import Optional, Any, Dict, List
 from .frames import VideoFrame, AudioFrame
-from . import ErrorCallback
+from .base import ErrorCallback
 from .state import StreamState
 from .loading_config import LoadingConfig, LoadingMode
 from .utils.loading_overlay import build_loading_overlay_frame
