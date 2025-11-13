@@ -93,6 +93,13 @@ class StreamServer:
         self.route_prefix = route_prefix
         self.enable_default_routes = enable_default_routes
         self.health_check_interval = health_check_interval
+        self._startup_task: Optional[asyncio.Task] = None
+        
+        if isinstance(self.frame_processor, FrameProcessor):
+            try:
+                self.frame_processor.attach_state(self.state)
+            except Exception as exc:
+                logger.debug("Failed to attach stream state to frame processor: %s", exc)
         
         # Create aiohttp application with optional configuration
         app_config = app_kwargs or {}
@@ -152,6 +159,44 @@ class StreamServer:
         if static_routes:
             self._setup_static_routes(static_routes)
         
+
+    def _start_pipeline_initialization(self) -> None:
+        """Kick off background initialization to prepare the pipeline."""
+        if isinstance(self.frame_processor, FrameProcessor):
+            loop = asyncio.get_running_loop()
+            self._startup_task = loop.create_task(self._initialize_frame_processor())
+            self._startup_task.add_done_callback(self._on_startup_task_done)
+        else:
+            self.state.set_startup_complete()
+
+    def _on_startup_task_done(self, task: asyncio.Task) -> None:
+        """Cleanup callback for startup initialization task."""
+        if task is not self._startup_task:
+            return
+        self._startup_task = None
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            logger.debug("Startup initialization task cancelled")
+        except Exception as exc:
+            logger.error("Startup initialization task failed: %s", exc)
+
+    async def _initialize_frame_processor(self) -> None:
+        """Ensure the frame processor is ready for incoming streams."""
+        try:
+            ensure_model_loaded = getattr(self.frame_processor, "ensure_model_loaded", None)
+            if callable(ensure_model_loaded):
+                await ensure_model_loaded()
+            else:
+                self.state.set_startup_complete()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.error("Failed to initialize frame processor: %s", exc)
+            self.state.set_error(f"Model loading failed: {exc}")
+        else:
+            if not self.state.startup_complete:
+                self.state.set_startup_complete()
 
     def _schedule_param_update(self, params: Dict[str, Any]) -> asyncio.Task:
         """Schedule parameter update processing in the background."""
@@ -341,14 +386,24 @@ class StreamServer:
     async def _handle_start_stream(self, request: web.Request) -> web.Response:
         """Handle stream start requests."""
         try:
-            # Check if pipeline is ready before allowing stream start
+            # Ensure pipeline initialization is complete before allowing stream start
             if not self.state.startup_complete or not self.state.pipeline_ready:
-                logger.warning("Stream start rejected - pipeline not ready yet")
-                return web.json_response({
-                    "status": "error",
-                    "message": "Pipeline is still initializing. Please wait for IDLE status.",
-                    "current_state": "LOADING"
-                }, status=503)  # 503 Service Unavailable
+                startup_task = self._startup_task
+                if startup_task:
+                    try:
+                        await asyncio.shield(startup_task)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:
+                        logger.error("Startup task failed before stream start: %s", exc)
+
+                if not self.state.startup_complete or not self.state.pipeline_ready:
+                    logger.warning("Stream start rejected - pipeline not ready yet")
+                    return web.json_response({
+                        "status": "error",
+                        "message": "Pipeline is still initializing. Please wait for IDLE status.",
+                        "current_state": "LOADING"
+                    }, status=503)  # 503 Service Unavailable
             
             # Parse and validate request first
             params = await self._parse_and_validate_request(request, StreamStartRequest)
@@ -670,6 +725,14 @@ class StreamServer:
             except asyncio.CancelledError:
                 pass
         
+        if self._startup_task:
+            self._startup_task.cancel()
+            try:
+                await self._startup_task
+            except asyncio.CancelledError:
+                pass
+            self._startup_task = None
+        
         # Cancel any in-flight parameter update tasks
         if self._pending_param_update_tasks:
             for task in list(self._pending_param_update_tasks):
@@ -688,6 +751,8 @@ class StreamServer:
         site = web.TCPSite(runner, self.host, self.port)
         await site.start()
         
+        self._start_pipeline_initialization()
+
         logger.info(f"Server started on {self.host}:{self.port}")
         return runner
 

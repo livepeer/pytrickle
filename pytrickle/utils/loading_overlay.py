@@ -9,13 +9,31 @@ import math
 from typing import Optional
 
 import av
-import cv2
 import numpy as np
 from pytrickle.frames import VideoFrame
 
 __all__ = [
     "build_loading_overlay_frame",
 ]
+
+
+_cv2_module = None
+
+
+def _get_cv2():
+    """Retrieve OpenCV lazily so it remains an optional dependency."""
+    global _cv2_module
+    if _cv2_module is None:
+        try:
+            import cv2  # type: ignore
+        except ImportError as exc:  # pragma: no cover - exercised in environments without cv2
+            raise RuntimeError(
+                "Loading overlay support requires the 'opencv-python' package. "
+                "Install it to enable loading overlay rendering."
+            ) from exc
+        _cv2_module = cv2
+    return _cv2_module
+
 
 def _create_loading_frame_numpy(
     width: int,
@@ -30,6 +48,7 @@ def _create_loading_frame_numpy(
     Creates an RGB loading overlay with animated progress bar using OpenCV.
     This is an implementation detail and should not be used directly.
     """
+    cv2 = _get_cv2()
     if width <= 0 or height <= 0:
         raise ValueError(f"Width and height must be positive, got {width}x{height}")
     if progress is not None and not (0.0 <= progress <= 1.0):
