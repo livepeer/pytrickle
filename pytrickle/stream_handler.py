@@ -12,7 +12,7 @@ import logging
 from abc import abstractmethod
 from typing import Optional, Dict, Any
 
-from .base import ErrorCallback
+from . import ErrorCallback
 from .frame_processor import FrameProcessor
 from .client import TrickleClient
 from .protocol import TrickleProtocol

@@ -93,6 +93,13 @@ class StreamServer:
         self.route_prefix = route_prefix
         self.enable_default_routes = enable_default_routes
         self.health_check_interval = health_check_interval
+        self._startup_task: Optional[asyncio.Task] = None
+        
+        if isinstance(self.frame_processor, FrameProcessor):
+            try:
+                self.frame_processor.attach_state(self.state)
+            except Exception as exc:
+                logger.debug("Failed to attach stream state to frame processor: %s", exc)
         
         # Create aiohttp application with optional configuration
         app_config = app_kwargs or {}
@@ -113,6 +120,8 @@ class StreamServer:
         self.current_client: Optional[TrickleClient] = None
         self.current_params: Optional[StreamStartRequest] = None
         self._client_task: Optional[asyncio.Task] = None
+        self._param_update_lock = asyncio.Lock()
+        self._pending_param_update_tasks: set[asyncio.Task] = set()
         
         # Health monitoring
         self._health_monitor_task: Optional[asyncio.Task] = None
@@ -150,6 +159,79 @@ class StreamServer:
         if static_routes:
             self._setup_static_routes(static_routes)
         
+
+    def _start_pipeline_initialization(self) -> None:
+        """Kick off background initialization to prepare the pipeline."""
+        if isinstance(self.frame_processor, FrameProcessor):
+            loop = asyncio.get_running_loop()
+            self._startup_task = loop.create_task(self._initialize_frame_processor())
+            self._startup_task.add_done_callback(self._on_startup_task_done)
+        else:
+            self.state.set_startup_complete()
+
+    def _on_startup_task_done(self, task: asyncio.Task) -> None:
+        """Cleanup callback for startup initialization task."""
+        if task is not self._startup_task:
+            return
+        self._startup_task = None
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            logger.debug("Startup initialization task cancelled")
+        except Exception as exc:
+            logger.error("Startup initialization task failed: %s", exc)
+
+    async def _initialize_frame_processor(self) -> None:
+        """Ensure the frame processor is ready for incoming streams."""
+        try:
+            ensure_model_loaded = getattr(self.frame_processor, "ensure_model_loaded", None)
+            if callable(ensure_model_loaded):
+                await ensure_model_loaded()
+            else:
+                self.state.set_startup_complete()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.error("Failed to initialize frame processor: %s", exc)
+            self.state.set_error(f"Model loading failed: {exc}")
+        else:
+            if not self.state.startup_complete:
+                self.state.set_startup_complete()
+
+    def _schedule_param_update(self, params: Dict[str, Any]) -> asyncio.Task:
+        """Schedule parameter update processing in the background."""
+        loop = asyncio.get_running_loop()
+        task = loop.create_task(self._run_param_update(params))
+        self._pending_param_update_tasks.add(task)
+        task.add_done_callback(lambda t: self._pending_param_update_tasks.discard(t))
+        return task
+
+    async def _run_param_update(self, params: Dict[str, Any]):
+        """Run parameter update sequentially while tracking state."""
+        task = asyncio.current_task()
+        params_payload = dict(params)
+        try:
+            async with self._param_update_lock:
+                await self.frame_processor.update_params(params_payload)
+                logger.info(f"Parameters updated: {params}")
+
+                if self.current_client and self.current_client.protocol:
+                    await self.current_client.protocol.emit_monitoring_event(
+                        {
+                            "type": "params_updated",
+                            "timestamp": int(time.time() * 1000),
+                            "params": params,
+                        }
+                    )
+        except asyncio.CancelledError:
+            logger.debug("Parameter update task cancelled before completion")
+            raise
+        except Exception as e:
+            logger.error(f"Error updating parameters: {e}")
+            self.state.set_error(f"Parameter update failed: {str(e)}")
+        finally:
+            if task in self._pending_param_update_tasks:
+                self._pending_param_update_tasks.discard(task)
 
     
     def _setup_middleware(self, middleware_list: List[Callable]):
@@ -304,6 +386,25 @@ class StreamServer:
     async def _handle_start_stream(self, request: web.Request) -> web.Response:
         """Handle stream start requests."""
         try:
+            # Ensure pipeline initialization is complete before allowing stream start
+            if not self.state.startup_complete or not self.state.pipeline_ready:
+                startup_task = self._startup_task
+                if startup_task:
+                    try:
+                        await asyncio.shield(startup_task)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:
+                        logger.error("Startup task failed before stream start: %s", exc)
+
+                if not self.state.startup_complete or not self.state.pipeline_ready:
+                    logger.warning("Stream start rejected - pipeline not ready yet")
+                    return web.json_response({
+                        "status": "error",
+                        "message": "Pipeline is still initializing. Please wait for IDLE status.",
+                        "current_state": "LOADING"
+                    }, status=503)  # 503 Service Unavailable
+            
             # Parse and validate request first
             params = await self._parse_and_validate_request(request, StreamStartRequest)
             
@@ -348,10 +449,16 @@ class StreamServer:
             
             # Set params if provided
             if params.params:
+                if hasattr(self.frame_processor, "prepare_stream_loading"):
+                    try:
+                        await self.frame_processor.prepare_stream_loading("Loading workflow...")
+                    except Exception as e:
+                        logger.debug(f"Unable to prepare stream loading overlay: {e}")
                 try:
-                    await self.frame_processor.update_params(params.params)
+                    self._schedule_param_update(params.params)
+                    logger.info(f"Initial stream parameters scheduled: {params.params}")
                 except Exception as e:
-                    logger.warning(f"Failed to set params: {e}")
+                    logger.warning(f"Failed to schedule initial params: {e}")
             
             # Start client in background
             self._client_task = asyncio.create_task(self._run_client(params.gateway_request_id))
@@ -443,22 +550,17 @@ class StreamServer:
                     "message": "No active stream to update"
                 }, status=400)
             
-            # Update frame processor parameters
-            await self.frame_processor.update_params(data)
-            logger.info(f"Parameters updated: {data}")
-            
-            # Emit monitoring event
-            if self.current_client.protocol:
-                await self.current_client.protocol.emit_monitoring_event({
-                    "type": "params_updated",
-                    "timestamp": int(time.time() * 1000),
-                    "params": data
-                })
-            
-            return web.json_response({
-                "status": "success",
-                "message": "Parameters updated successfully"
-            })
+            # Schedule background update to avoid blocking the HTTP response
+            self._schedule_param_update(data)
+            logger.info(f"Parameter update scheduled: {data}")
+
+            return web.json_response(
+                {
+                    "status": "accepted",
+                    "message": "Parameter update scheduled",
+                },
+                status=200,
+            )
             
         except Exception as e:
             logger.error(f"Error in update params handler: {e}")
@@ -622,6 +724,24 @@ class StreamServer:
                 await self._health_monitor_task
             except asyncio.CancelledError:
                 pass
+        
+        if self._startup_task:
+            self._startup_task.cancel()
+            try:
+                await self._startup_task
+            except asyncio.CancelledError:
+                pass
+            self._startup_task = None
+        
+        # Cancel any in-flight parameter update tasks
+        if self._pending_param_update_tasks:
+            for task in list(self._pending_param_update_tasks):
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+            self._pending_param_update_tasks.clear()
     
     async def start_server(self):
         """Start the HTTP server."""
@@ -631,10 +751,8 @@ class StreamServer:
         site = web.TCPSite(runner, self.host, self.port)
         await site.start()
         
-        # Set pipeline ready when server is up and ready to accept requests
-        self.state.set_state(PipelineState.IDLE)
-        self.state.set_startup_complete()
-        
+        self._start_pipeline_initialization()
+
         logger.info(f"Server started on {self.host}:{self.port}")
         return runner
 

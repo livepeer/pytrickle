@@ -21,7 +21,7 @@ from .utils.register import RegisterCapability
 
 # Processing utilities
 from .frame_processor import FrameProcessor
-from .stream_processor import StreamProcessor
+from .stream_processor import StreamProcessor, VideoProcessingResult
 from .fps_meter import FPSMeter
 from .frame_skipper import FrameSkipConfig
 
@@ -33,6 +33,7 @@ __all__ = [
     "TrickleClient",
     "StreamServer",
     "StreamProcessor",
+    "VideoProcessingResult",
     "TrickleProtocol",
     "VideoFrame",
     "AudioFrame", 

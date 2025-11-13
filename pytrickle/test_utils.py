@@ -23,6 +23,10 @@ class MockFrameProcessor(FrameProcessor):
         """Test model loader."""
         pass
     
+    async def warmup(self, **kwargs):
+        """Test warmup."""
+        pass
+    
     async def process_video_async(self, frame):
         """Test video processor."""
         return frame

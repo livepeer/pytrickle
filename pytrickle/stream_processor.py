@@ -1,6 +1,7 @@
 import asyncio
 import inspect
 import logging
+from enum import Enum
 from typing import Optional, Callable, Dict, Any, List, Union, Awaitable
 
 from .registry import HandlerRegistry
@@ -8,6 +9,12 @@ from .frames import VideoFrame, AudioFrame
 from .frame_processor import FrameProcessor
 from .server import StreamServer
 from .frame_skipper import FrameSkipConfig
+from .loading_config import LoadingConfig
+from dataclasses import replace
+
+class VideoProcessingResult(Enum):
+    """Explicit result to distinguish intentional frame withholding from errors."""
+    WITHHELD = "withheld"  # Intentionally withholding frame to trigger overlay
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +68,13 @@ class StreamProcessor:
         on_stream_start = registry.get("stream_start")
         on_stream_stop = registry.get("stream_stop")
 
+        # If handler_instance is a FrameProcessor, extract its loading_config
+        loading_config = None
+        if isinstance(handler_instance, FrameProcessor):
+            loading_config = getattr(handler_instance, 'loading_config', None)
+            if loading_config:
+                logger.debug(f"Extracted loading_config from {handler_instance.__class__.__name__}")
+
         processor = cls(
             video_processor=video_processor,
             audio_processor=audio_processor,
@@ -73,6 +87,7 @@ class StreamProcessor:
             port=port,
             frame_skip_config=frame_skip_config,
             validate_signature=validate_signature,
+            loading_config=loading_config,
             **server_kwargs
         )
 
@@ -93,6 +108,7 @@ class StreamProcessor:
         port: int = 8000,
         frame_skip_config: Optional[FrameSkipConfig] = None,
         validate_signature: bool = True,
+        loading_config: Optional[LoadingConfig] = None,
         **server_kwargs
     ):
         """
@@ -151,7 +167,8 @@ class StreamProcessor:
             param_updater=param_updater,
             on_stream_start=on_stream_start,
             on_stream_stop=on_stream_stop,
-            name=name
+            name=name,
+            loading_config=loading_config
         )
         
         # Create and start server
@@ -161,6 +178,9 @@ class StreamProcessor:
             frame_skip_config=frame_skip_config,
             **server_kwargs
         )
+
+        # Attach server state to processor for health transitions
+        self._frame_processor.attach_state(self.server.state)
     
     async def send_data(self, data: str):
         """Send data to the server."""
@@ -207,7 +227,35 @@ class StreamProcessor:
 
     async def run_forever(self):
         """Run the stream processor server forever."""
-        await self.server.run_forever()
+        try:
+            if self.model_loader:
+                # Trigger model loading for processors with models (non-blocking due to async lock)
+                # The server will start and be available while model loading happens
+                asyncio.create_task(self._trigger_model_loading())
+            else:
+                # For processors without models, mark startup complete immediately
+                self.server.state.set_startup_complete()
+            
+            # Run server (this will start immediately and be available for /health checks)
+            await self.server.run_forever()
+            
+        except Exception as e:
+            logger.error(f"Error in StreamProcessor: {e}")
+            raise
+    
+    async def _trigger_model_loading(self):
+        """Trigger model loading via parameter update.
+        
+        If model loading fails, the error is logged and propagated to ensure
+        the server state reflects the failure properly.
+        """
+        try:
+            await self._frame_processor.update_params({"load_model": True})
+            logger.debug(f"Model loading triggered via parameter update for '{self.name}'")
+        except Exception as e:
+            logger.error(f"Failed to trigger model loading: {e}")
+            self.server.state.set_error(f"Model loading failed: {e}")
+            raise
     
     def run(self):
         """Run the stream processor server (blocking)."""
@@ -259,7 +307,8 @@ class _InternalFrameProcessor(FrameProcessor):
         param_updater: Optional[ParamUpdater] = None,
         on_stream_start: Optional[OnStreamStart] = None,
         on_stream_stop: Optional[OnStreamStop] = None,
-        name: str = "internal-processor"
+        name: str = "internal-processor",
+        loading_config: Optional['LoadingConfig'] = None
     ):
         # Set attributes first before calling parent
         self.video_processor = video_processor
@@ -273,8 +322,9 @@ class _InternalFrameProcessor(FrameProcessor):
         # Frame skipping is handled at TrickleClient level
         self.frame_skip_config = None
         self.frame_skipper = None
-        
-        super().__init__(error_callback=None)
+
+        # Pass loading_config to base class
+        super().__init__(error_callback=None, loading_config=loading_config)
     
     async def load_model(self, **kwargs):
         """Load model using provided async function."""
@@ -288,13 +338,19 @@ class _InternalFrameProcessor(FrameProcessor):
     
     async def process_video_async(self, frame: VideoFrame) -> Optional[VideoFrame]:
         """Process video frame using provided async function."""
+        # Normal processing
         if not self.video_processor:
             logger.debug("No video processor defined, passing frame unchanged")
             return frame
             
         try:
             result = await self.video_processor(frame)
-            return result if isinstance(result, VideoFrame) else frame
+            if isinstance(result, VideoFrame):
+                return result
+            if result == VideoProcessingResult.WITHHELD:
+                return None
+            # None from decorators or other failures means pass through
+            return frame
         except Exception as e:
             logger.error(f"Error in video processing: {e}")
             return frame
@@ -319,11 +375,74 @@ class _InternalFrameProcessor(FrameProcessor):
             return [frame]
     
     async def update_params(self, params: Dict[str, Any]):
-        """Update parameters using provided async function."""
-        if self.param_updater:
+        """Update processing parameters."""
+        if not params:
+            return
+
+        load_model_requested = bool(params.get("load_model", False))
+        if load_model_requested:
             try:
-                await self.param_updater(params)
-                logger.info(f"Parameters updated: {params}")
+                await self.ensure_model_loaded()
+                logger.info(f"Model loaded via parameter update for '{self.name}'")
+            except Exception as e:
+                logger.error(f"Error loading model via parameter update: {e}")
+                raise
+
+        # Prepare parameters for user callbacks (remove only internal sentinels)
+        user_params = dict(params)
+        if load_model_requested:
+            user_params.pop("load_model", None)
+
+        # Handle loading config updates
+        loading_params: Dict[str, Any] = {}
+        manual_show_loading: Optional[bool] = None
+        if "show_loading" in params:
+            manual_show_loading = bool(params["show_loading"])
+            loading_params["enabled"] = manual_show_loading
+        if "loading_message" in params:
+            loading_params["message"] = str(params["loading_message"])
+        if "loading_mode" in params:
+            from .loading_config import LoadingMode
+            mode_str = str(params["loading_mode"]).lower()
+            loading_params["mode"] = LoadingMode.OVERLAY if mode_str == "overlay" else LoadingMode.PASSTHROUGH
+        if "loading_progress" in params:
+            loading_params["progress"] = float(params["loading_progress"])
+        if "loading_auto_timeout" in params:
+            raw_timeout = params["loading_auto_timeout"]
+            loading_params["auto_timeout_seconds"] = None if raw_timeout is None else float(raw_timeout)
+        
+        if loading_params:
+            previous_config = self.loading_config
+            if self.loading_config:
+                self.loading_config = replace(self.loading_config, **loading_params)
+            else:
+                self.loading_config = LoadingConfig(**loading_params)
+            
+            if manual_show_loading is not None:
+                self.set_loading_active(manual_show_loading)
+            elif self.loading_config and not self.loading_config.enabled:
+                self.set_loading_active(False)
+
+            if (
+                previous_config
+                and self._loading_active
+                and previous_config.mode != self.loading_config.mode
+            ):
+                self._frame_counter = 0
+
+            logger.info(
+                "Loading config updated: enabled=%s, mode=%s, message='%s', timeout=%s",
+                self.loading_config.enabled,
+                self.loading_config.mode.value,
+                self.loading_config.message,
+                self.loading_config.auto_timeout_seconds,
+            )
+        
+        # Normal parameter updates (will include other params even if load_model was present)
+        if self.param_updater and user_params:
+            try:
+                await self.param_updater(user_params)
+                logger.info(f"Parameters updated: {user_params}")
             except Exception as e:
                 logger.error(f"Error updating parameters: {e}")
     
@@ -338,6 +457,11 @@ class _InternalFrameProcessor(FrameProcessor):
     
     async def on_stream_stop(self):
         """Call user-provided on_stream_stop callback."""
+        # Reset frame counter and loading state for next stream
+        self._frame_counter = 0
+        self._loading_active = False
+        logger.debug(f"StreamProcessor '{self.name}' reset frame counter and loading state")
+        
         if self.on_stream_stop_callback:
             try:
                 await self.on_stream_stop_callback()

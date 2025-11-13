@@ -2,18 +2,19 @@
 Frame data structures and processing utilities for trickle streaming.
 
 Defines VideoFrame, AudioFrame, their output counterparts, frame processing
-utilities, and streaming utilities for handling media data in the trickle 
+utilities, and streaming utilities for handling media data in the trickle
 streaming pipeline.
 """
 
 import logging
-import torch
-import numpy as np
-import av
-from typing import Optional, Dict, Union, List, Deque
-from fractions import Fraction
-from collections import deque
 from abc import ABC
+from collections import deque
+from fractions import Fraction
+from typing import Deque, Dict, List, Optional, Union
+
+import av
+import numpy as np
+import torch
 
 logger = logging.getLogger(__name__)
 
