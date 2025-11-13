@@ -8,6 +8,7 @@ from pytrickle.client import TrickleClient
 from pytrickle.frames import VideoFrame
 from pytrickle.stream_processor import _InternalFrameProcessor, VideoProcessingResult
 
+
 def _make_video_frame(value: float = 0.5, timestamp: int = 0) -> VideoFrame:
     tensor = torch.full((3, 4, 4), value, dtype=torch.float32)
     return VideoFrame(tensor=tensor, timestamp=timestamp, time_base=Fraction(1, 30))
@@ -24,6 +25,26 @@ async def _noop_param_updater(params):
 async def _video_processor(frame: VideoFrame) -> VideoFrame:
     tensor = frame.tensor + 1.0
     return frame.replace_tensor(tensor)
+
+
+class _DummyProtocol:
+    fps_meter = None
+    error_callback = None
+
+    async def start(self):
+        return None
+
+    async def stop(self):
+        return None
+
+
+async def _run_single_frame(processor, frame):
+    """Push a single frame through the TrickleClient video loop."""
+    client = TrickleClient(protocol=_DummyProtocol(), frame_processor=processor)
+    await client.video_input_queue.put(frame)
+    await client.video_input_queue.put(None)
+    await client._process_video_frames()
+    return await client.output_queue.get()
 
 
 @pytest.mark.asyncio
@@ -50,27 +71,9 @@ async def test_overlay_mode_injects_overlay_frame(monkeypatch):
     )
     await processor.update_params({"show_loading": True, "loading_mode": "overlay"})
 
-    # Use a simple namespace with minimal attributes required by TrickleClient
-    class DummyProtocol:
-        fps_meter = None
-
-        async def start(self):
-            return None
-
-        async def stop(self):
-            return None
-
-        error_callback = None
-
-    client = TrickleClient(protocol=DummyProtocol(), frame_processor=processor)
-
-    frame = _make_video_frame(1.0, timestamp=123)
-    await client.video_input_queue.put(frame)
-    await client.video_input_queue.put(None)
-
-    await client._process_video_frames()
-
-    output = await client.output_queue.get()
+    output = await _run_single_frame(
+        processor, _make_video_frame(1.0, timestamp=123)
+    )
     assert torch.allclose(output.frame.tensor, overlay_marker.tensor)
 
 
@@ -85,26 +88,8 @@ async def test_passthrough_mode_keeps_processed_frame():
     )
     await processor.update_params({"show_loading": True, "loading_mode": "passthrough"})
 
-    class DummyProtocol:
-        fps_meter = None
-
-        async def start(self):
-            return None
-
-        async def stop(self):
-            return None
-
-        error_callback = None
-
-    client = TrickleClient(protocol=DummyProtocol(), frame_processor=processor)
-
     frame = _make_video_frame(2.0, timestamp=456)
-    await client.video_input_queue.put(frame)
-    await client.video_input_queue.put(None)
-
-    await client._process_video_frames()
-
-    output = await client.output_queue.get()
+    output = await _run_single_frame(processor, frame)
     # Processed frame should be the handler result (value + 1)
     assert torch.allclose(output.frame.tensor, frame.tensor + 1.0)
 
@@ -139,26 +124,9 @@ async def test_auto_overlay_engages_when_frames_stall(monkeypatch):
         }
     )
 
-    class DummyProtocol:
-        fps_meter = None
-
-        async def start(self):
-            return None
-
-        async def stop(self):
-            return None
-
-        error_callback = None
-
-    client = TrickleClient(protocol=DummyProtocol(), frame_processor=processor)
-
-    frame = _make_video_frame(1.0, timestamp=789)
-    await client.video_input_queue.put(frame)
-    await client.video_input_queue.put(None)
-
-    await client._process_video_frames()
-
-    output = await client.output_queue.get()
+    output = await _run_single_frame(
+        processor, _make_video_frame(1.0, timestamp=789)
+    )
     assert torch.allclose(output.frame.tensor, overlay_marker.tensor)
 
 
@@ -172,18 +140,7 @@ async def test_client_start_resets_auto_loading_state(monkeypatch):
         name="test-reset",
     )
 
-    class DummyProtocol:
-        fps_meter = None
-
-        async def start(self):
-            return None
-
-        async def stop(self):
-            return None
-
-        error_callback = None
-
-    client = TrickleClient(protocol=DummyProtocol(), frame_processor=processor)
+    client = TrickleClient(protocol=_DummyProtocol(), frame_processor=processor)
 
     async def noop_loop(self):
         return None
