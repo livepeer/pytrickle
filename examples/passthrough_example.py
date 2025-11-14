@@ -18,7 +18,7 @@ import logging
 from dataclasses import dataclass
 from typing import List
 
-from pytrickle import StreamProcessor, VideoFrame, AudioFrame
+from pytrickle import StreamProcessor, VideoFrame, AudioFrame, runtime_args
 from pytrickle.decorators import (
     audio_handler,
     model_loader,
@@ -125,15 +125,16 @@ class PassthroughHandlers:
 async def main() -> None:
     """Main entry point - creates and runs the stream processor."""
     handlers = PassthroughHandlers()
+    port = runtime_args.resolve_port()
     processor = StreamProcessor.from_handlers(
         handlers,
         name="passthrough-example",
-        port=8000,
+        port=port,
     )
-    
-    logger.info("Send video to: http://localhost:8000/stream")
-    logger.info("Update params: POST http://localhost:8000/control")
-    
+
+    logger.info("Send video to: http://localhost:%d/stream", port)
+    logger.info("Update params: POST http://localhost:%d/control", port)
+
     await processor.run_forever()
 
 
