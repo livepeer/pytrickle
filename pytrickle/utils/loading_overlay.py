@@ -21,7 +21,7 @@ _cv2_module = None
 
 
 def _get_cv2():
-    """Retrieve OpenCV lazily so it remains an optional dependency."""
+    """Retrieve OpenCV and verify it's properly installed."""
     global _cv2_module
     if _cv2_module is None:
         try:
@@ -31,6 +31,18 @@ def _get_cv2():
                 "Loading overlay support requires the 'opencv-python' package. "
                 "Install it to enable loading overlay rendering."
             ) from exc
+        
+        # Verify OpenCV is properly built and functional
+        try:
+            build_info = cv2.getBuildInformation()
+            if not build_info or not isinstance(build_info, str):
+                raise RuntimeError("OpenCV build information is invalid or empty.")
+        except Exception as exc:
+            raise RuntimeError(
+                "OpenCV is installed but not functioning correctly. "
+                "Please reinstall opencv-python."
+            ) from exc
+        
         _cv2_module = cv2
     return _cv2_module
 
