@@ -8,9 +8,10 @@ with automatic reconnection and error handling.
 import asyncio
 import aiohttp
 import logging
-from typing import Optional
+from typing import Optional, List
 
-from .base import ErrorCallback, TrickleComponent
+from .base import ErrorCallback
+from .base import TrickleComponent
 
 logger = logging.getLogger(__name__)
 

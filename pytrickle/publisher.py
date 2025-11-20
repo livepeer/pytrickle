@@ -8,9 +8,10 @@ with automatic preconnection and background task management.
 import asyncio
 import aiohttp
 import logging
-from typing import Optional
+from typing import Optional, List
 
-from .base import ErrorCallback, TrickleComponent
+from .base import ErrorCallback
+from .base import TrickleComponent
 import time
 logger = logging.getLogger(__name__)
 
