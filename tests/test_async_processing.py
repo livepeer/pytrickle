@@ -35,11 +35,6 @@ class TestProcessor(FrameProcessor):
         """Load model (no-op for test)."""
         logger.info("Test processor model loaded")
         pass
-
-    async def warmup(self, **kwargs):
-        """Warmup (no-op for test)."""
-        logger.info("Test processor warmup")
-        pass
     
     async def process_video_async(self, frame: VideoFrame) -> VideoFrame:
         """Process video frame with artificial delay."""
