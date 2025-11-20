@@ -22,6 +22,7 @@ from .frame_processor import FrameProcessor
 from .client import TrickleClient
 from .protocol import TrickleProtocol
 from .frame_skipper import FrameSkipConfig
+from .loading_config import LoadingConfig
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,8 @@ class StreamServer:
         app_kwargs: Optional[Dict[str, Any]] = None,
         # Frame skipping configuration
         frame_skip_config: Optional[FrameSkipConfig] = None,
+        # Loading overlay configuration
+        loading_config: Optional['LoadingConfig'] = None,
 
     ):
         """Initialize StreamServer.
@@ -115,6 +118,9 @@ class StreamServer:
         
         # Frame skipping configuration
         self.frame_skip_config = frame_skip_config
+        
+        # Loading overlay configuration
+        self.loading_config = loading_config
         
         # Stream management - simple and direct
         self.current_client: Optional[TrickleClient] = None
@@ -211,8 +217,22 @@ class StreamServer:
         task = asyncio.current_task()
         params_payload = dict(params)
         try:
+            # Handle manual loading overlay changes before parameter updates            
+            show_loading = params_payload.get("show_loading", None)
+            if show_loading is not None and self.current_client:
+                
+                # Parse string/bool values for manual loading overlay
+                if isinstance(show_loading, str):
+                    show_loading_bool = show_loading.lower() in ("true")
+                else:
+                    show_loading_bool = bool(show_loading)
+                    
+                self.current_client.loading_controller.set_manual_loading(show_loading_bool)
+                logger.debug(f"Manual loading set to: {show_loading_bool} (from {show_loading})")
+            
             async with self._param_update_lock:
                 await self.frame_processor.update_params(params_payload)
+                
                 logger.info(f"Parameters updated: {params}")
 
                 if self.current_client and self.current_client.protocol:
@@ -440,6 +460,7 @@ class StreamServer:
                 frame_processor=self.frame_processor,
                 control_handler=self._handle_control_message,
                 frame_skip_config=self.frame_skip_config,
+                loading_config=self.loading_config,
             )
             
             # Update state

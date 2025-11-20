@@ -10,7 +10,6 @@ from .frame_processor import FrameProcessor
 from .server import StreamServer
 from .frame_skipper import FrameSkipConfig
 from .loading_config import LoadingConfig
-from dataclasses import replace
 
 class VideoProcessingResult(Enum):
     """Explicit result to distinguish intentional frame withholding from errors."""
@@ -41,6 +40,7 @@ class StreamProcessor:
         name: str = "stream-processor",
         port: int = 8000,
         frame_skip_config: Optional[FrameSkipConfig] = None,
+        loading_config: Optional[LoadingConfig] = None,
         validate_signature: bool = True,
         **server_kwargs
     ):
@@ -68,13 +68,6 @@ class StreamProcessor:
         on_stream_start = registry.get("stream_start")
         on_stream_stop = registry.get("stream_stop")
 
-        # If handler_instance is a FrameProcessor, extract its loading_config
-        loading_config = None
-        if isinstance(handler_instance, FrameProcessor):
-            loading_config = getattr(handler_instance, 'loading_config', None)
-            if loading_config:
-                logger.debug(f"Extracted loading_config from {handler_instance.__class__.__name__}")
-
         processor = cls(
             video_processor=video_processor,
             audio_processor=audio_processor,
@@ -86,8 +79,8 @@ class StreamProcessor:
             name=name,
             port=port,
             frame_skip_config=frame_skip_config,
-            validate_signature=validate_signature,
             loading_config=loading_config,
+            validate_signature=validate_signature,
             **server_kwargs
         )
 
@@ -107,8 +100,8 @@ class StreamProcessor:
         name: str = "stream-processor",
         port: int = 8000,
         frame_skip_config: Optional[FrameSkipConfig] = None,
-        validate_signature: bool = True,
         loading_config: Optional[LoadingConfig] = None,
+        validate_signature: bool = True,
         **server_kwargs
     ):
         """
@@ -125,6 +118,8 @@ class StreamProcessor:
             name: Processor name
             port: Server port
             frame_skip_config: Optional frame skipping configuration (None = no frame skipping)
+            loading_config: Optional loading configuration (None = no loading configuration)
+            validate_signature: Whether to validate the signature of the processors (default: True)
             **server_kwargs: Additional arguments passed to StreamServer
         """
         # Validate that processors are async functions
@@ -156,6 +151,7 @@ class StreamProcessor:
         self.name = name
         self.port = port
         self.frame_skip_config = frame_skip_config
+        self.loading_config = loading_config
         self.server_kwargs = server_kwargs
         self._handler_registry: Optional[HandlerRegistry] = None
         
@@ -167,8 +163,7 @@ class StreamProcessor:
             param_updater=param_updater,
             on_stream_start=on_stream_start,
             on_stream_stop=on_stream_stop,
-            name=name,
-            loading_config=loading_config
+            name=name
         )
         
         # Create and start server
@@ -176,6 +171,7 @@ class StreamProcessor:
             frame_processor=self._frame_processor,
             port=port,
             frame_skip_config=frame_skip_config,
+            loading_config=loading_config,
             **server_kwargs
         )
 
@@ -308,7 +304,6 @@ class _InternalFrameProcessor(FrameProcessor):
         on_stream_start: Optional[OnStreamStart] = None,
         on_stream_stop: Optional[OnStreamStop] = None,
         name: str = "internal-processor",
-        loading_config: Optional['LoadingConfig'] = None
     ):
         # Set attributes first before calling parent
         self.video_processor = video_processor
@@ -323,8 +318,8 @@ class _InternalFrameProcessor(FrameProcessor):
         self.frame_skip_config = None
         self.frame_skipper = None
 
-        # Pass loading_config to base class
-        super().__init__(error_callback=None, loading_config=loading_config)
+        # Initialize parent (loading is handled at TrickleClient level)
+        super().__init__(error_callback=None)
     
     async def load_model(self, **kwargs):
         """Load model using provided async function."""
@@ -392,51 +387,6 @@ class _InternalFrameProcessor(FrameProcessor):
         user_params = dict(params)
         if load_model_requested:
             user_params.pop("load_model", None)
-
-        # Handle loading config updates
-        loading_params: Dict[str, Any] = {}
-        manual_show_loading: Optional[bool] = None
-        if "show_loading" in params:
-            manual_show_loading = bool(params["show_loading"])
-            loading_params["enabled"] = manual_show_loading
-        if "loading_message" in params:
-            loading_params["message"] = str(params["loading_message"])
-        if "loading_mode" in params:
-            from .loading_config import LoadingMode
-            mode_str = str(params["loading_mode"]).lower()
-            loading_params["mode"] = LoadingMode.OVERLAY if mode_str == "overlay" else LoadingMode.PASSTHROUGH
-        if "loading_progress" in params:
-            loading_params["progress"] = float(params["loading_progress"])
-        if "loading_auto_timeout" in params:
-            raw_timeout = params["loading_auto_timeout"]
-            loading_params["auto_timeout_seconds"] = None if raw_timeout is None else float(raw_timeout)
-        
-        if loading_params:
-            previous_config = self.loading_config
-            if self.loading_config:
-                self.loading_config = replace(self.loading_config, **loading_params)
-            else:
-                self.loading_config = LoadingConfig(**loading_params)
-            
-            if manual_show_loading is not None:
-                self.set_loading_active(manual_show_loading)
-            elif self.loading_config and not self.loading_config.enabled:
-                self.set_loading_active(False)
-
-            if (
-                previous_config
-                and self._loading_active
-                and previous_config.mode != self.loading_config.mode
-            ):
-                self._frame_counter = 0
-
-            logger.info(
-                "Loading config updated: enabled=%s, mode=%s, message='%s', timeout=%s",
-                self.loading_config.enabled,
-                self.loading_config.mode.value,
-                self.loading_config.message,
-                self.loading_config.auto_timeout_seconds,
-            )
         
         # Normal parameter updates (will include other params even if load_model was present)
         if self.param_updater and user_params:
@@ -457,11 +407,6 @@ class _InternalFrameProcessor(FrameProcessor):
     
     async def on_stream_stop(self):
         """Call user-provided on_stream_stop callback."""
-        # Reset frame counter and loading state for next stream
-        self._frame_counter = 0
-        self._loading_active = False
-        logger.debug(f"StreamProcessor '{self.name}' reset frame counter and loading state")
-        
         if self.on_stream_stop_callback:
             try:
                 await self.on_stream_stop_callback()

@@ -139,15 +139,6 @@ async def update_params(params: dict):
 
     # Additional custom parameters can be handled here.
 
-async def register_with_orchestrator(app):
-    """Register this capability with the orchestrator on startup."""
-    registrar = RegisterCapability(logger)
-    result = await registrar.register_capability()
-    if result:
-        logger.info(f"✅ Successfully registered capability with orchestrator: {result}")
-    else:
-        logger.info("ℹ️  Orchestrator registration skipped (no ORCH_URL/ORCH_SECRET provided)")
-
 # Create and run StreamProcessor
 if __name__ == "__main__":
     logger.info("=" * 60)
@@ -180,7 +171,6 @@ if __name__ == "__main__":
             enabled=True,
             auto_timeout_seconds=1.0,
         ),
-        on_startup=[register_with_orchestrator],
         route_prefix="/"
     )
     processor.run()
