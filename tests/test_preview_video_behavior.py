@@ -7,7 +7,7 @@ from types import MethodType
 from pytrickle.client import TrickleClient
 from pytrickle.frames import VideoFrame
 from pytrickle.stream_processor import _InternalFrameProcessor, VideoProcessingResult
-from pytrickle.loading_config import LoadingConfig, LoadingMode
+from pytrickle.preview_video_config import PreviewVideoConfig, PreviewVideoMode
 
 
 def _make_video_frame(value: float = 0.5, timestamp: int = 0) -> VideoFrame:
@@ -39,12 +39,12 @@ class _DummyProtocol:
         return None
 
 
-async def _run_single_frame(processor, frame, loading_config=None):
+async def _run_single_frame(processor, frame, preview_video_config=None):
     """Push a single frame through the TrickleClient video loop."""
     client = TrickleClient(
         protocol=_DummyProtocol(),
         frame_processor=processor,
-        loading_config=loading_config
+        preview_video_config=preview_video_config
     )
     await client.video_input_queue.put(frame)
     await client.video_input_queue.put(None)
@@ -53,14 +53,14 @@ async def _run_single_frame(processor, frame, loading_config=None):
 
 
 @pytest.mark.asyncio
-async def test_overlay_mode_injects_overlay_frame(monkeypatch):
+async def test_preview_mode_injects_preview_frame(monkeypatch):
     overlay_marker = _make_video_frame(9.0)
 
     def fake_overlay(*, original_frame, message, frame_counter, progress):
         return overlay_marker
 
     monkeypatch.setattr(
-        "pytrickle.loading_overlay_controller.build_loading_overlay_frame",
+        "pytrickle.preview_video_controller.build_preview_video_frame",
         fake_overlay,
     )
 
@@ -72,23 +72,23 @@ async def test_overlay_mode_injects_overlay_frame(monkeypatch):
         audio_processor=_noop_audio_handler,
         model_loader=None,
         param_updater=_noop_param_updater,
-        name="test-overlay",
+        name="test-preview",
     )
     
-    # Create loading config for manual overlay mode
-    loading_config = LoadingConfig(
-        mode=LoadingMode.OVERLAY,
+    # Create preview config for manual preview mode
+    preview_video_config = PreviewVideoConfig(
+        mode=PreviewVideoMode.ProgressBar,
         enabled=True,
         auto_timeout_seconds=None  # Disable auto-timeout for manual mode
     )
     
-    # Create client with manual loading enabled
+    # Create client with manual preview enabled
     client = TrickleClient(
         protocol=_DummyProtocol(),
         frame_processor=processor,
-        loading_config=loading_config
+        preview_video_config=preview_video_config
     )
-    client.loading_controller.set_manual_loading(True)
+    client.preview_video_controller.set_manual_preview(True)
     
     await client.video_input_queue.put(_make_video_frame(1.0, timestamp=123))
     await client.video_input_queue.put(None)
@@ -108,19 +108,19 @@ async def test_passthrough_mode_keeps_processed_frame():
         name="test-passthrough",
     )
     
-    # Create loading config for passthrough mode
-    loading_config = LoadingConfig(
-        mode=LoadingMode.PASSTHROUGH,
+    # Create preview config for passthrough mode
+    preview_video_config = PreviewVideoConfig(
+        mode=PreviewVideoMode.Passthrough,
         enabled=True
     )
     
-    # Create client with manual loading enabled in passthrough mode
+    # Create client with manual preview enabled in passthrough mode
     client = TrickleClient(
         protocol=_DummyProtocol(),
         frame_processor=processor,
-        loading_config=loading_config
+        preview_video_config=preview_video_config
     )
-    client.loading_controller.set_manual_loading(True)
+    client.preview_video_controller.set_manual_preview(True)
     
     frame = _make_video_frame(2.0, timestamp=456)
     await client.video_input_queue.put(frame)
@@ -133,14 +133,14 @@ async def test_passthrough_mode_keeps_processed_frame():
 
 
 @pytest.mark.asyncio
-async def test_auto_overlay_engages_when_frames_stall(monkeypatch):
+async def test_auto_preview_engages_when_frames_stall(monkeypatch):
     overlay_marker = _make_video_frame(7.0)
 
     def fake_overlay(**kwargs):
         return overlay_marker
 
     monkeypatch.setattr(
-        "pytrickle.loading_overlay_controller.build_loading_overlay_frame",
+        "pytrickle.preview_video_controller.build_preview_video_frame",
         fake_overlay,
     )
 
@@ -152,25 +152,25 @@ async def test_auto_overlay_engages_when_frames_stall(monkeypatch):
         audio_processor=_noop_audio_handler,
         model_loader=None,
         param_updater=_noop_param_updater,
-        name="test-auto-overlay",
+        name="test-auto-preview",
     )
     
-    # Create loading config with auto-timeout set to 0 (immediate)
-    loading_config = LoadingConfig(
-        mode=LoadingMode.OVERLAY,
+    # Create preview config with auto-timeout set to 0 (immediate)
+    preview_video_config = PreviewVideoConfig(
+        mode=PreviewVideoMode.ProgressBar,
         message="Waiting...",
         enabled=True,
         auto_timeout_seconds=0.0
     )
 
     output = await _run_single_frame(
-        processor, _make_video_frame(1.0, timestamp=789), loading_config=loading_config
+        processor, _make_video_frame(1.0, timestamp=789), preview_video_config=preview_video_config
     )
     assert torch.allclose(output.frame.tensor, overlay_marker.tensor)
 
 
 @pytest.mark.asyncio
-async def test_client_start_resets_auto_loading_state(monkeypatch):
+async def test_client_start_resets_auto_preview_state(monkeypatch):
     processor = _InternalFrameProcessor(
         video_processor=_video_processor,
         audio_processor=_noop_audio_handler,
@@ -193,19 +193,19 @@ async def test_client_start_resets_auto_loading_state(monkeypatch):
     ):
         monkeypatch.setattr(client, loop_name, MethodType(noop_loop, client))
 
-    # Access loading controller state (it's now in the controller, not the client)
-    client.loading_controller._loading_active = True
-    client.loading_controller._last_video_frame_time = -1.0
+    # Access preview video controller state (it's now in the controller, not the client)
+    client.preview_video_controller._preview_active = True
+    client.preview_video_controller._last_video_frame_time = -1.0
 
     await client.start("first-run")
 
-    assert client.loading_controller._loading_active is False
-    assert client.loading_controller._last_video_frame_time != -1.0
+    assert client.preview_video_controller._preview_active is False
+    assert client.preview_video_controller._last_video_frame_time != -1.0
 
-    client.loading_controller._loading_active = True
-    client.loading_controller._last_video_frame_time = -5.0
+    client.preview_video_controller._preview_active = True
+    client.preview_video_controller._last_video_frame_time = -5.0
 
     await client.start("second-run")
 
-    assert client.loading_controller._loading_active is False
-    assert client.loading_controller._last_video_frame_time != -5.0
+    assert client.preview_video_controller._preview_active is False
+    assert client.preview_video_controller._last_video_frame_time != -5.0

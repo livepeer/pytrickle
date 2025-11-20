@@ -1,5 +1,5 @@
 """
-Loading overlay utilities for PyTrickle video frames.
+Preview video utilities for PyTrickle video frames.
 
 Inspired by the ai-runner feature (Credit to @victorges):
 https://github.com/livepeer/ai-runner/blob/main/runner/app/live/process/loading_overlay.py
@@ -13,7 +13,7 @@ import numpy as np
 from pytrickle.frames import VideoFrame
 
 __all__ = [
-    "build_loading_overlay_frame",
+    "build_preview_video_frame",
 ]
 
 
@@ -28,8 +28,8 @@ def _get_cv2():
             import cv2  # type: ignore
         except ImportError as exc:  # pragma: no cover - exercised in environments without cv2
             raise RuntimeError(
-                "Loading overlay support requires the 'opencv-python' package. "
-                "Install it to enable loading overlay rendering."
+                "Preview video support requires the 'opencv-python' package. "
+                "Install it to enable preview video rendering."
             ) from exc
         
         # Verify OpenCV is properly built and functional
@@ -47,7 +47,7 @@ def _get_cv2():
     return _cv2_module
 
 
-def _create_loading_frame_numpy(
+def _create_preview_frame_numpy(
     width: int,
     height: int,
     message: str,
@@ -55,9 +55,9 @@ def _create_loading_frame_numpy(
     progress: Optional[float],
 ) -> np.ndarray:
     """
-    Internal helper to create a loading overlay frame as numpy array.
+    Internal helper to create a preview video frame as numpy array.
 
-    Creates an RGB loading overlay with animated progress bar using OpenCV.
+    Creates an RGB preview video with animated progress bar using OpenCV.
     This is an implementation detail and should not be used directly.
     """
     cv2 = _get_cv2()
@@ -142,18 +142,18 @@ def _create_loading_frame_numpy(
     return frame
 
 
-def build_loading_overlay_frame(
+def build_preview_video_frame(
     original_frame: VideoFrame,
     message: str = "Loading...",
     frame_counter: int = 0,
     progress: Optional[float] = None,
 ) -> VideoFrame:
     """
-    Create a loading overlay VideoFrame with timing preserved from original frame.
+    Create a preview video VideoFrame with timing preserved from original frame.
 
-    Replaces the video content with an animated loading overlay while preserving
+    Replaces the video content with an animated preview video while preserving
     timing information (timestamp, time_base) from the original frame. This is
-    useful for frame processors that need to show loading state during warmup or
+    useful for frame processors that need to show preview/loading state during warmup or
     processing delays.
     """
     from ..frames import VideoFrame
@@ -172,7 +172,7 @@ def build_loading_overlay_frame(
     else:
         raise ValueError(f"Unexpected tensor dimensions: {tensor.shape}")
 
-    overlay_np = _create_loading_frame_numpy(
+    overlay_np = _create_preview_frame_numpy(
         width=width,
         height=height,
         message=message,
@@ -187,4 +187,3 @@ def build_loading_overlay_frame(
     overlay_frame = VideoFrame.from_av_frame_with_timing(overlay_av, original_frame)
 
     return overlay_frame
-

@@ -17,8 +17,8 @@ from .frames import VideoFrame, AudioFrame, VideoOutput, AudioOutput
 from .base import ErrorCallback
 from .frame_processor import FrameProcessor
 from .frame_skipper import AdaptiveFrameSkipper, FrameSkipConfig, FrameProcessingResult
-from .loading_config import LoadingConfig
-from .loading_overlay_controller import LoadingOverlayController
+from .preview_video_config import PreviewVideoConfig
+from .preview_video_controller import PreviewVideoController
 
 logger = logging.getLogger(__name__)
 
@@ -34,9 +34,9 @@ class TrickleClient:
         error_callback: Optional[ErrorCallback] = None,
         max_queue_size: int = 300,
         frame_skip_config: Optional[FrameSkipConfig] = None,
-        loading_config: Optional[LoadingConfig] = None,
+        preview_video_config: Optional[PreviewVideoConfig] = None,
     ):
-        """Initialize TrickleClient with optional frame skipping and loading overlay."""
+        """Initialize TrickleClient with optional frame skipping and preview video."""
         self.protocol = protocol
         self.frame_processor = frame_processor
         self.control_handler = control_handler
@@ -45,11 +45,11 @@ class TrickleClient:
         # Instantiate mutable defaults inside the function to avoid shared state
         if frame_skip_config is None:
             frame_skip_config = FrameSkipConfig()
-        if loading_config is None:
-            loading_config = LoadingConfig()
+        if preview_video_config is None:
+            preview_video_config = PreviewVideoConfig()
         
-        # Loading configuration
-        self.loading_controller = LoadingOverlayController(self.frame_processor, loading_config)
+        # Preview video configuration
+        self.preview_video_controller = PreviewVideoController(self.frame_processor, preview_video_config)
 
         # Use provided error_callback, or fall back to frame_processor's error_callback
         self.error_callback = error_callback or frame_processor.error_callback
@@ -93,7 +93,7 @@ class TrickleClient:
         self.request_id = request_id
         self.stop_event.clear()
         self.error_event.clear()
-        self.loading_controller.reset()
+        self.preview_video_controller.reset()
         
         logger.info(f"Starting trickle client with request_id={request_id}")
         
@@ -158,8 +158,8 @@ class TrickleClient:
         logger.info("Stopping trickle client")
         self.stop_event.set()
         
-        # Reset loading controller before stopping
-        self.loading_controller.reset()
+        # Reset preview video controller before stopping
+        self.preview_video_controller.reset()
                 
         # Send sentinel values to stop processing and egress loops
         try:
@@ -287,7 +287,7 @@ class TrickleClient:
                 frame = frame_or_result
                 processed_frame = await self.frame_processor.process_video_async(frame)
 
-                output_frame = self.loading_controller.update_and_apply(frame, processed_frame)
+                output_frame = self.preview_video_controller.update_and_apply(frame, processed_frame)
 
                 output = VideoOutput(output_frame, self.request_id)
                 await self.output_queue.put(output)

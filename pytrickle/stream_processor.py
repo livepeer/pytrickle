@@ -9,7 +9,7 @@ from .frames import VideoFrame, AudioFrame
 from .frame_processor import FrameProcessor
 from .server import StreamServer
 from .frame_skipper import FrameSkipConfig
-from .loading_config import LoadingConfig
+from .preview_video_config import PreviewVideoConfig
 
 class VideoProcessingResult(Enum):
     """Explicit result to distinguish intentional frame withholding from errors."""
@@ -40,7 +40,7 @@ class StreamProcessor:
         name: str = "stream-processor",
         port: int = 8000,
         frame_skip_config: Optional[FrameSkipConfig] = None,
-        loading_config: Optional[LoadingConfig] = None,
+        preview_video_config: Optional[PreviewVideoConfig] = None,
         validate_signature: bool = True,
         **server_kwargs
     ):
@@ -79,7 +79,7 @@ class StreamProcessor:
             name=name,
             port=port,
             frame_skip_config=frame_skip_config,
-            loading_config=loading_config,
+            preview_video_config=preview_video_config,
             validate_signature=validate_signature,
             **server_kwargs
         )
@@ -100,7 +100,7 @@ class StreamProcessor:
         name: str = "stream-processor",
         port: int = 8000,
         frame_skip_config: Optional[FrameSkipConfig] = None,
-        loading_config: Optional[LoadingConfig] = None,
+        preview_video_config: Optional[PreviewVideoConfig] = None,
         validate_signature: bool = True,
         **server_kwargs
     ):
@@ -118,7 +118,7 @@ class StreamProcessor:
             name: Processor name
             port: Server port
             frame_skip_config: Optional frame skipping configuration (None = no frame skipping)
-            loading_config: Optional loading configuration (None = no loading configuration)
+            preview_video_config: Optional preview video configuration (None = no preview video configuration)
             validate_signature: Whether to validate the signature of the processors (default: True)
             **server_kwargs: Additional arguments passed to StreamServer
         """
@@ -151,7 +151,7 @@ class StreamProcessor:
         self.name = name
         self.port = port
         self.frame_skip_config = frame_skip_config
-        self.loading_config = loading_config
+        self.preview_video_config = preview_video_config
         self.server_kwargs = server_kwargs
         self._handler_registry: Optional[HandlerRegistry] = None
         
@@ -171,7 +171,7 @@ class StreamProcessor:
             frame_processor=self._frame_processor,
             port=port,
             frame_skip_config=frame_skip_config,
-            loading_config=loading_config,
+            preview_video_config=preview_video_config,
             **server_kwargs
         )
 

@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-Model Loading and Loading Overlay Example
+Model Loading and Preview Video Example
 
 Demonstrates:
 1. Non-blocking model loading with configurable delay
 2. Server health state transitions (LOADING -> IDLE)
-3. Automatic loading overlay during processing delays
+3. Automatic preview video during processing delays
 4. Real-time parameter updates
 
 The server starts immediately and is available for /health checks while
-the model loads in the background. The loading overlay automatically appears
+    the model loads in the background. The preview video automatically appears
 when frames are withheld during processing delays.
 
 To test:
-1. Run: python examples/loading_overlay_example.py
+1. Run: python examples/preview_video_example.py
 2. Check health: curl http://localhost:8000/health
 3. Simulate a 15s processing stall:
    curl -X POST http://localhost:8000/update_params \
@@ -28,7 +28,7 @@ from typing import Optional
 
 from pytrickle.frames import AudioFrame, VideoFrame
 from pytrickle.frame_skipper import FrameSkipConfig
-from pytrickle.loading_config import LoadingConfig, LoadingMode
+from pytrickle.preview_video_config import PreviewVideoConfig, PreviewVideoMode
 from pytrickle.stream_processor import StreamProcessor, VideoProcessingResult
 from pytrickle.utils.register import RegisterCapability
 
@@ -142,7 +142,7 @@ async def update_params(params: dict):
 # Create and run StreamProcessor
 if __name__ == "__main__":
     logger.info("=" * 60)
-    logger.info("Model Loading & Loading Overlay Example")
+    logger.info("Model Loading & Preview Video Example")
     logger.info("=" * 60)
     logger.info("")
     logger.info("Server: http://localhost:8000")
@@ -165,8 +165,8 @@ if __name__ == "__main__":
         name="model-loading-demo",
         port=8000,
         frame_skip_config=FrameSkipConfig(),
-        loading_config=LoadingConfig(
-            mode=LoadingMode.OVERLAY,
+        preview_video_config=PreviewVideoConfig(
+            mode=PreviewVideoMode.ProgressBar,
             message="Loading...",
             enabled=True,
             auto_timeout_seconds=1.0,
