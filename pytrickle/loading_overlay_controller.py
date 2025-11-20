@@ -67,12 +67,8 @@ class LoadingOverlayController:
         """Toggle manual loading overlay state."""
         self._loading_active = bool(active)
         self._is_manual_loading = bool(active)
-        if active:
-            # When manually enabling, update timestamp
-            self._last_video_frame_time = time.time()
-        else:
-            # When manually disabling, reset timestamp to give grace period before auto can re-enable
-            self._last_video_frame_time = time.time()
+        self._last_video_frame_time = time.time()
+        if not active:
             self._frame_counter = 0
 
     def _update_loading_state(self, received_frame_from_processor: bool) -> None:

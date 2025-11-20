@@ -13,7 +13,7 @@ from .loading_config import LoadingConfig
 
 class VideoProcessingResult(Enum):
     """Explicit result to distinguish intentional frame withholding from errors."""
-    WITHHELD = "withheld"  # Intentionally withholding frame to trigger overlay
+    WITHHELD = "withheld"
 
 logger = logging.getLogger(__name__)
 
@@ -343,8 +343,9 @@ class _InternalFrameProcessor(FrameProcessor):
             if isinstance(result, VideoFrame):
                 return result
             if result == VideoProcessingResult.WITHHELD:
+                # StreamProcessors can return VideoProcessingResult.WITHHELD 
+                # to actively trigger overlay instead of waiting for the auto-timeout
                 return None
-            # None from decorators or other failures means pass through
             return frame
         except Exception as e:
             logger.error(f"Error in video processing: {e}")

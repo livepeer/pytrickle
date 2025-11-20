@@ -223,7 +223,7 @@ class StreamServer:
                 
                 # Parse string/bool values for manual loading overlay
                 if isinstance(show_loading, str):
-                    show_loading_bool = show_loading.lower() in ("true")
+                    show_loading_bool = show_loading.lower() == ("true")
                 else:
                     show_loading_bool = bool(show_loading)
                     
@@ -470,11 +470,6 @@ class StreamServer:
             
             # Set params if provided
             if params.params:
-                if hasattr(self.frame_processor, "prepare_stream_loading"):
-                    try:
-                        await self.frame_processor.prepare_stream_loading("Loading workflow...")
-                    except Exception as e:
-                        logger.debug(f"Unable to prepare stream loading overlay: {e}")
                 try:
                     self._schedule_param_update(params.params)
                     logger.info(f"Initial stream parameters scheduled: {params.params}")
