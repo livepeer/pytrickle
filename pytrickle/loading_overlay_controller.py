@@ -8,7 +8,6 @@ import time
 import logging
 from typing import Optional
 
-from .frame_processor import FrameProcessor
 from .frames import VideoFrame
 from .loading_config import LoadingConfig, LoadingMode
 from .utils.loading_overlay import build_loading_overlay_frame
@@ -19,8 +18,7 @@ logger = logging.getLogger(__name__)
 class LoadingOverlayController:
     """Helper to coordinate loading overlay state and rendering within the client."""
 
-    def __init__(self, frame_processor: FrameProcessor, loading_config: Optional[LoadingConfig]):
-        self.frame_processor = frame_processor
+    def __init__(self, loading_config: Optional[LoadingConfig]):
         self.loading_config = loading_config if loading_config is not None else LoadingConfig()
         self._last_video_frame_time = time.time()
         self._loading_active = False

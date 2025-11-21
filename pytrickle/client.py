@@ -49,7 +49,7 @@ class TrickleClient:
             loading_config = LoadingConfig()
         
         # Loading configuration
-        self.loading_controller = LoadingOverlayController(self.frame_processor, loading_config)
+        self.loading_controller = LoadingOverlayController(loading_config)
 
         # Use provided error_callback, or fall back to frame_processor's error_callback
         self.error_callback = error_callback or frame_processor.error_callback
