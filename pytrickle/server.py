@@ -11,6 +11,7 @@ import time
 from typing import Optional, Dict, Any, Callable, Union, List
 from dataclasses import dataclass
 import os
+import uuid
 
 from aiohttp import web
 from .version import __version__
@@ -574,6 +575,7 @@ class StreamServer:
                 {
                     "status": "accepted",
                     "message": "Parameter update scheduled",
+                    "request_id": str(uuid.uuid4())
                 },
                 status=200,
             )
