@@ -7,7 +7,7 @@ from types import MethodType
 from pytrickle.client import TrickleClient
 from pytrickle.frames import VideoFrame
 from pytrickle.stream_processor import _InternalFrameProcessor, VideoProcessingResult
-from pytrickle.loading_config import LoadingConfig, LoadingMode
+from pytrickle.frame_overlay import LoadingConfig, LoadingMode
 
 
 def _make_video_frame(value: float = 0.5, timestamp: int = 0) -> VideoFrame:
@@ -60,7 +60,7 @@ async def test_overlay_mode_injects_overlay_frame(monkeypatch):
         return overlay_marker
 
     monkeypatch.setattr(
-        "pytrickle.loading_overlay_controller.build_loading_overlay_frame",
+        "pytrickle.frame_overlay.build_frame_overlay",
         fake_overlay,
     )
 
@@ -140,7 +140,7 @@ async def test_auto_overlay_engages_when_frames_stall(monkeypatch):
         return overlay_marker
 
     monkeypatch.setattr(
-        "pytrickle.loading_overlay_controller.build_loading_overlay_frame",
+        "pytrickle.frame_overlay.build_frame_overlay",
         fake_overlay,
     )
 

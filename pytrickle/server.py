@@ -23,7 +23,7 @@ from .frame_processor import FrameProcessor
 from .client import TrickleClient
 from .protocol import TrickleProtocol
 from .frame_skipper import FrameSkipConfig
-from .loading_config import LoadingConfig
+from .frame_overlay import LoadingConfig
 
 logger = logging.getLogger(__name__)
 

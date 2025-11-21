@@ -9,7 +9,7 @@ from .frames import VideoFrame, AudioFrame
 from .frame_processor import FrameProcessor
 from .server import StreamServer
 from .frame_skipper import FrameSkipConfig
-from .loading_config import LoadingConfig
+from .frame_overlay import LoadingConfig
 
 class VideoProcessingResult(Enum):
     """Explicit result to distinguish intentional frame withholding from errors."""

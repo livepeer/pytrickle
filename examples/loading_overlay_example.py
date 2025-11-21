@@ -28,7 +28,7 @@ from typing import Optional
 
 from pytrickle.frames import AudioFrame, VideoFrame
 from pytrickle.frame_skipper import FrameSkipConfig
-from pytrickle.loading_config import LoadingConfig, LoadingMode
+from pytrickle.frame_overlay import LoadingConfig, LoadingMode
 from pytrickle.stream_processor import StreamProcessor, VideoProcessingResult
 from pytrickle.utils.register import RegisterCapability
 

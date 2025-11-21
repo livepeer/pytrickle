@@ -17,8 +17,8 @@ from .frames import VideoFrame, AudioFrame, VideoOutput, AudioOutput
 from .base import ErrorCallback
 from .frame_processor import FrameProcessor
 from .frame_skipper import AdaptiveFrameSkipper, FrameSkipConfig, FrameProcessingResult
-from .loading_config import LoadingConfig
-from .loading_overlay_controller import LoadingOverlayController
+from .frame_overlay import LoadingConfig
+from .frame_overlay import LoadingOverlayController
 
 logger = logging.getLogger(__name__)
 
