@@ -456,6 +456,7 @@ class StreamServer:
             self.state.set_active_client(True)
             self.state.update_active_streams(1)
             
+<<<<<<< HEAD
             # Set params if provided
             if params.params:
                 try:
@@ -465,6 +466,14 @@ class StreamServer:
             
             # Start client in background
             self._client_task = asyncio.create_task(self._run_client(params.gateway_request_id))
+=======
+            # Start client in background (params will be passed to on_stream_start)
+            # Note: We pass params via client.start instead of via update_params
+            # to differentiate stream start from parameter updates
+            self._client_task = asyncio.create_task(
+                self._run_client(params.gateway_request_id, params.params)
+            )
+>>>>>>> 4002528 (feat(client): pass initial stream parameters to on_stream_start callback)
             
             # Start health monitoring
             self._start_health_monitoring()
@@ -697,11 +706,16 @@ class StreamServer:
         except Exception as e:
             logger.error(f"Health monitoring error: {e}")
     
-    async def _run_client(self, request_id: str):
-        """Run the trickle client in background."""
+    async def _run_client(self, request_id: str, params: Optional[Dict[str, Any]] = None):
+        """Run the trickle client in background.
+        
+        Args:
+            request_id: Unique identifier for the stream request
+            params: Optional parameters to pass to on_stream_start callback
+        """
         try:
             if self.current_client:
-                await self.current_client.start(request_id)
+                await self.current_client.start(request_id, params)
                 logger.info("Client stream completed successfully")
         except Exception as e:
             logger.error(f"Error running client: {e}")

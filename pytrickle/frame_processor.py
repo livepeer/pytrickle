@@ -128,15 +128,19 @@ class FrameProcessor(ABC):
         """
         pass
 
-    async def on_stream_start(self):
+    async def on_stream_start(self, params: Optional[Dict[str, Any]] = None):
         """
         Called when a stream starts or client connects.
         
+        Args:
+            params: Optional dictionary of stream start parameters (width, height, etc.)
+        
         Override this method to perform initialization operations like:
         - Starting background tasks
-        - Initializing state
+        - Initializing state based on stream parameters
         - Setting up resources
         - Starting timers or loops
+        - Configuring the pipeline based on initial parameters
         """
         pass
 

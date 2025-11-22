@@ -15,20 +15,22 @@ from pytrickle.server import StreamServer
 from pytrickle.state import PipelineState
 from pytrickle.test_utils import MockFrameProcessor
 
-# Import example processor functions
-from pytrickle.examples.process_video_example import load_model, process_video, update_params
-
 
 @pytest_asyncio.fixture
 async def test_server():
     """Create a test server with the example processor."""
-    processor = _InternalFrameProcessor(
-        video_processor=process_video,
-        audio_processor=None,
-        model_loader=load_model,
-        param_updater=update_params,
-        name="trickle-stream-example",
-    )
+    # Try to import example functions, fall back to mock if not available
+    try:
+        from pytrickle.examples.process_video_example import load_model, process_video, update_params
+        processor = _InternalFrameProcessor(
+            video_processor=process_video,
+            audio_processor=None,
+            model_loader=load_model,
+            param_updater=update_params,
+            name="trickle-stream-example",
+        )
+    except ImportError:
+        processor = MockFrameProcessor()
 
     server = StreamServer(
         frame_processor=processor,
@@ -96,6 +98,18 @@ class TestVersionEndpoint:
     @pytest.mark.asyncio
     async def test_version_endpoint_custom_values(self):
         """Test /version and /app-version endpoints with custom pipeline and version values."""
+        # Try to use example functions, fall back to simple test functions
+        try:
+            from pytrickle.examples.process_video_example import load_model, process_video, update_params
+        except ImportError:
+            # Define simple test functions if examples aren't available
+            async def process_video(frame):
+                return frame
+            async def load_model():
+                pass
+            async def update_params(params):
+                pass
+        
         # Create server with custom values
         processor = _InternalFrameProcessor(
             video_processor=process_video,
