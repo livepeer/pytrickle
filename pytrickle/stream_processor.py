@@ -9,7 +9,7 @@ from .frames import VideoFrame, AudioFrame
 from .frame_processor import FrameProcessor
 from .server import StreamServer
 from .frame_skipper import FrameSkipConfig
-from .frame_overlay import LoadingConfig
+from .frame_overlay import OverlayConfig
 
 class VideoProcessingResult(Enum):
     """Explicit result to distinguish intentional frame withholding from errors."""
@@ -40,7 +40,7 @@ class StreamProcessor:
         name: str = "stream-processor",
         port: int = 8000,
         frame_skip_config: Optional[FrameSkipConfig] = None,
-        loading_config: Optional[LoadingConfig] = None,
+        overlay_config: Optional[OverlayConfig] = None,
         validate_signature: bool = True,
         **server_kwargs
     ):
@@ -79,7 +79,7 @@ class StreamProcessor:
             name=name,
             port=port,
             frame_skip_config=frame_skip_config,
-            loading_config=loading_config,
+            overlay_config=overlay_config,
             validate_signature=validate_signature,
             **server_kwargs
         )
@@ -100,7 +100,7 @@ class StreamProcessor:
         name: str = "stream-processor",
         port: int = 8000,
         frame_skip_config: Optional[FrameSkipConfig] = None,
-        loading_config: Optional[LoadingConfig] = None,
+        overlay_config: Optional[OverlayConfig] = None,
         validate_signature: bool = True,
         **server_kwargs
     ):
@@ -118,7 +118,7 @@ class StreamProcessor:
             name: Processor name
             port: Server port
             frame_skip_config: Optional frame skipping configuration (None = no frame skipping)
-            loading_config: Optional loading configuration (None = no loading configuration)
+            overlay_config: Optional loading configuration (None = no loading configuration)
             validate_signature: Whether to validate the signature of the processors (default: True)
             **server_kwargs: Additional arguments passed to StreamServer
         """
@@ -151,7 +151,7 @@ class StreamProcessor:
         self.name = name
         self.port = port
         self.frame_skip_config = frame_skip_config
-        self.loading_config = loading_config
+        self.overlay_config = overlay_config
         self.server_kwargs = server_kwargs
         self._handler_registry: Optional[HandlerRegistry] = None
         
@@ -171,7 +171,7 @@ class StreamProcessor:
             frame_processor=self._frame_processor,
             port=port,
             frame_skip_config=frame_skip_config,
-            loading_config=loading_config,
+            overlay_config=overlay_config,
             **server_kwargs
         )
 

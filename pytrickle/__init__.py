@@ -24,8 +24,8 @@ from .frame_processor import FrameProcessor
 from .stream_processor import StreamProcessor, VideoProcessingResult
 from .fps_meter import FPSMeter
 from .frame_skipper import FrameSkipConfig
-from .frame_overlay import LoadingConfig, LoadingMode
-from .frame_overlay import LoadingOverlayController
+from .frame_overlay import OverlayConfig, OverlayMode
+from .frame_overlay import OverlayController
 
 from . import api
 
@@ -57,8 +57,8 @@ __all__ = [
     "FrameProcessor",
     "FPSMeter",
     "FrameSkipConfig",
-    "LoadingConfig",
-    "LoadingMode",
-    "LoadingOverlayController",
+    "OverlayConfig",
+    "OverlayMode",
+    "OverlayController",
     "__version__"
 ] 

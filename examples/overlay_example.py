@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Model Loading and Loading Overlay Example
+Model Loading and Overlay Example
 
 Demonstrates:
 1. Non-blocking model loading with configurable delay
@@ -13,7 +13,7 @@ the model loads in the background. The loading overlay automatically appears
 when frames are withheld during processing delays.
 
 To test:
-1. Run: python examples/loading_overlay_example.py
+1. Run: python examples/overlay_example.py
 2. Check health: curl http://localhost:8000/health
 3. Simulate a 15s processing stall:
    curl -X POST http://localhost:8000/update_params \
@@ -28,7 +28,7 @@ from typing import Optional
 
 from pytrickle.frames import AudioFrame, VideoFrame
 from pytrickle.frame_skipper import FrameSkipConfig
-from pytrickle.frame_overlay import LoadingConfig, LoadingMode
+from pytrickle.frame_overlay import OverlayConfig, OverlayMode
 from pytrickle.stream_processor import StreamProcessor, VideoProcessingResult
 
 logging.basicConfig(level=logging.INFO)
@@ -173,8 +173,8 @@ if __name__ == "__main__":
         name="model-loading-demo",
         port=8000,
         frame_skip_config=FrameSkipConfig(),
-        loading_config=LoadingConfig(
-            mode=LoadingMode.OVERLAY,
+        overlay_config=OverlayConfig(
+            mode=OverlayMode.OVERLAY,
             message="Loading...",
             enabled=True,
             auto_timeout_seconds=1.0,

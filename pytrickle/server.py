@@ -23,7 +23,7 @@ from .frame_processor import FrameProcessor
 from .client import TrickleClient
 from .protocol import TrickleProtocol
 from .frame_skipper import FrameSkipConfig
-from .frame_overlay import LoadingConfig
+from .frame_overlay import OverlayConfig
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +66,7 @@ class StreamServer:
         # Frame skipping configuration
         frame_skip_config: Optional[FrameSkipConfig] = None,
         # Loading overlay configuration
-        loading_config: Optional['LoadingConfig'] = None,
+        overlay_config: Optional['OverlayConfig'] = None,
 
     ):
         """Initialize StreamServer.
@@ -121,7 +121,7 @@ class StreamServer:
         self.frame_skip_config = frame_skip_config
         
         # Loading overlay configuration
-        self.loading_config = loading_config
+        self.overlay_config = overlay_config
         
         # Stream management - simple and direct
         self.current_client: Optional[TrickleClient] = None
@@ -448,7 +448,7 @@ class StreamServer:
                 frame_processor=self.frame_processor,
                 control_handler=self._handle_control_message,
                 frame_skip_config=self.frame_skip_config,
-                loading_config=self.loading_config,
+                overlay_config=self.overlay_config,
             )
             
             # Update state

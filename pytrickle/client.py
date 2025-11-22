@@ -17,8 +17,8 @@ from .frames import VideoFrame, AudioFrame, VideoOutput, AudioOutput
 from .base import ErrorCallback
 from .frame_processor import FrameProcessor
 from .frame_skipper import AdaptiveFrameSkipper, FrameSkipConfig, FrameProcessingResult
-from .frame_overlay import LoadingConfig
-from .frame_overlay import LoadingOverlayController
+from .frame_overlay import OverlayConfig
+from .frame_overlay import OverlayController
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ class TrickleClient:
         error_callback: Optional[ErrorCallback] = None,
         max_queue_size: int = 300,
         frame_skip_config: Optional[FrameSkipConfig] = None,
-        loading_config: Optional[LoadingConfig] = None,
+        overlay_config: Optional[OverlayConfig] = None,
     ):
         """Initialize TrickleClient with optional frame skipping and loading overlay."""
         self.protocol = protocol
@@ -45,11 +45,11 @@ class TrickleClient:
         # Instantiate mutable defaults inside the function to avoid shared state
         if frame_skip_config is None:
             frame_skip_config = FrameSkipConfig()
-        if loading_config is None:
-            loading_config = LoadingConfig()
+        if overlay_config is None:
+            overlay_config = OverlayConfig()
         
         # Loading configuration
-        self.loading_controller = LoadingOverlayController(loading_config)
+        self.loading_controller = OverlayController(overlay_config)
 
         # Use provided error_callback, or fall back to frame_processor's error_callback
         self.error_callback = error_callback or frame_processor.error_callback

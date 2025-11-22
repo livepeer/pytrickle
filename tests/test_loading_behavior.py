@@ -7,7 +7,7 @@ from types import MethodType
 from pytrickle.client import TrickleClient
 from pytrickle.frames import VideoFrame
 from pytrickle.stream_processor import _InternalFrameProcessor, VideoProcessingResult
-from pytrickle.frame_overlay import LoadingConfig, LoadingMode
+from pytrickle.frame_overlay import OverlayConfig, OverlayMode
 
 
 def _make_video_frame(value: float = 0.5, timestamp: int = 0) -> VideoFrame:
@@ -39,12 +39,12 @@ class _DummyProtocol:
         return None
 
 
-async def _run_single_frame(processor, frame, loading_config=None):
+async def _run_single_frame(processor, frame, overlay_config=None):
     """Push a single frame through the TrickleClient video loop."""
     client = TrickleClient(
         protocol=_DummyProtocol(),
         frame_processor=processor,
-        loading_config=loading_config
+        overlay_config=overlay_config
     )
     await client.video_input_queue.put(frame)
     await client.video_input_queue.put(None)
@@ -76,8 +76,8 @@ async def test_overlay_mode_injects_overlay_frame(monkeypatch):
     )
     
     # Create loading config for manual overlay mode
-    loading_config = LoadingConfig(
-        mode=LoadingMode.OVERLAY,
+    overlay_config = OverlayConfig(
+        mode=OverlayMode.OVERLAY,
         enabled=True,
         auto_timeout_seconds=None  # Disable auto-timeout for manual mode
     )
@@ -86,7 +86,7 @@ async def test_overlay_mode_injects_overlay_frame(monkeypatch):
     client = TrickleClient(
         protocol=_DummyProtocol(),
         frame_processor=processor,
-        loading_config=loading_config
+        overlay_config=overlay_config
     )
     client.loading_controller.set_manual_loading(True)
     
@@ -109,8 +109,8 @@ async def test_passthrough_mode_keeps_processed_frame():
     )
     
     # Create loading config for passthrough mode
-    loading_config = LoadingConfig(
-        mode=LoadingMode.PASSTHROUGH,
+    overlay_config = OverlayConfig(
+        mode=OverlayMode.PASSTHROUGH,
         enabled=True
     )
     
@@ -118,7 +118,7 @@ async def test_passthrough_mode_keeps_processed_frame():
     client = TrickleClient(
         protocol=_DummyProtocol(),
         frame_processor=processor,
-        loading_config=loading_config
+        overlay_config=overlay_config
     )
     client.loading_controller.set_manual_loading(True)
     
@@ -156,15 +156,15 @@ async def test_auto_overlay_engages_when_frames_stall(monkeypatch):
     )
     
     # Create loading config with auto-timeout set to 0 (immediate)
-    loading_config = LoadingConfig(
-        mode=LoadingMode.OVERLAY,
+    overlay_config = OverlayConfig(
+        mode=OverlayMode.OVERLAY,
         message="Waiting...",
         enabled=True,
         auto_timeout_seconds=0.0
     )
 
     output = await _run_single_frame(
-        processor, _make_video_frame(1.0, timestamp=789), loading_config=loading_config
+        processor, _make_video_frame(1.0, timestamp=789), overlay_config=overlay_config
     )
     assert torch.allclose(output.frame.tensor, overlay_marker.tensor)
 

@@ -20,9 +20,9 @@ import numpy as np
 from .frames import VideoFrame
 
 __all__ = [
-    "LoadingMode",
-    "LoadingConfig",
-    "LoadingOverlayController",
+    "OverlayMode",
+    "OverlayConfig",
+    "OverlayController",
     "build_frame_overlay",
 ]
 
@@ -199,16 +199,16 @@ def build_frame_overlay(
     return overlay_frame
 
 
-class LoadingMode(Enum):
+class OverlayMode(Enum):
     """Mode for handling video frames during loading."""
     OVERLAY = "overlay"      # Show loading animation overlay
     PASSTHROUGH = "passthrough"  # Pass through original frames
 
 
 @dataclass
-class LoadingConfig:
+class OverlayConfig:
     """Configuration for loading behavior."""
-    mode: LoadingMode = LoadingMode.OVERLAY  # How to handle video frames during loading
+    mode: OverlayMode = OverlayMode.OVERLAY  # How to handle video frames during loading
     message: str = "Loading..."              # Loading message to display in overlay
     progress: Optional[float] = None         # Progress value 0.0-1.0 (None = animated)
     enabled: bool = True                     # Whether loading gating is active
@@ -216,18 +216,18 @@ class LoadingConfig:
     
     def is_overlay_mode(self) -> bool:
         """Return True if this config is set to overlay mode."""
-        return self.mode == LoadingMode.OVERLAY
+        return self.mode == OverlayMode.OVERLAY
 
     def is_passthrough_mode(self) -> bool:
         """Return True if this config is set to passthrough mode."""
-        return self.mode == LoadingMode.PASSTHROUGH
+        return self.mode == OverlayMode.PASSTHROUGH
 
 
-class LoadingOverlayController:
+class OverlayController:
     """Helper to coordinate loading overlay state and rendering within the client."""
 
-    def __init__(self, loading_config: Optional[LoadingConfig]):
-        self.loading_config = loading_config if loading_config is not None else LoadingConfig()
+    def __init__(self, overlay_config: Optional[OverlayConfig]):
+        self.overlay_config = overlay_config if overlay_config is not None else OverlayConfig()
         self._last_video_frame_time = time.time()
         self._loading_active = False
         self._is_manual_loading = False  # Track if loading was set manually
@@ -259,13 +259,13 @@ class LoadingOverlayController:
         self._update_loading_state(received_frame)
         return self._apply_loading_overlay(original_frame, processed_frame)
 
-    def apply_loading_config(self, config: Optional[LoadingConfig]) -> None:
+    def apply_overlay_config(self, config: Optional[OverlayConfig]) -> None:
         """Push a new loading configuration into the controller."""
-        self.loading_config = config if config is not None else LoadingConfig()
+        self.overlay_config = config if config is not None else OverlayConfig()
         self._frame_counter = 0
         if (
-            not self.loading_config.enabled
-            or self.loading_config.mode == LoadingMode.PASSTHROUGH
+            not self.overlay_config.enabled
+            or self.overlay_config.mode == OverlayMode.PASSTHROUGH
         ):
             self._disable_overlay()
 
@@ -279,11 +279,11 @@ class LoadingOverlayController:
 
     def _update_loading_state(self, received_frame_from_processor: bool) -> None:
         """Update loading state based on whether the processor returned a frame."""
-        if not self.loading_config or not self.loading_config.enabled:
+        if not self.overlay_config or not self.overlay_config.enabled:
             self._disable_overlay()
             return
 
-        if self.loading_config.mode != LoadingMode.OVERLAY:
+        if self.overlay_config.mode != OverlayMode.OVERLAY:
             self._disable_overlay()
             return
 
@@ -296,7 +296,7 @@ class LoadingOverlayController:
         else:
             # Only auto-enable if not already manually enabled
             if not self._is_manual_loading:
-                timeout = self.loading_config.auto_timeout_seconds
+                timeout = self.overlay_config.auto_timeout_seconds
                 if (
                     timeout is not None
                     and timeout >= 0.0
@@ -329,9 +329,9 @@ class LoadingOverlayController:
         fallback_frame = processed_frame if processed_frame is not None else original_frame
 
         if (
-            not self.loading_config
-            or not self.loading_config.enabled
-            or self.loading_config.is_passthrough_mode()
+            not self.overlay_config
+            or not self.overlay_config.enabled
+            or self.overlay_config.is_passthrough_mode()
         ):
             return fallback_frame
 
@@ -341,8 +341,8 @@ class LoadingOverlayController:
         self._frame_counter += 1
         return build_frame_overlay(
             original_frame=original_frame,
-            message=self.loading_config.message,
+            message=self.overlay_config.message,
             frame_counter=self._frame_counter,
-            progress=self.loading_config.progress,
+            progress=self.overlay_config.progress,
         )
 
