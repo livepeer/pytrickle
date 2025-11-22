@@ -201,14 +201,14 @@ def build_frame_overlay(
 
 class OverlayMode(Enum):
     """Mode for handling video frames during loading."""
-    OVERLAY = "overlay"      # Show loading animation overlay
+    PROGRESSBAR = "progressbar"  # Show loading animation overlay
     PASSTHROUGH = "passthrough"  # Pass through original frames
 
 
 @dataclass
 class OverlayConfig:
     """Configuration for loading behavior."""
-    mode: OverlayMode = OverlayMode.OVERLAY  # How to handle video frames during loading
+    mode: OverlayMode = OverlayMode.PROGRESSBAR  # How to handle video frames during loading
     message: str = "Loading..."              # Loading message to display in overlay
     progress: Optional[float] = None         # Progress value 0.0-1.0 (None = animated)
     enabled: bool = True                     # Whether loading gating is active
@@ -216,7 +216,7 @@ class OverlayConfig:
     
     def is_overlay_mode(self) -> bool:
         """Return True if this config is set to overlay mode."""
-        return self.mode == OverlayMode.OVERLAY
+        return self.mode == OverlayMode.PROGRESSBAR
 
     def is_passthrough_mode(self) -> bool:
         """Return True if this config is set to passthrough mode."""
@@ -283,7 +283,7 @@ class OverlayController:
             self._disable_overlay()
             return
 
-        if self.overlay_config.mode != OverlayMode.OVERLAY:
+        if self.overlay_config.mode != OverlayMode.PROGRESSBAR:
             self._disable_overlay()
             return
 

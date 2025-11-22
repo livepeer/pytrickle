@@ -77,7 +77,7 @@ async def test_overlay_mode_injects_overlay_frame(monkeypatch):
     
     # Create loading config for manual overlay mode
     overlay_config = OverlayConfig(
-        mode=OverlayMode.OVERLAY,
+        mode=OverlayMode.PROGRESSBAR,
         enabled=True,
         auto_timeout_seconds=None  # Disable auto-timeout for manual mode
     )
@@ -157,7 +157,7 @@ async def test_auto_overlay_engages_when_frames_stall(monkeypatch):
     
     # Create loading config with auto-timeout set to 0 (immediate)
     overlay_config = OverlayConfig(
-        mode=OverlayMode.OVERLAY,
+        mode=OverlayMode.PROGRESSBAR,
         message="Waiting...",
         enabled=True,
         auto_timeout_seconds=0.0

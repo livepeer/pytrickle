@@ -174,7 +174,7 @@ if __name__ == "__main__":
         port=8000,
         frame_skip_config=FrameSkipConfig(),
         overlay_config=OverlayConfig(
-            mode=OverlayMode.OVERLAY,
+            mode=OverlayMode.PROGRESSBAR,
             message="Loading...",
             enabled=True,
             auto_timeout_seconds=1.0,
