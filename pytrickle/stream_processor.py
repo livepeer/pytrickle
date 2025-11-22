@@ -396,6 +396,7 @@ class _InternalFrameProcessor(FrameProcessor):
                 logger.info(f"Parameters updated: {user_params}")
             except Exception as e:
                 logger.error(f"Error updating parameters: {e}")
+                raise
     
     async def on_stream_start(self):
         """Call user-provided on_stream_start callback."""

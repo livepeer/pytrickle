@@ -324,16 +324,18 @@ class OverlayController:
             processed_frame: Frame returned by the user handler (may be None).
 
         Returns:
-            The frame that should be forwarded downstream (overlay or passthrough).
+            The frame that should be forwarded downstream (overlay, passthrough, or None to skip).
         """
-        fallback_frame = processed_frame if processed_frame is not None else original_frame
-
+        # If overlay is disabled or in passthrough mode, return processed_frame as-is (may be None)
         if (
             not self.overlay_config
             or not self.overlay_config.enabled
             or self.overlay_config.is_passthrough_mode()
         ):
-            return fallback_frame
+            return processed_frame
+        
+        # For overlay modes: use original_frame as fallback only when overlay logic applies
+        fallback_frame = processed_frame if processed_frame is not None else original_frame
 
         if not self._loading_active:
             return fallback_frame

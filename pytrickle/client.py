@@ -288,6 +288,10 @@ class TrickleClient:
                 processed_frame = await self.frame_processor.process_video_async(frame)
 
                 output_frame = self.loading_controller.update_and_apply(frame, processed_frame)
+                
+                # Respect the semantic contract: if processor returns None, skip the frame
+                if output_frame is None:
+                    continue
 
                 output = VideoOutput(output_frame, self.request_id)
                 await self.output_queue.put(output)
