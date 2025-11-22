@@ -30,7 +30,6 @@ from pytrickle.frames import AudioFrame, VideoFrame
 from pytrickle.frame_skipper import FrameSkipConfig
 from pytrickle.frame_overlay import LoadingConfig, LoadingMode
 from pytrickle.stream_processor import StreamProcessor, VideoProcessingResult
-from pytrickle.utils.register import RegisterCapability
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -134,8 +133,17 @@ async def update_params(params: dict):
     if processing_delay > 0:
         blocked_until = max(blocked_until, time.time() + processing_delay)
         logger.info("Simulating processing delay for %.1fs", processing_delay)
-        await asyncio.sleep(processing_delay)
+        asyncio.create_task(_log_processing_delay_completion(processing_delay))
+
+# Background helpers
+async def _log_processing_delay_completion(duration: float):
+    """Log when the simulated processing delay completes."""
+    try:
+        await asyncio.sleep(duration)
         logger.info("Processing delay complete")
+    except asyncio.CancelledError:
+        logger.debug("Processing delay logging cancelled")
+
 
     # Additional custom parameters can be handled here.
 

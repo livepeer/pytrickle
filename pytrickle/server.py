@@ -128,7 +128,6 @@ class StreamServer:
         self.current_params: Optional[StreamStartRequest] = None
         self._client_task: Optional[asyncio.Task] = None
         self._param_update_lock = asyncio.Lock()
-        self._pending_param_update_tasks: set[asyncio.Task] = set()
         
         # Health monitoring
         self._health_monitor_task: Optional[asyncio.Task] = None
@@ -205,17 +204,8 @@ class StreamServer:
             if not self.state.startup_complete:
                 self.state.set_startup_complete()
 
-    def _schedule_param_update(self, params: Dict[str, Any]) -> asyncio.Task:
-        """Schedule parameter update processing in the background."""
-        loop = asyncio.get_running_loop()
-        task = loop.create_task(self._run_param_update(params))
-        self._pending_param_update_tasks.add(task)
-        task.add_done_callback(lambda t: self._pending_param_update_tasks.discard(t))
-        return task
-
     async def _run_param_update(self, params: Dict[str, Any]):
         """Run parameter update sequentially while tracking state."""
-        task = asyncio.current_task()
         params_payload = dict(params)
         try:
             # Handle manual loading overlay changes before parameter updates            
@@ -250,9 +240,6 @@ class StreamServer:
         except Exception as e:
             logger.error(f"Error updating parameters: {e}")
             self.state.set_error(f"Parameter update failed: {str(e)}")
-        finally:
-            if task in self._pending_param_update_tasks:
-                self._pending_param_update_tasks.discard(task)
 
     
     def _setup_middleware(self, middleware_list: List[Callable]):
@@ -472,10 +459,9 @@ class StreamServer:
             # Set params if provided
             if params.params:
                 try:
-                    self._schedule_param_update(params.params)
-                    logger.info(f"Initial stream parameters scheduled: {params.params}")
+                    await self._run_param_update(params.params)
                 except Exception as e:
-                    logger.warning(f"Failed to schedule initial params: {e}")
+                    logger.warning(f"Failed to set params: {e}")
             
             # Start client in background
             self._client_task = asyncio.create_task(self._run_client(params.gateway_request_id))
@@ -567,18 +553,22 @@ class StreamServer:
                     "message": "No active stream to update"
                 }, status=400)
             
-            # Schedule background update to avoid blocking the HTTP response
-            self._schedule_param_update(data)
-            logger.info(f"Parameter update scheduled: {data}")
-
-            return web.json_response(
-                {
-                    "status": "accepted",
-                    "message": "Parameter update scheduled",
-                    "request_id": str(uuid.uuid4())
-                },
-                status=200,
-            )
+            # Update frame processor parameters
+            await self._run_param_update(data)
+            logger.info(f"Parameters updated: {data}")
+            
+            # Emit monitoring event
+            if self.current_client.protocol:
+                await self.current_client.protocol.emit_monitoring_event({
+                    "type": "params_updated",
+                    "timestamp": int(time.time() * 1000),
+                    "params": data
+                })
+            
+            return web.json_response({
+                "status": "success",
+                "message": "Parameters updated successfully"
+            })
             
         except Exception as e:
             logger.error(f"Error in update params handler: {e}")
@@ -750,16 +740,6 @@ class StreamServer:
             except asyncio.CancelledError:
                 pass
             self._startup_task = None
-        
-        # Cancel any in-flight parameter update tasks
-        if self._pending_param_update_tasks:
-            for task in list(self._pending_param_update_tasks):
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-            self._pending_param_update_tasks.clear()
     
     async def start_server(self):
         """Start the HTTP server."""
