@@ -14,7 +14,6 @@ from unittest.mock import patch, MagicMock
 from pytrickle.server import StreamServer
 from pytrickle.state import StreamState, PipelineState
 from pytrickle.test_utils import MockFrameProcessor, create_mock_client
-from pytrickle.examples.process_video_example import load_model, process_video, update_params
 
 def get_stream_route(server, endpoint):
     """Get the full route path for a streaming endpoint."""
@@ -233,6 +232,18 @@ class TestFrameProcessorStateIntegration:
         """Test _InternalFrameProcessor integration with state."""
         from pytrickle.stream_processor import _InternalFrameProcessor
         
+        # Try to use example functions, fall back to simple test functions
+        try:
+            from pytrickle.examples.process_video_example import load_model, process_video, update_params
+        except ImportError:
+            # Define simple test functions if examples aren't available
+            async def process_video(frame):
+                return frame
+            async def load_model():
+                pass
+            async def update_params(params):
+                pass
+        
         processor = _InternalFrameProcessor(
             video_processor=process_video,
             model_loader=load_model,
@@ -415,6 +426,18 @@ class TestStateIntegrationWithStreamProcessor:
     async def test_stream_processor_state_integration(self):
         """Test StreamProcessor integration with state."""
         from pytrickle.stream_processor import _InternalFrameProcessor
+        
+        # Try to use example functions, fall back to simple test functions
+        try:
+            from pytrickle.examples.process_video_example import load_model, process_video, update_params
+        except ImportError:
+            # Define simple test functions if examples aren't available
+            async def process_video(frame):
+                return frame
+            async def load_model():
+                pass
+            async def update_params(params):
+                pass
         
         processor = _InternalFrameProcessor(
             video_processor=process_video,
