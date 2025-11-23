@@ -21,9 +21,11 @@ from .utils.register import RegisterCapability
 
 # Processing utilities
 from .frame_processor import FrameProcessor
-from .stream_processor import StreamProcessor
+from .stream_processor import StreamProcessor, VideoProcessingResult
 from .fps_meter import FPSMeter
 from .frame_skipper import FrameSkipConfig
+from .frame_overlay import OverlayConfig, OverlayMode
+from .frame_overlay import OverlayController
 
 from . import api
 
@@ -33,6 +35,7 @@ __all__ = [
     "TrickleClient",
     "StreamServer",
     "StreamProcessor",
+    "VideoProcessingResult",
     "TrickleProtocol",
     "VideoFrame",
     "AudioFrame", 
@@ -54,5 +57,8 @@ __all__ = [
     "FrameProcessor",
     "FPSMeter",
     "FrameSkipConfig",
+    "OverlayConfig",
+    "OverlayMode",
+    "OverlayController",
     "__version__"
 ] 

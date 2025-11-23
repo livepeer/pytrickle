@@ -9,7 +9,7 @@ import asyncio
 import logging
 import time
 import json
-from typing import Callable, Optional, Union, Deque, Any
+from typing import Callable, Optional, Deque, Any
 from collections import deque
 
 from .protocol import TrickleProtocol
@@ -17,6 +17,8 @@ from .frames import VideoFrame, AudioFrame, VideoOutput, AudioOutput
 from .base import ErrorCallback
 from .frame_processor import FrameProcessor
 from .frame_skipper import AdaptiveFrameSkipper, FrameSkipConfig, FrameProcessingResult
+from .frame_overlay import OverlayConfig
+from .frame_overlay import OverlayController
 
 logger = logging.getLogger(__name__)
 
@@ -31,13 +33,23 @@ class TrickleClient:
         send_data_interval: Optional[float] = 0.333,
         error_callback: Optional[ErrorCallback] = None,
         max_queue_size: int = 300,
-        frame_skip_config: Optional[FrameSkipConfig] = None
+        frame_skip_config: Optional[FrameSkipConfig] = None,
+        overlay_config: Optional[OverlayConfig] = None,
     ):
-        """Initialize TrickleClient with optional frame skipping."""
+        """Initialize TrickleClient with optional frame skipping and loading overlay."""
         self.protocol = protocol
         self.frame_processor = frame_processor
         self.control_handler = control_handler
         self.send_data_interval = send_data_interval
+        
+        # Instantiate mutable defaults inside the function to avoid shared state
+        if frame_skip_config is None:
+            frame_skip_config = FrameSkipConfig()
+        if overlay_config is None:
+            overlay_config = OverlayConfig()
+        
+        # Loading configuration
+        self.loading_controller = OverlayController(overlay_config)
 
         # Use provided error_callback, or fall back to frame_processor's error_callback
         self.error_callback = error_callback or frame_processor.error_callback
@@ -72,7 +84,7 @@ class TrickleClient:
             )
         else:
             self.frame_skipper = None
-    
+
     async def start(self, request_id: str = "default"):
         """Start the trickle client."""
         if self.running:
@@ -81,6 +93,7 @@ class TrickleClient:
         self.request_id = request_id
         self.stop_event.clear()
         self.error_event.clear()
+        self.loading_controller.reset()
         
         logger.info(f"Starting trickle client with request_id={request_id}")
         
@@ -145,6 +158,9 @@ class TrickleClient:
         logger.info("Stopping trickle client")
         self.stop_event.set()
         
+        # Reset loading controller before stopping
+        self.loading_controller.reset()
+                
         # Send sentinel values to stop processing and egress loops
         try:
             self.output_queue.put_nowait(None)
@@ -269,11 +285,16 @@ class TrickleClient:
                     continue
 
                 frame = frame_or_result
-                
                 processed_frame = await self.frame_processor.process_video_async(frame)
-                if processed_frame:
-                    output = VideoOutput(processed_frame, self.request_id)
-                    await self.output_queue.put(output)
+
+                output_frame = self.loading_controller.update_and_apply(frame, processed_frame)
+                
+                # Respect the semantic contract: if processor returns None, skip the frame
+                if output_frame is None:
+                    continue
+
+                output = VideoOutput(output_frame, self.request_id)
+                await self.output_queue.put(output)
             except asyncio.TimeoutError:
                 continue
             except asyncio.CancelledError:
