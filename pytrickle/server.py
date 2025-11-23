@@ -11,11 +11,11 @@ import time
 from typing import Optional, Dict, Any, Callable, Union, List
 from dataclasses import dataclass
 import os
-import uuid
 
 from aiohttp import web
-from .version import __version__
+from pydantic import ValidationError
 
+from .version import __version__
 from .api import StreamParamsUpdateRequest, StreamStartRequest, Version, HardwareInformation, HardwareStats
 from .state import StreamState, PipelineState
 from .utils.hardware import HardwareInfo
@@ -34,6 +34,21 @@ class RouteConfig:
     path: str
     handler: Callable
     kwargs: Optional[Dict[str, Any]] = None
+
+
+class StreamRequestRejected(Exception):
+    """Exception used to indicate a client-visible rejection without tripping ERROR state."""
+
+    def __init__(
+        self,
+        message: str,
+        status: int = 400,
+        details: Optional[Dict[str, Any]] = None,
+    ):
+        super().__init__(message)
+        self.message = message
+        self.status = status
+        self.details = details
 
 
 class StreamServer:
@@ -385,15 +400,48 @@ class StreamServer:
 
     async def _parse_and_validate_request(self, request: web.Request, model_class):
         """Parse and validate request data using a Pydantic model."""
-        if request.content_type.startswith("application/json"):
+        content_type = request.content_type or ""
+        if not content_type.startswith("application/json"):
+            raise StreamRequestRejected(
+                message=f"Unsupported content type: {content_type or 'unknown'}",
+                status=415,
+            )
+
+        try:
             data = await request.json()
-        else:
-            raise ValueError(f"Unknown content type: {request.content_type}")
-        return model_class.model_validate(data)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            raise StreamRequestRejected(
+                message="Failed to read JSON payload",
+                status=400,
+            ) from exc
+
+        try:
+            return model_class.model_validate(data)
+        except ValidationError as exc:
+            raise StreamRequestRejected(
+                message="Invalid request payload",
+                status=400,
+                details={"errors": exc.errors()},
+            ) from exc
+        except ValueError as exc:
+            raise StreamRequestRejected(
+                message=str(exc) or "Invalid request payload",
+                status=400,
+            ) from exc
     
     async def _handle_start_stream(self, request: web.Request) -> web.Response:
         """Handle stream start requests."""
         try:
+            # Allow automatic recovery after previous client failures
+            if self.state.is_error() and self.current_client is None:
+                logger.info("Clearing previous stream error before new start request")
+                self.state.clear_error()
+                # Ensure the frame processor gets another chance to initialize
+                if not self.state.startup_complete and not self._startup_task:
+                    self._start_pipeline_initialization()
+
             # Ensure pipeline initialization is complete before allowing stream start
             if not self.state.startup_complete or not self.state.pipeline_ready:
                 startup_task = self._startup_task
@@ -472,6 +520,15 @@ class StreamServer:
                 "request_id": params.gateway_request_id
             })
             
+        except StreamRequestRejected as rejection:
+            logger.warning("Stream start rejected: %s", rejection.message)
+            response_payload = {
+                "status": "error",
+                "message": rejection.message,
+            }
+            if rejection.details:
+                response_payload["details"] = rejection.details
+            return web.json_response(response_payload, status=rejection.status)
         except Exception as e:
             logger.error(f"Error in start stream handler: {e}")
             self.state.set_error(f"Stream start failed: {str(e)}")
@@ -567,6 +624,15 @@ class StreamServer:
                 "message": "Parameters updated successfully"
             })
             
+        except StreamRequestRejected as rejection:
+            logger.warning("Parameter update rejected: %s", rejection.message)
+            response_payload = {
+                "status": "error",
+                "message": rejection.message,
+            }
+            if rejection.details:
+                response_payload["details"] = rejection.details
+            return web.json_response(response_payload, status=rejection.status)
         except Exception as e:
             logger.error(f"Error in update params handler: {e}")
             return web.json_response({

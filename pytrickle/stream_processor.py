@@ -27,7 +27,7 @@ AudioProcessor = Callable[[AudioFrame], Awaitable[Optional[List[AudioFrame]]]]
 ModelLoader = Callable[..., Awaitable[None]]
 
 ParamUpdater = Callable[[Dict[str, Any]], Awaitable[None]]
-OnStreamStart = Callable[[], Awaitable[None]]
+OnStreamStart = Callable[[Optional[Dict[str, Any]]], Awaitable[None]]
 OnStreamStop = Callable[[], Awaitable[None]]
 
 class StreamProcessor:
@@ -276,10 +276,34 @@ class StreamProcessor:
             if params and params[0].name == "self":
                 params = params[1:]
 
-            if name_label in {"on_stream_start", "on_stream_stop", "model_loader"}:
-                # allow any for model_loader; strict zero-arg for lifecycle
-                if name_label.startswith("on_stream") and any(p.kind == p.POSITIONAL_OR_KEYWORD for p in params):
-                    logger.warning("%s expected no parameters, got %s", name_label, [p.name for p in params])
+            if name_label == "model_loader":
+                return
+            if name_label == "on_stream_start":
+                if params:
+                    first = params[0]
+                    allows_positional = first.kind in (
+                        first.POSITIONAL_ONLY,
+                        first.POSITIONAL_OR_KEYWORD,
+                    )
+                    has_varargs = any(p.kind == p.VAR_POSITIONAL for p in params)
+                    # Allow exactly one positional parameter named however or varargs capture
+                    if not allows_positional and not has_varargs:
+                        logger.warning(
+                            "on_stream_start expected at most one positional parameter (e.g. 'params'); got %s",
+                            [p.name for p in params],
+                        )
+                    elif len(params) > 1 and not has_varargs:
+                        logger.warning(
+                            "on_stream_start supports a single params argument; got %s",
+                            [p.name for p in params],
+                        )
+                return
+            if name_label == "on_stream_stop":
+                if params:
+                    logger.warning(
+                        "on_stream_stop expected no parameters, got %s",
+                        [p.name for p in params],
+                    )
                 return
             if name_label == "param_updater":
                 if not params:
@@ -320,6 +344,26 @@ class _InternalFrameProcessor(FrameProcessor):
 
         # Initialize parent (loading is handled at TrickleClient level)
         super().__init__(error_callback=None)
+    
+    @staticmethod
+    def _callback_accepts_params(callback: Callable[..., Awaitable[None]]) -> bool:
+        """Return True if the callback accepts at least one positional parameter."""
+        try:
+            base_fn = getattr(callback, "__func__", callback)
+            sig = inspect.signature(base_fn)
+        except (TypeError, ValueError):
+            return False
+        params = list(sig.parameters.values())
+        if params and params[0].name == "self":
+            params = params[1:]
+        for param in params:
+            if param.kind in (
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.VAR_POSITIONAL,
+            ):
+                return True
+        return False
     
     async def load_model(self, **kwargs):
         """Load model using provided async function."""
@@ -398,11 +442,14 @@ class _InternalFrameProcessor(FrameProcessor):
                 logger.error(f"Error updating parameters: {e}")
                 raise
     
-    async def on_stream_start(self):
-        """Call user-provided on_stream_start callback."""
+    async def on_stream_start(self, params: Optional[Dict[str, Any]] = None):
+        """Call user-provided on_stream_start callback with optional params."""
         if self.on_stream_start_callback:
             try:
-                await self.on_stream_start_callback()
+                if self._callback_accepts_params(self.on_stream_start_callback):
+                    await self.on_stream_start_callback(params)
+                else:
+                    await self.on_stream_start_callback()
                 logger.info(f"StreamProcessor '{self.name}' stream start callback executed successfully")
             except Exception as e:
                 logger.error(f"Error in stream start callback: {e}")
