@@ -477,7 +477,28 @@ class StreamServer:
             
         except Exception as e:
             logger.error(f"Error in start stream handler: {e}")
-            self.state.set_error(f"Stream start failed: {str(e)}")
+
+            # Ensure we don't leave the server in a partially active state
+            if self._client_task:
+                self._client_task.cancel()
+                try:
+                    await self._client_task
+                except asyncio.CancelledError:
+                    pass
+                finally:
+                    self._client_task = None
+
+            if self.current_client:
+                try:
+                    await self.current_client.stop()
+                except Exception as stop_exc:
+                    logger.debug("Failed to stop client after start error: %s", stop_exc)
+                self.current_client = None
+
+            self.current_params = None
+            self.state.set_active_client(False)
+            self.state.update_active_streams(0)
+
             return web.json_response({
                 "status": "error",
                 "message": f"Error starting stream: {str(e)}"
