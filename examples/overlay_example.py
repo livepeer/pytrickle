@@ -79,7 +79,7 @@ async def load_model(**kwargs):
     load_duration = time.time() - model_load_start_time
     logger.info(f"✅ Model loading complete in {load_duration:.2f}s")
 
-async def on_stream_start():
+async def on_stream_start(params: Optional[dict] = None):
     """Called when a stream starts."""
     global pending_startup_block, blocked_until
 
