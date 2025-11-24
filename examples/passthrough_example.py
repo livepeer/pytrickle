@@ -22,6 +22,7 @@ from pytrickle import StreamProcessor, VideoFrame, AudioFrame
 from pytrickle.decorators import (
     audio_handler,
     model_loader,
+    on_stream_start,
     on_stream_stop,
     param_updater,
     video_handler,
@@ -58,6 +59,13 @@ class PassthroughHandlers:
             **kwargs: Stream metadata (stream_name, etc.)
         """
         logger.info("Initializing passthrough handlers (no model to load)")
+
+    @on_stream_start
+    async def on_start(self, params: dict | None = None) -> None:
+        """Apply initial stream parameters before frames start flowing."""
+        if params and "enabled" in params:
+            self.cfg.enabled = bool(params["enabled"])
+            logger.info("Stream start: processing %s", "enabled" if self.cfg.enabled else "disabled")
 
     @video_handler
     async def handle_video(self, frame: VideoFrame) -> VideoFrame:

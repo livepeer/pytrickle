@@ -93,8 +93,58 @@ class TestStreamingEndpoints:
             # Verify client was created
             mock_client_class.assert_called_once()
             
-            # Verify frame processor received params
-            assert server.frame_processor.test_params == {"intensity": 0.8, "width": 512, "height": 512}
+            # Note: Params are now passed to on_stream_start instead of update_params
+
+    @pytest.mark.asyncio
+    async def test_on_stream_start_receives_parameters(self, test_server):
+        """Test that on_stream_start callback receives stream parameters."""
+        client, server = test_server
+        
+        # Mock TrickleClient and TrickleProtocol creation
+        with patch('pytrickle.server.TrickleProtocol') as mock_protocol_class, \
+             patch('pytrickle.server.TrickleClient') as mock_client_class:
+            
+            mock_protocol = MagicMock()
+            mock_protocol_class.return_value = mock_protocol
+            
+            # Create a real async mock for client.start that captures params
+            captured_params = None
+            async def capture_start(request_id, params=None):
+                nonlocal captured_params
+                captured_params = params
+                # Call the actual on_stream_start on the processor
+                await server.frame_processor.on_stream_start(params)
+            
+            mock_client = create_mock_client()
+            mock_client.start = AsyncMock(side_effect=capture_start)
+            mock_client_class.return_value = mock_client
+            
+            payload = {
+                "subscribe_url": "http://localhost:3389/input",
+                "publish_url": "http://localhost:3389/output", 
+                "gateway_request_id": "test-stream-start-params",
+                "params": {
+                    "model": "flux",
+                    "width": 1024,
+                    "height": 768,
+                    "seed": 42
+                }
+            }
+            
+            resp = await client.post(get_stream_route(server, "start"), json=payload)
+            assert resp.status == 200
+            
+            # Give background task time to call start
+            await asyncio.sleep(0.1)
+            
+            # Verify on_stream_start was called with params
+            mock_client.start.assert_called_once()
+            call_args = mock_client.start.call_args
+            assert call_args[0][0] == "test-stream-start-params"  # request_id
+            assert call_args[0][1] == payload["params"]  # params
+            
+            # Verify the processor captured the params in on_stream_start
+            assert server.frame_processor.stream_start_params == payload["params"]
 
     @pytest.mark.asyncio
     async def test_stream_state_updates_during_lifecycle(self, test_server):
