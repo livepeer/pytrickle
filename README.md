@@ -192,6 +192,13 @@ make test
 python examples/async_processor_example.py
 ```
 
+### Trickle Media Workflows
+
+To reproduce the FFmpeg/FFplay pipelines from [`http-trickle`](https://github.com/J0sh/http-trickle),
+see [`docs/trickle_media_examples.md`](docs/trickle_media_examples.md). It walks through using
+`examples/trickle_media_tools.py` and the direct `TrickleProtocol` passthrough helper to publish and
+subscribe to trickle channels without creating new frame processor examples.
+
 ### Full Integration Test
 
 1. **Start trickle server**:
