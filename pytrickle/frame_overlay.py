@@ -293,6 +293,7 @@ class OverlayController:
         now = time.time()
         if received_frame_from_processor:
             self._last_video_frame_time = now
+            # auto-disable if loading was set automatically (not manually enabled) and `frame_count_to_disable` threshold is reached
             self._consecutive_received_frames += 1
             if self._loading_active and not self._is_manual_loading:
                 threshold = max(1, self.overlay_config.frame_count_to_disable)
