@@ -27,7 +27,7 @@ AudioProcessor = Callable[[AudioFrame], Awaitable[Optional[List[AudioFrame]]]]
 ModelLoader = Callable[..., Awaitable[None]]
 
 ParamUpdater = Callable[[Dict[str, Any]], Awaitable[None]]
-OnStreamStart = Callable[[Optional[Dict[str, Any]]], Awaitable[None]]
+OnStreamStart = Callable[[Dict[str, Any]], Awaitable[None]]
 OnStreamStop = Callable[[], Awaitable[None]]
 
 class StreamProcessor:
@@ -265,7 +265,7 @@ class StreamProcessor:
         - audio_processor(frame: AudioFrame) -> Awaitable[Optional[List[AudioFrame]]]
         - model_loader(...) -> Awaitable[None]
         - param_updater(params: Dict[str, Any]) -> Awaitable[None]
-        - on_stream_start(params: Optional[Dict[str, Any]] = None) -> Awaitable[None]
+        - on_stream_start(params: Dict[str, Any]) -> Awaitable[None]
         - on_stream_stop() -> Awaitable[None]
         """
         try:
@@ -290,9 +290,12 @@ class StreamProcessor:
                 ]
 
                 if name_label == "on_stream_start":
+                    if not concrete_params:
+                        logger.warning("on_stream_start expected a 'params' argument")
+                        return
                     if len(concrete_params) > 1:
                         logger.warning(
-                            "on_stream_start expected at most one explicit parameter, got %s",
+                            "on_stream_start expected exactly one explicit parameter, got %s",
                             [p.name for p in concrete_params],
                         )
                     return
@@ -314,52 +317,6 @@ class StreamProcessor:
         except Exception:
             logger.debug("Could not validate signature for %s", name_label, exc_info=True)
 
-def _resolve_stream_start_call_mode(callback: Optional[OnStreamStart]):
-    """
-    Determine how to invoke the stream start handler with params.
-
-    Returns:
-        Tuple of (mode, kwarg_name) where mode is one of
-        {"none", "positional", "keyword"}.
-    """
-    if not callback:
-        return "none", None
-
-    try:
-        base_fn = getattr(callback, "__func__", callback)
-        sig = inspect.signature(base_fn)
-        params = list(sig.parameters.values())
-
-        if params and params[0].name == "self":
-            params = params[1:]
-
-        if not params:
-            return "none", None
-
-        first_param = params[0]
-
-        if len(params) > 1:
-            logger.warning(
-                "on_stream_start handler %s defines multiple parameters; only the first will receive stream params",
-                getattr(base_fn, "__qualname__", repr(base_fn)),
-            )
-
-        if first_param.kind in (
-            inspect.Parameter.POSITIONAL_ONLY,
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            inspect.Parameter.VAR_POSITIONAL,
-        ):
-            return "positional", None
-        if first_param.kind == inspect.Parameter.KEYWORD_ONLY:
-            return "keyword", first_param.name
-        if first_param.kind == inspect.Parameter.VAR_KEYWORD:
-            return "keyword", None
-    except Exception:
-        logger.debug("Could not inspect on_stream_start handler signature", exc_info=True)
-
-    return "none", None
-
-
 class _InternalFrameProcessor(FrameProcessor):
     """Internal frame processor that wraps user-provided functions."""
     
@@ -380,10 +337,6 @@ class _InternalFrameProcessor(FrameProcessor):
         self.param_updater = param_updater
         self.on_stream_start_callback = on_stream_start
         self.on_stream_stop_callback = on_stream_stop
-        (
-            self._stream_start_arg_mode,
-            self._stream_start_kwarg_name,
-        ) = _resolve_stream_start_call_mode(on_stream_start)
         self.name = name
         
         # Frame skipping is handled at TrickleClient level
@@ -470,27 +423,16 @@ class _InternalFrameProcessor(FrameProcessor):
                 logger.error(f"Error updating parameters: {e}")
                 raise
     
-    async def on_stream_start(self, params: Optional[Dict[str, Any]] = None):
+    async def on_stream_start(self, params: Dict[str, Any]):
         """Call user-provided on_stream_start callback."""
-        if self.on_stream_start_callback:
-            try:
-                if self._stream_start_arg_mode == "positional":
-                    await self.on_stream_start_callback(params)
-                elif self._stream_start_arg_mode == "keyword":
-                    kwarg = self._stream_start_kwarg_name or "params"
-                    await self.on_stream_start_callback(**{kwarg: params})
-                else:
-                    if params is not None:
-                        logger.debug(
-                            "Stream start params provided but handler %s does not accept arguments",
-                            getattr(self.on_stream_start_callback, "__qualname__", repr(self.on_stream_start_callback)),
-                        )
-                    await self.on_stream_start_callback()
-                logger.info(
-                    f"StreamProcessor '{self.name}' stream start callback executed successfully"
-                )
-            except Exception as e:
-                logger.error(f"Error in stream start callback: {e}")
+        if not self.on_stream_start_callback:
+            return
+
+        try:
+            await self.on_stream_start_callback(params or {})
+            logger.info("StreamProcessor '%s' stream start callback executed successfully", self.name)
+        except Exception as e:
+            logger.error("Error in stream start callback: %s", e)
     
     async def on_stream_stop(self):
         """Call user-provided on_stream_stop callback."""

@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import List
+from typing import List, Dict, Any
 
 import numpy as np
 import torch
@@ -51,7 +51,7 @@ class GrayscaleChipmunkHandlers:
         logger.info("Model loader invoked; nothing to warm up for this demo.")
 
     @on_stream_start
-    async def on_start(self, params: dict | None = None) -> None:
+    async def on_start(self, params: Dict[str, Any]) -> None:
         """Capture initial parameter values for the effect."""
         if not params:
             return

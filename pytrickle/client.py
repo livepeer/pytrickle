@@ -9,7 +9,7 @@ import asyncio
 import logging
 import time
 import json
-from typing import Callable, Optional, Deque, Any
+from typing import Callable, Optional, Deque, Any, Dict
 from collections import deque
 
 from .protocol import TrickleProtocol
@@ -85,7 +85,7 @@ class TrickleClient:
         else:
             self.frame_skipper = None
     
-    async def start(self, request_id: str = "default", params: Optional[Any] = None):
+    async def start(self, request_id: str = "default", params: Optional[Dict[str, Any]] = {}):
         """Start the trickle client.
         
         Args:
@@ -108,7 +108,8 @@ class TrickleClient:
         # Call the optional on_stream_start callback after protocol starts
         if self.frame_processor.on_stream_start:
             try:
-                await self.frame_processor.on_stream_start(params)
+                stream_params = params or {}
+                await self.frame_processor.on_stream_start(stream_params)
                 logger.info("Stream start callback executed successfully")
             except Exception as e:
                 logger.error(f"Error in stream start callback: {e}")

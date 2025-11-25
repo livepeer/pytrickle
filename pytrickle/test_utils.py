@@ -36,7 +36,7 @@ class MockFrameProcessor(FrameProcessor):
         if params:
             self.test_params.update(params)
     
-    async def on_stream_start(self, params: Optional[Dict[str, Any]] = None):
+    async def on_stream_start(self, params: Dict[str, Any]):
         """Capture stream start parameters for testing."""
         self.stream_start_params = params
 

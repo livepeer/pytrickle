@@ -17,7 +17,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from typing import List
+from typing import List, Dict, Any
 
 import cv2
 import numpy as np
@@ -105,7 +105,7 @@ class GreenProcessorHandlers:
             logger.error(f"Error in background status task: {e}")
 
     @on_stream_start
-    async def on_start(self, params: dict | None = None) -> None:
+    async def on_start(self, params: Dict[str, Any]) -> None:
         """Called when stream starts - initialize resources."""
         if params:
             if "intensity" in params:

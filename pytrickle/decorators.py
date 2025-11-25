@@ -25,9 +25,10 @@ from .registry import (
     HandlerFn,
     HandlerInfo,
     HandlerKind,
-    LifecycleProtocol,
     ModelLoaderProtocol,
     ParamUpdaterProtocol,
+    StreamStartProtocol,
+    StreamStopProtocol,
     VideoHandlerProtocol,
 )
 
@@ -375,7 +376,7 @@ def param_updater(
 
 def on_stream_start(
     func: HandlerFn,
-) -> LifecycleProtocol:
+) -> StreamStartProtocol:
     """Decorator for stream start lifecycle handler.
     
     The description is automatically generated from the function name.
@@ -399,7 +400,7 @@ def on_stream_start(
 
 def on_stream_stop(
     func: HandlerFn,
-) -> LifecycleProtocol:
+) -> StreamStopProtocol:
     """Decorator for stream stop lifecycle handler.
     
     The description is automatically generated from the function name.

@@ -113,7 +113,7 @@ class TestStreamingEndpoints:
                 nonlocal captured_params
                 captured_params = params
                 # Call the actual on_stream_start on the processor
-                await server.frame_processor.on_stream_start(params)
+                await server.frame_processor.on_stream_start(params or {})
             
             mock_client = create_mock_client()
             mock_client.start = AsyncMock(side_effect=capture_start)

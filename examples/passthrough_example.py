@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import List
+from typing import List, Dict, Any
 
 from pytrickle import StreamProcessor, VideoFrame, AudioFrame
 from pytrickle.decorators import (
@@ -61,7 +61,7 @@ class PassthroughHandlers:
         logger.info("Initializing passthrough handlers (no model to load)")
 
     @on_stream_start
-    async def on_start(self, params: dict | None = None) -> None:
+    async def on_start(self, params: Dict[str, Any]) -> None:
         """Apply initial stream parameters before frames start flowing."""
         if params and "enabled" in params:
             self.cfg.enabled = bool(params["enabled"])
