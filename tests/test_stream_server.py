@@ -526,6 +526,7 @@ class TestErrorHandling:
         processor = MockFrameProcessor()
         mock_protocol = MagicMock(spec=TrickleProtocol)
         mock_protocol.error_callback = None
+        mock_protocol.fps_meter = MagicMock()
         
         trickle_client = TrickleClient(
             protocol=mock_protocol,

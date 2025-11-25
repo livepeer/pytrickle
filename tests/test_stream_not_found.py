@@ -15,6 +15,14 @@ from pytrickle.subscriber import TrickleSubscriber
 from pytrickle.test_utils import MockFrameProcessor
 
 
+def _make_protocol_mock() -> MagicMock:
+    """Create a protocol mock with required attributes for TrickleClient."""
+    protocol = MagicMock(spec=TrickleProtocol)
+    protocol.error_callback = None
+    protocol.fps_meter = MagicMock()
+    return protocol
+
+
 class TestStreamNotFoundClient:
     """Test client-level handling of stream_not_found errors."""
 
@@ -22,8 +30,7 @@ class TestStreamNotFoundClient:
     async def test_stream_not_found_sets_stop_event(self):
         """Test that stream_not_found error sets stop_event in client."""
         processor = MockFrameProcessor()
-        protocol = MagicMock(spec=TrickleProtocol)
-        protocol.error_callback = None
+        protocol = _make_protocol_mock()
         
         client = TrickleClient(
             protocol=protocol,
@@ -46,8 +53,7 @@ class TestStreamNotFoundClient:
     async def test_stream_not_found_vs_other_errors(self):
         """Test that stream_not_found sets stop_event but not error_event, unlike other errors."""
         processor = MockFrameProcessor()
-        protocol = MagicMock(spec=TrickleProtocol)
-        protocol.error_callback = None
+        protocol = _make_protocol_mock()
         
         client = TrickleClient(
             protocol=protocol,
@@ -72,8 +78,7 @@ class TestStreamNotFoundClient:
     async def test_stream_not_found_calls_error_callback(self):
         """Test that stream_not_found error calls the error callback."""
         processor = MockFrameProcessor()
-        protocol = MagicMock(spec=TrickleProtocol)
-        protocol.error_callback = None
+        protocol = _make_protocol_mock()
         
         error_callback = AsyncMock()
         client = TrickleClient(
@@ -92,8 +97,7 @@ class TestStreamNotFoundClient:
     async def test_stream_not_found_terminates_ingress_loop(self):
         """Test that ingress loop terminates when stop_event is set due to stream_not_found."""
         processor = MockFrameProcessor()
-        protocol = MagicMock(spec=TrickleProtocol)
-        protocol.error_callback = None
+        protocol = _make_protocol_mock()
         
         # Mock ingress_loop to check stop_event - must be async generator
         async def mock_ingress_loop(stop_event):
