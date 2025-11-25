@@ -4,12 +4,13 @@ This module provides base classes and utilities for async frame processing,
 making it easy to integrate AI models and async pipelines with PyTrickle.
 """
 
+import asyncio
 import logging
 from abc import ABC, abstractmethod
 from typing import Optional, Any, Dict, List
 from .frames import VideoFrame, AudioFrame
-from . import ErrorCallback
-from .state import StreamState, PipelineState
+from .base import ErrorCallback
+from .state import StreamState
 
 logger = logging.getLogger(__name__)
 
@@ -55,10 +56,28 @@ class FrameProcessor(ABC):
         """
         self.error_callback = error_callback
         self.state: Optional[StreamState] = None
-
+        self._model_loaded = False
+        self._model_load_lock = asyncio.Lock()
+        
     def attach_state(self, state: StreamState) -> None:
-        """Attach a pipeline state manager and set IDLE if model already loaded."""
+        """Attach a pipeline state manager."""
         self.state = state
+
+    async def ensure_model_loaded(self, **kwargs):
+        """Thread-safe wrapper that ensures model is loaded exactly once."""
+        async with self._model_load_lock:
+            if not self._model_loaded:
+                await self.load_model(**kwargs)
+                self._model_loaded = True
+                
+                # After load_model completes, mark startup complete
+                if self.state:
+                    self.state.set_startup_complete()
+                    logger.debug(f"Model loaded - startup complete for {self.__class__.__name__}")
+                else:
+                    logger.debug(f"Model loaded for {self.__class__.__name__}")
+            else:
+                logger.debug(f"Model already loaded for {self.__class__.__name__}")
 
     @abstractmethod
     async def load_model(self, **kwargs):

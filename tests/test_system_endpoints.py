@@ -16,7 +16,7 @@ from pytrickle.state import PipelineState
 from pytrickle.test_utils import MockFrameProcessor
 
 # Import example processor functions
-from examples.process_video_example import load_model, process_video, update_params
+from pytrickle.examples.process_video_example import load_model, process_video, update_params
 
 
 @pytest_asyncio.fixture

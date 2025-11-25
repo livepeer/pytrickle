@@ -108,7 +108,7 @@ async def main():
     await app.run_forever()
 ```
 
-For a complete working example with green tint processing, see `examples/async_processor_example.py`.
+For a complete working example with green tint processing, see [`examples/process_video_example.py`](examples/process_video_example.py) and [`examples/overlay_example.py`](examples/overlay_example.py) for model loading with overlay demonstrations.
 
 ## HTTP API
 

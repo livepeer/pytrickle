@@ -36,16 +36,19 @@ Homepage = "https://github.com/livepeer/pytrickle"
 Repository = "https://github.com/livepeer/pytrickle"
 Issues = "https://github.com/livepeer/pytrickle/issues"
 
+[project.scripts]
+pytrickle = "pytrickle.cli:main"
+
 [tool.setuptools]
 include-package-data = true
+packages = ["pytrickle", "pytrickle.examples"]
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["pytrickle*", "examples*"]
-exclude = ["tests*"]
+[tool.setuptools.package-dir]
+"pytrickle.examples" = "examples"
 
 [tool.setuptools.package-data]
 pytrickle = ["*.py"]
+"pytrickle.examples" = ["*.py", "*.txt", "Dockerfile.*"]
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}

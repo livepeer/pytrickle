@@ -151,6 +151,46 @@ class TestStreamingEndpoints:
         assert server.state.active_streams == initial_streams
         assert server.state.active_client == initial_client
         assert server.current_client is None
+        assert server.state.is_error() is False
+
+        # Health should remain IDLE after rejection
+        health_resp = await client.get("/health")
+        assert health_resp.status == 200
+        health_data = await health_resp.json()
+        assert health_data["status"] == "IDLE"
+
+    @pytest.mark.asyncio
+    async def test_start_stream_runtime_error_does_not_set_error_state(self, test_server):
+        """Ensure runtime failures during start don't flip health to ERROR."""
+        client, server = test_server
+
+        payload = {
+            "subscribe_url": "http://localhost:3389/input",
+            "publish_url": "http://localhost:3389/output",
+            "gateway_request_id": "test-runtime-error",
+        }
+
+        with patch('pytrickle.server.TrickleProtocol') as mock_protocol_class, \
+             patch('pytrickle.server.TrickleClient') as mock_client_class:
+            mock_protocol_class.return_value = MagicMock()
+            mock_client_class.side_effect = RuntimeError("Connection lost")
+
+            resp = await client.post(get_stream_route(server, "start"), json=payload)
+            assert resp.status == 400
+
+            data = await resp.json()
+            assert data["status"] == "error"
+            assert "Connection lost" in data["message"]
+
+        assert server.state.is_error() is False
+        assert server.state.active_streams == 0
+        assert server.state.active_client is False
+        assert server.current_client is None
+
+        health_resp = await client.get("/health")
+        assert health_resp.status == 200
+        health_data = await health_resp.json()
+        assert health_data["status"] == "IDLE"
 
     @pytest.mark.asyncio
     async def test_update_params_success_with_monitoring(self, test_server):
