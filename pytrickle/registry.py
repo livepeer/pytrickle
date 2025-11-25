@@ -45,8 +45,13 @@ class ParamUpdaterProtocol(Protocol):
     """Protocol for decorated parameter updater functions."""
     async def __call__(self, params: Dict[str, Any]) -> None: ...
 
-class LifecycleProtocol(Protocol):
-    """Protocol for decorated lifecycle functions (start/stop)."""
+class StreamStartProtocol(Protocol):
+    """Protocol for decorated stream start handlers."""
+    async def __call__(self, params: Dict[str, Any]) -> None: ...
+
+
+class StreamStopProtocol(Protocol):
+    """Protocol for decorated stream stop handlers."""
     async def __call__(self) -> None: ...    
 
 @dataclass
@@ -96,9 +101,10 @@ class HandlerRegistry:
     def get(self, handler_type: Literal["param_updater"]) -> Optional[ParamUpdaterProtocol]: ...
 
     @overload
-    def get(
-        self, handler_type: Literal["stream_start", "stream_stop"]
-    ) -> Optional[LifecycleProtocol]: ...
+    def get(self, handler_type: Literal["stream_start"]) -> Optional[StreamStartProtocol]: ...
+
+    @overload
+    def get(self, handler_type: Literal["stream_stop"]) -> Optional[StreamStopProtocol]: ...
 
     def get(self, handler_type: HandlerKind) -> Optional[HandlerFn]:
         return self._handlers.get(handler_type)

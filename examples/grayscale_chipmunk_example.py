@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import List
+from typing import List, Dict, Any
 
 import numpy as np
 import torch
@@ -22,6 +22,7 @@ from pytrickle import StreamProcessor, VideoFrame, AudioFrame
 from pytrickle.decorators import (
     audio_handler,
     model_loader,
+    on_stream_start,
     on_stream_stop,
     param_updater,
     video_handler,
@@ -48,6 +49,23 @@ class GrayscaleChipmunkHandlers:
     @model_loader
     async def load(self, **_: dict) -> None:
         logger.info("Model loader invoked; nothing to warm up for this demo.")
+
+    @on_stream_start
+    async def on_start(self, params: Dict[str, Any]) -> None:
+        """Capture initial parameter values for the effect."""
+        if not params:
+            return
+        if "grayscale" in params:
+            self.config.grayscale_enabled = bool(params["grayscale"])
+            logger.info("Stream start grayscale set to %s", self.config.grayscale_enabled)
+        if "chipmunk_factor" in params:
+            try:
+                value = float(params["chipmunk_factor"])
+                if value > 0:
+                    self.config.chipmunk_factor = value
+                    logger.info("Stream start chipmunk_factor set to %.2f", value)
+            except (TypeError, ValueError):
+                logger.warning("Invalid chipmunk_factor %s at stream start", params["chipmunk_factor"])
 
     @video_handler
     async def handle_video(self, frame: VideoFrame) -> VideoFrame:

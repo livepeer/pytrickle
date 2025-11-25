@@ -27,7 +27,7 @@ AudioProcessor = Callable[[AudioFrame], Awaitable[Optional[List[AudioFrame]]]]
 ModelLoader = Callable[..., Awaitable[None]]
 
 ParamUpdater = Callable[[Dict[str, Any]], Awaitable[None]]
-OnStreamStart = Callable[[], Awaitable[None]]
+OnStreamStart = Callable[[Dict[str, Any]], Awaitable[None]]
 OnStreamStop = Callable[[], Awaitable[None]]
 
 class StreamProcessor:
@@ -265,7 +265,7 @@ class StreamProcessor:
         - audio_processor(frame: AudioFrame) -> Awaitable[Optional[List[AudioFrame]]]
         - model_loader(...) -> Awaitable[None]
         - param_updater(params: Dict[str, Any]) -> Awaitable[None]
-        - on_stream_start() -> Awaitable[None]
+        - on_stream_start(params: Dict[str, Any]) -> Awaitable[None]
         - on_stream_stop() -> Awaitable[None]
         """
         try:
@@ -276,10 +276,20 @@ class StreamProcessor:
             if params and params[0].name == "self":
                 params = params[1:]
 
-            if name_label in {"on_stream_start", "on_stream_stop", "model_loader"}:
-                # allow any for model_loader; strict zero-arg for lifecycle
-                if name_label.startswith("on_stream") and any(p.kind == p.POSITIONAL_OR_KEYWORD for p in params):
-                    logger.warning("%s expected no parameters, got %s", name_label, [p.name for p in params])
+            if name_label in {"model_loader", "on_stream_start", "on_stream_stop"}:
+                if name_label == "model_loader":
+                    return
+                if name_label == "on_stream_start":
+                    if not params:
+                        logger.warning("on_stream_start expected a 'params' argument")
+                    return
+                if name_label == "on_stream_stop" and any(
+                    p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD for p in params
+                ):
+                    logger.warning(
+                        "on_stream_stop expected no parameters, got %s",
+                        [p.name for p in params],
+                    )
                 return
             if name_label == "param_updater":
                 if not params:
@@ -398,14 +408,16 @@ class _InternalFrameProcessor(FrameProcessor):
                 logger.error(f"Error updating parameters: {e}")
                 raise
     
-    async def on_stream_start(self):
+    async def on_stream_start(self, params: Dict[str, Any]):
         """Call user-provided on_stream_start callback."""
-        if self.on_stream_start_callback:
-            try:
-                await self.on_stream_start_callback()
-                logger.info(f"StreamProcessor '{self.name}' stream start callback executed successfully")
-            except Exception as e:
-                logger.error(f"Error in stream start callback: {e}")
+        if not self.on_stream_start_callback:
+            return
+
+        try:
+            await self.on_stream_start_callback(params or {})
+            logger.info("StreamProcessor '%s' stream start callback executed successfully", self.name)
+        except Exception as e:
+            logger.error("Error in stream start callback: %s", e)
     
     async def on_stream_stop(self):
         """Call user-provided on_stream_stop callback."""
