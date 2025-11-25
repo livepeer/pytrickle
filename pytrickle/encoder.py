@@ -87,9 +87,11 @@ def encode_av(
         write_file = os.fdopen(write_fd, 'wb', buffering=0)
         output_callback(read_file, write_file, url)
         return write_file
-
+    
+    # keep the internal buffer around segment time, this will let ffmpeg flush packets to segment io even if one stream does not have packets
+    options = {'max_interleave_delta': str(GOP_SECS * 1050000)}  
     # Open the output container in write mode
-    output_container = av.open("%d.ts", format='segment', mode='w', io_open=custom_io_open)
+    output_container = av.open("%d.ts", format='segment', mode='w', io_open=custom_io_open, options=options)
 
     # Create corresponding output streams if input streams exist
     output_video_stream = None
