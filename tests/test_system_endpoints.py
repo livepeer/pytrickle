@@ -8,16 +8,12 @@ with comprehensive state validation using the simplified architecture.
 import pytest
 import pytest_asyncio
 from aiohttp.test_utils import TestServer, TestClient
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from pytrickle.stream_processor import _InternalFrameProcessor
 from pytrickle.server import StreamServer
-from pytrickle.state import PipelineState
 from pytrickle.test_utils import MockFrameProcessor
-
-# Import example processor functions
 from pytrickle.examples.process_video_example import load_model, process_video, update_params
-
 
 @pytest_asyncio.fixture
 async def test_server():
@@ -29,6 +25,7 @@ async def test_server():
         param_updater=update_params,
         name="trickle-stream-example",
     )
+
 
     server = StreamServer(
         frame_processor=processor,
@@ -96,6 +93,7 @@ class TestVersionEndpoint:
     @pytest.mark.asyncio
     async def test_version_endpoint_custom_values(self):
         """Test /version and /app-version endpoints with custom pipeline and version values."""
+        
         # Create server with custom values
         processor = _InternalFrameProcessor(
             video_processor=process_video,

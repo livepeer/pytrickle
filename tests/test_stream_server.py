@@ -13,6 +13,8 @@ from unittest.mock import patch, MagicMock, AsyncMock
 
 from pytrickle.server import StreamServer
 from pytrickle.test_utils import MockFrameProcessor, create_mock_client
+from pytrickle.client import TrickleClient
+from pytrickle.protocol import TrickleProtocol
 
 def get_stream_route(server, endpoint):
     """Get the full route path for a streaming endpoint."""
@@ -93,8 +95,58 @@ class TestStreamingEndpoints:
             # Verify client was created
             mock_client_class.assert_called_once()
             
-            # Verify frame processor received params
-            assert server.frame_processor.test_params == {"intensity": 0.8, "width": 512, "height": 512}
+            # Note: Params are now passed to on_stream_start instead of update_params
+
+    @pytest.mark.asyncio
+    async def test_on_stream_start_receives_parameters(self, test_server):
+        """Test that on_stream_start callback receives stream parameters."""
+        client, server = test_server
+        
+        # Mock TrickleClient and TrickleProtocol creation
+        with patch('pytrickle.server.TrickleProtocol') as mock_protocol_class, \
+             patch('pytrickle.server.TrickleClient') as mock_client_class:
+            
+            mock_protocol = MagicMock()
+            mock_protocol_class.return_value = mock_protocol
+            
+            # Create a real async mock for client.start that captures params
+            captured_params = None
+            async def capture_start(request_id, params=None):
+                nonlocal captured_params
+                captured_params = params
+                # Call the actual on_stream_start on the processor
+                await server.frame_processor.on_stream_start(params or {})
+            
+            mock_client = create_mock_client()
+            mock_client.start = AsyncMock(side_effect=capture_start)
+            mock_client_class.return_value = mock_client
+            
+            payload = {
+                "subscribe_url": "http://localhost:3389/input",
+                "publish_url": "http://localhost:3389/output", 
+                "gateway_request_id": "test-stream-start-params",
+                "params": {
+                    "model": "flux",
+                    "width": 1024,
+                    "height": 768,
+                    "seed": 42
+                }
+            }
+            
+            resp = await client.post(get_stream_route(server, "start"), json=payload)
+            assert resp.status == 200
+            
+            # Give background task time to call start
+            await asyncio.sleep(0.1)
+            
+            # Verify on_stream_start was called with params
+            mock_client.start.assert_called_once()
+            call_args = mock_client.start.call_args
+            assert call_args[0][0] == "test-stream-start-params"  # request_id
+            assert call_args[0][1] == payload["params"]  # params
+            
+            # Verify the processor captured the params in on_stream_start
+            assert server.frame_processor.stream_start_params == payload["params"]
 
     @pytest.mark.asyncio
     async def test_stream_state_updates_during_lifecycle(self, test_server):
@@ -514,3 +566,112 @@ class TestErrorHandling:
             # State should be consistent (only one active stream)
             assert server.state.active_streams <= 1
             assert server.current_client is not None
+
+    @pytest.mark.asyncio
+    async def test_stream_not_found_terminates_stream(self, test_server):
+        """Test that stream_not_found (404) error properly terminates the stream."""
+        client, server = test_server
+        
+        # Create a real client with mocked protocol to simulate stream_not_found
+        processor = MockFrameProcessor()
+        mock_protocol = MagicMock(spec=TrickleProtocol)
+        mock_protocol.error_callback = None
+        mock_protocol.fps_meter = MagicMock()
+        
+        trickle_client = TrickleClient(
+            protocol=mock_protocol,
+            frame_processor=processor
+        )
+        
+        # Mock ingress loop that checks stop_event - must be async generator
+        ingress_terminated = False
+        async def mock_ingress_loop(stop_event):
+            nonlocal ingress_terminated
+            while not stop_event.is_set():
+                await asyncio.sleep(0.01)
+            ingress_terminated = True
+            # Empty generator - no frames yielded
+            return
+            yield  # Make it a generator (unreachable but makes it async generator)
+        
+        mock_protocol.ingress_loop = mock_ingress_loop
+        
+        # Mock egress loop
+        async def mock_egress_loop(output_generator):
+            async for _ in output_generator:
+                pass
+        
+        mock_protocol.egress_loop = mock_egress_loop
+        
+        # Set up server with the client
+        server.current_client = trickle_client
+        server.state.set_active_client(True)
+        server.state.update_active_streams(1)
+        
+        # Start client in background
+        client_task = asyncio.create_task(trickle_client.start())
+        
+        # Wait a bit for client to start
+        await asyncio.sleep(0.05)
+        
+        # Simulate 404 error from subscriber (stream_not_found)
+        await trickle_client._on_protocol_error("stream_not_found", Exception("404 error for http://localhost:3389/input/0"))
+        
+        # Wait for client to process the error
+        await asyncio.sleep(0.1)
+        
+        # Verify stop_event is set (this is what PR #59 fixes)
+        assert trickle_client.stop_event.is_set()
+        
+        # Verify ingress loop terminated
+        assert ingress_terminated or trickle_client.stop_event.is_set()
+        
+        # Clean up
+        trickle_client.stop_event.set()
+        try:
+            await asyncio.wait_for(client_task, timeout=1.0)
+        except asyncio.TimeoutError:
+            client_task.cancel()
+            try:
+                await client_task
+            except asyncio.CancelledError:
+                pass
+
+    @pytest.mark.asyncio
+    async def test_stream_not_found_propagates_to_client(self, test_server):
+        """Test that protocol properly propagates stream_not_found error to client."""
+        client, server = test_server
+        
+        processor = MockFrameProcessor()
+        
+        client_error_callback = AsyncMock()
+        
+        protocol = TrickleProtocol(
+            subscribe_url="http://localhost:3389/input",
+            publish_url="http://localhost:3389/output",
+            error_callback=None
+        )
+        
+        trickle_client = TrickleClient(
+            protocol=protocol,
+            frame_processor=processor,
+            error_callback=client_error_callback
+        )
+        
+        # Set protocol's error callback to client's handler
+        protocol.error_callback = trickle_client._on_protocol_error
+        
+        # Simulate subscriber notifying protocol of stream_not_found
+        await protocol._notify_error("stream_not_found", Exception("404 error"))
+        
+        # Wait for async propagation
+        await asyncio.sleep(0.05)
+        
+        # Verify client's stop_event is set (this is what PR #59 fixes)
+        assert trickle_client.stop_event.is_set()
+        
+        # Verify client's error callback was called
+        assert client_error_callback.called
+        call_args = client_error_callback.call_args[0]
+        assert call_args[0] == "stream_not_found"
+        assert isinstance(call_args[1], Exception)

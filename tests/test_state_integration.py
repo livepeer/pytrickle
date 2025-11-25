@@ -7,15 +7,12 @@ Validates that state changes work correctly for monitoring and health reporting.
 
 import pytest
 import pytest_asyncio
-import asyncio
 from aiohttp.test_utils import TestServer, TestClient
-from unittest.mock import patch, MagicMock
-
 from pytrickle.server import StreamServer
 from pytrickle.state import StreamState, PipelineState
 from pytrickle.test_utils import MockFrameProcessor, create_mock_client
 from pytrickle.examples.process_video_example import load_model, process_video, update_params
-
+            
 def get_stream_route(server, endpoint):
     """Get the full route path for a streaming endpoint."""
     prefix = server.route_prefix.rstrip('/')
@@ -269,9 +266,7 @@ class TestServerStateIntegration:
     async def test_server_health_endpoint_state_integration(self, server_with_state):
         """Test health endpoint reflects server state."""
         server, processor = server_with_state
-        
-        from aiohttp.test_utils import TestServer, TestClient
-        
+
         app = server.get_app()
         test_server_instance = TestServer(app)
         
@@ -304,8 +299,6 @@ class TestServerStateIntegration:
     async def test_server_stream_state_validation(self, server_with_state):
         """Test that server properly validates and updates state during stream operations."""
         server, processor = server_with_state
-        
-        from aiohttp.test_utils import TestServer, TestClient
         
         app = server.get_app()
         test_server_instance = TestServer(app)
@@ -415,6 +408,18 @@ class TestStateIntegrationWithStreamProcessor:
     async def test_stream_processor_state_integration(self):
         """Test StreamProcessor integration with state."""
         from pytrickle.stream_processor import _InternalFrameProcessor
+        
+        # Try to use example functions, fall back to simple test functions
+        try:
+            from pytrickle.examples.process_video_example import load_model, process_video, update_params
+        except ImportError:
+            # Define simple test functions if examples aren't available
+            async def process_video(frame):
+                return frame
+            async def load_model(**kwargs):
+                pass
+            async def update_params(params):
+                pass
         
         processor = _InternalFrameProcessor(
             video_processor=process_video,

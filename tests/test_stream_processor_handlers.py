@@ -29,8 +29,9 @@ class MyHandlers:
         self.params = params
 
     @on_stream_start
-    async def start(self) -> None:
+    async def start(self, params: Dict[str, Any]) -> None:
         self.started = True
+        self.params = params
 
     @on_stream_stop
     async def stop(self) -> None:
@@ -44,7 +45,7 @@ async def test_from_handlers_discovers_bound_methods_and_runs():
     sp = StreamProcessor.from_handlers(inst, validate_signature=True)
 
     # Lifecycle
-    await sp._frame_processor.on_stream_start()
+    await sp._frame_processor.on_stream_start({})
     assert inst.started is True
 
     # Video processing

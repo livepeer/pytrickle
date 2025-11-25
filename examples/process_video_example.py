@@ -17,7 +17,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from typing import List
+from typing import List, Dict, Any
 
 import cv2
 import numpy as np
@@ -105,8 +105,21 @@ class GreenProcessorHandlers:
             logger.error(f"Error in background status task: {e}")
 
     @on_stream_start
-    async def on_start(self) -> None:
+    async def on_start(self, params: Dict[str, Any]) -> None:
         """Called when stream starts - initialize resources."""
+        if params:
+            if "intensity" in params:
+                try:
+                    self.cfg.intensity = max(0.0, min(1.0, float(params["intensity"])))
+                    logger.info("Stream start intensity set to %.2f", self.cfg.intensity)
+                except (TypeError, ValueError):
+                    logger.warning("Invalid intensity %s at stream start", params["intensity"])
+            if "delay" in params:
+                try:
+                    self.cfg.delay = max(0.0, float(params["delay"]))
+                    logger.info("Stream start delay set to %.2fs", self.cfg.delay)
+                except (TypeError, ValueError):
+                    logger.warning("Invalid delay %s at stream start", params["delay"])
         logger.info("Stream started, initializing resources")
         self.background_task_started = False
         logger.info("Stream initialization complete")

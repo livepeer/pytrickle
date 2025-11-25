@@ -9,7 +9,7 @@ import asyncio
 import logging
 import time
 import json
-from typing import Callable, Optional, Deque, Any
+from typing import Callable, Optional, Deque, Any, Dict
 from collections import deque
 
 from .protocol import TrickleProtocol
@@ -84,9 +84,14 @@ class TrickleClient:
             )
         else:
             self.frame_skipper = None
-
-    async def start(self, request_id: str = "default"):
-        """Start the trickle client."""
+    
+    async def start(self, request_id: str = "default", params: Optional[Dict[str, Any]] = None):
+        """Start the trickle client.
+        
+        Args:
+            request_id: Unique identifier for the stream request
+            params: Optional parameters dict to pass to on_stream_start callback
+        """
         if self.running:
             raise RuntimeError("Client is already running")
             
@@ -103,7 +108,8 @@ class TrickleClient:
         # Call the optional on_stream_start callback after protocol starts
         if self.frame_processor.on_stream_start:
             try:
-                await self.frame_processor.on_stream_start()
+                stream_params = params or {}
+                await self.frame_processor.on_stream_start(stream_params)
                 logger.info("Stream start callback executed successfully")
             except Exception as e:
                 logger.error(f"Error in stream start callback: {e}")
@@ -194,8 +200,8 @@ class TrickleClient:
         logger.info(f"Protocol event received: {error_type} - {exception}")
         
         # Set appropriate event based on error type
-        if error_type in ("protocol_shutdown", "subscription_ended"):
-            # Clean shutdown - set stop event
+        if error_type in ("protocol_shutdown", "subscription_ended", "stream_not_found"):
+            # Clean shutdown or stream not found - set stop event
             self.stop_event.set()
             logger.debug(f"Set stop_event due to {error_type}")
         else:
