@@ -85,7 +85,7 @@ class TrickleClient:
         else:
             self.frame_skipper = None
     
-    async def start(self, request_id: str = "default", params: Optional[Dict[str, Any]] = {}):
+    async def start(self, request_id: str = "default", params: Optional[Dict[str, Any]] = None):
         """Start the trickle client.
         
         Args:
