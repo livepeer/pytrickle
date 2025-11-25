@@ -276,34 +276,19 @@ class StreamProcessor:
             if params and params[0].name == "self":
                 params = params[1:]
 
-            if name_label in {"on_stream_start", "on_stream_stop", "model_loader"}:
+            if name_label in {"model_loader", "on_stream_start", "on_stream_stop"}:
                 if name_label == "model_loader":
                     return
-
-                concrete_params = [
-                    p for p in params
-                    if p.kind in (
-                        inspect.Parameter.POSITIONAL_ONLY,
-                        inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                        inspect.Parameter.KEYWORD_ONLY,
-                    )
-                ]
-
                 if name_label == "on_stream_start":
-                    if not concrete_params:
+                    if not params:
                         logger.warning("on_stream_start expected a 'params' argument")
-                        return
-                    if len(concrete_params) > 1:
-                        logger.warning(
-                            "on_stream_start expected exactly one explicit parameter, got %s",
-                            [p.name for p in concrete_params],
-                        )
                     return
-
-                if concrete_params:
+                if name_label == "on_stream_stop" and any(
+                    p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD for p in params
+                ):
                     logger.warning(
                         "on_stream_stop expected no parameters, got %s",
-                        [p.name for p in concrete_params],
+                        [p.name for p in params],
                     )
                 return
             if name_label == "param_updater":
