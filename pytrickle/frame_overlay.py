@@ -213,6 +213,7 @@ class OverlayConfig:
     progress: Optional[float] = None         # Progress value 0.0-1.0 (None = animated)
     enabled: bool = True                     # Whether loading gating is active
     auto_timeout_seconds: Optional[float] = 1.5  # Seconds without output before overlay auto-enables
+    frame_count_to_disable: int = 1  # Consecutive valid frames required before overlay auto-disables
     
     def is_overlay_mode(self) -> bool:
         """Return True if this config is set to overlay mode."""
@@ -232,6 +233,7 @@ class OverlayController:
         self._loading_active = False
         self._is_manual_loading = False  # Track if loading was set manually
         self._frame_counter = 0
+        self._consecutive_received_frames = 0
 
     def reset(self) -> None:
         """Reset timing/state for a new stream."""
@@ -239,6 +241,7 @@ class OverlayController:
         self._loading_active = False
         self._is_manual_loading = False
         self._frame_counter = 0
+        self._consecutive_received_frames = 0
 
     def update_and_apply(
         self,
@@ -290,10 +293,14 @@ class OverlayController:
         now = time.time()
         if received_frame_from_processor:
             self._last_video_frame_time = now
-            # Only auto-disable if loading was set automatically (not manually)
+            # auto-disable if loading was set automatically (not manually enabled) and `frame_count_to_disable` threshold is reached
+            self._consecutive_received_frames += 1
             if self._loading_active and not self._is_manual_loading:
-                self._loading_active = False
+                threshold = max(1, self.overlay_config.frame_count_to_disable)
+                if self._consecutive_received_frames >= threshold:
+                    self._loading_active = False
         else:
+            self._consecutive_received_frames = 0
             # Only auto-enable if not already manually enabled
             if not self._is_manual_loading:
                 timeout = self.overlay_config.auto_timeout_seconds
@@ -310,6 +317,7 @@ class OverlayController:
         self._loading_active = False
         self._is_manual_loading = False
         self._frame_counter = 0
+        self._consecutive_received_frames = 0
 
     def _apply_loading_overlay(
         self,
