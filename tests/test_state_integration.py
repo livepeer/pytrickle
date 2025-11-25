@@ -416,7 +416,7 @@ class TestStateIntegrationWithStreamProcessor:
             # Define simple test functions if examples aren't available
             async def process_video(frame):
                 return frame
-            async def load_model():
+            async def load_model(**kwargs):
                 pass
             async def update_params(params):
                 pass
