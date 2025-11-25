@@ -9,6 +9,8 @@ import time
 import torch
 import cv2
 import numpy as np
+from typing import List, Dict, Any
+
 from pytrickle import StreamProcessor
 from pytrickle.frames import VideoFrame
 from pytrickle.frame_skipper import FrameSkipConfig
@@ -80,7 +82,7 @@ async def send_periodic_status():
     except Exception as e:
         logger.error(f"Error in background status task: {e}")
 
-async def on_stream_start():
+async def on_stream_start(params: Dict[str, Any]):
     """Called when stream starts - initialize resources."""
     global background_task_started
     logger.info("Stream started, initializing resources")
