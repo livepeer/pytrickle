@@ -4,12 +4,13 @@ This module provides base classes and utilities for async frame processing,
 making it easy to integrate AI models and async pipelines with PyTrickle.
 """
 
+import asyncio
 import logging
 from abc import ABC, abstractmethod
 from typing import Optional, Any, Dict, List
 from .frames import VideoFrame, AudioFrame
-from . import ErrorCallback
-from .state import StreamState, PipelineState
+from .base import ErrorCallback
+from .state import StreamState
 
 logger = logging.getLogger(__name__)
 
@@ -55,35 +56,39 @@ class FrameProcessor(ABC):
         """
         self.error_callback = error_callback
         self.state: Optional[StreamState] = None
-        self.model_loaded: bool = False
-        try:
-            self.load_model(**init_kwargs)
-            self.model_loaded = True
-            # If a state manager is already attached, mark ready automatically
-            if self.state is not None:
-                self.state.set_state(PipelineState.IDLE)
-        except Exception:
-            # If load fails and we have a state manager, mark ERROR
-            if self.state is not None:
-                self.state.set_state(PipelineState.ERROR)
-            raise
-
+        self._model_loaded = False
+        self._model_load_lock = asyncio.Lock()
+        
     def attach_state(self, state: StreamState) -> None:
-        """Attach a pipeline state manager and set IDLE if model already loaded."""
+        """Attach a pipeline state manager."""
         self.state = state
-        if self.model_loaded:
-            self.state.set_state(PipelineState.IDLE)
+
+    async def ensure_model_loaded(self, **kwargs):
+        """Thread-safe wrapper that ensures model is loaded exactly once."""
+        async with self._model_load_lock:
+            if not self._model_loaded:
+                await self.load_model(**kwargs)
+                self._model_loaded = True
+                
+                # After load_model completes, mark startup complete
+                if self.state:
+                    self.state.set_startup_complete()
+                    logger.debug(f"Model loaded - startup complete for {self.__class__.__name__}")
+                else:
+                    logger.debug(f"Model loaded for {self.__class__.__name__}")
+            else:
+                logger.debug(f"Model already loaded for {self.__class__.__name__}")
 
     @abstractmethod
-    def load_model(self, *kwargs):
+    async def load_model(self, **kwargs):
         """
         Load the model.
 
         This method should be implemented to load any required models or resources.
-        It is called automatically during initialization.
+        It is called automatically when needed.
         
         Args:
-            *kwargs: Additional parameters for model loading
+            **kwargs: Additional parameters for model loading
         """
         pass
 
@@ -114,11 +119,39 @@ class FrameProcessor(ABC):
         pass
 
     @abstractmethod
-    def update_params(self, params: Dict[str, Any]):
+    async def update_params(self, params: Dict[str, Any]):
         """
         Update processing parameters (optional override).
 
         Args:
             params: Dictionary of parameters to update
+        """
+        pass
+
+    async def on_stream_start(self, params: Dict[str, Any]):
+        """
+        Called when a stream starts or client connects.
+        
+        Args:
+            params: Dictionary of stream start parameters (width, height, etc.)
+        
+        Override this method to perform initialization operations like:
+        - Starting background tasks
+        - Initializing state based on stream parameters
+        - Setting up resources
+        - Starting timers or loops
+        - Configuring the pipeline based on initial parameters
+        """
+        pass
+
+    async def on_stream_stop(self):
+        """
+        Called when a stream stops or client disconnects.
+        
+        Override this method to perform cleanup operations like:
+        - Cancelling background tasks
+        - Resetting internal state
+        - Cleaning up resources
+        - Stopping timers or loops
         """
         pass

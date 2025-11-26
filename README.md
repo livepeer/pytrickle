@@ -1,4 +1,6 @@
-# PyTrickle
+
+# PyTrickle [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/livepeer/pytrickle)
+
 
 A high-performance Python package for real-time video streaming and processing over the trickle protocol. Built for maximum throughput, reliability, and ease of integration into video processing applications.
 
@@ -106,7 +108,7 @@ async def main():
     await app.run_forever()
 ```
 
-For a complete working example with green tint processing, see `examples/async_processor_example.py`.
+For a complete working example with green tint processing, see [`examples/process_video_example.py`](examples/process_video_example.py) and [`examples/overlay_example.py`](examples/overlay_example.py) for model loading with overlay demonstrations.
 
 ## HTTP API
 

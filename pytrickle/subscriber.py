@@ -10,7 +10,7 @@ import aiohttp
 import logging
 from typing import Optional, List
 
-from . import ErrorCallback
+from .base import ErrorCallback
 from .base import TrickleComponent
 
 logger = logging.getLogger(__name__)
@@ -22,14 +22,13 @@ RETRY_DELAY_SECONDS = 0.5
 class TrickleSubscriber(TrickleComponent):
     """Trickle subscriber for receiving data from a URL."""
     
-    def __init__(self, url: str, start_seq: int = -2, max_retries: int = MAX_RETRIES, connect_timeout_seconds: float = CONNECT_TIMEOUT_SECONDS, error_callback: Optional[ErrorCallback] = None):
-        super().__init__(error_callback)
+    def __init__(self, url: str, start_seq: int = -2, max_retries: int = MAX_RETRIES, connect_timeout_seconds: float = CONNECT_TIMEOUT_SECONDS, error_callback: Optional[ErrorCallback] = None, component_name: Optional[str] = "subscriber"):
+        super().__init__(error_callback, component_name)
         self.base_url = url
         self.idx = start_seq
         self.max_retries = max_retries
         self.pending_get: Optional[aiohttp.ClientResponse] = None
         self.lock = asyncio.Lock()
-        self._background_tasks: List[asyncio.Task] = []  # Track background tasks
         self.session: Optional[aiohttp.ClientSession] = None
         self.connect_timeout_seconds = connect_timeout_seconds
 
@@ -90,8 +89,17 @@ class TrickleSubscriber(TrickleComponent):
                 resp.release()
                 logger.error(f"Trickle sub failed GET {url} status code: {resp.status}, msg: {body}")
 
-            except Exception:
-                logger.exception(f"Trickle sub failed to complete GET {url}", stack_info=True)
+            except aiohttp.ClientConnectionError as e:
+                # Connection errors are common during shutdown or network issues
+                logger.debug(f"Connection error for {url} (may be expected during shutdown): {e}")
+            except asyncio.CancelledError:
+                # Handle cancellation gracefully during shutdown
+                logger.debug(f"GET request cancelled for {url} during shutdown")
+                raise
+            except Exception as e:
+                # Ensure we have a meaningful error message
+                error_msg = str(e) or repr(e) or f"{type(e).__name__}"
+                logger.exception(f"Trickle sub failed to complete GET {url} - {error_msg}", stack_info=True)
 
             if attempt < self.max_retries - 1:
                 await asyncio.sleep(RETRY_DELAY_SECONDS)
@@ -132,11 +140,8 @@ class TrickleSubscriber(TrickleComponent):
                 self.idx = idx + 1
 
             # Set up the next connection in the background
-            preconnect_task = asyncio.create_task(self._preconnect_next_segment())
-            self._background_tasks.append(preconnect_task)
+            self._track_background_task(asyncio.create_task(self._preconnect_next_segment()))
             logger.debug(f"Created background preconnect task for {self.base_url}, total tasks: {len(self._background_tasks)}")
-            # Add callback to remove completed tasks from the list
-            preconnect_task.add_done_callback(lambda t: self._background_tasks.remove(t) if t in self._background_tasks else None)
 
         return segment
 

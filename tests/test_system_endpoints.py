@@ -8,16 +8,12 @@ with comprehensive state validation using the simplified architecture.
 import pytest
 import pytest_asyncio
 from aiohttp.test_utils import TestServer, TestClient
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from pytrickle.stream_processor import _InternalFrameProcessor
 from pytrickle.server import StreamServer
-from pytrickle.state import PipelineState
 from pytrickle.test_utils import MockFrameProcessor
-
-# Import example processor functions
-from examples.process_video_example import load_model, process_video, update_params
-
+from pytrickle.examples.process_video_example import load_model, process_video, update_params
 
 @pytest_asyncio.fixture
 async def test_server():
@@ -29,6 +25,7 @@ async def test_server():
         param_updater=update_params,
         name="trickle-stream-example",
     )
+
 
     server = StreamServer(
         frame_processor=processor,
@@ -88,15 +85,15 @@ class TestVersionEndpoint:
         resp = await client.get("/version")
         assert resp.status == 200
         data = await resp.json()
-        assert data == {
-            "pipeline": "byoc",
-            "model_id": "trickle-stream-example",
-            "version": "0.0.1",
-        }
+        assert data["pipeline"] == "byoc"
+        assert data["model_id"] == "trickle-stream-example"
+        # Version should start with 0.1. (setuptools-scm generates versions like 0.1.4.dev0+...)
+        assert data["version"].startswith("0.1.")
 
     @pytest.mark.asyncio
     async def test_version_endpoint_custom_values(self):
-        """Test /version endpoint with custom pipeline and version values."""
+        """Test /version and /app-version endpoints with custom pipeline and version values."""
+        
         # Create server with custom values
         processor = _InternalFrameProcessor(
             video_processor=process_video,
@@ -120,14 +117,34 @@ class TestVersionEndpoint:
         async with test_server_instance:
             client = TestClient(test_server_instance)
             async with client:
+                # Test /version endpoint returns package version
                 resp = await client.get("/version")
                 assert resp.status == 200
                 data = await resp.json()
+                assert data["pipeline"] == "custom-pipeline"
+                assert data["model_id"] == "custom-model"
+                # Version should start with 0.1. (setuptools-scm generates versions like 0.1.4.dev0+...)
+                assert data["version"].startswith("0.1.")
+                
+                # Test /app-version endpoint returns custom app version
+                resp = await client.get("/app-version")
+                assert resp.status == 200
+                data = await resp.json()
                 assert data == {
-                    "pipeline": "custom-pipeline",
-                    "model_id": "custom-model",
-                    "version": "1.2.3",
+                    "version": "1.2.3",  # Custom app version
                 }
+    
+    @pytest.mark.asyncio
+    async def test_app_version_endpoint(self, test_server):
+        """Test /app-version endpoint returns expected payload."""
+        client, server = test_server
+        
+        resp = await client.get("/app-version")
+        assert resp.status == 200
+        data = await resp.json()
+        assert data == {
+            "version": "0.0.1",  # Default app version from server init
+        }
 
 
 class TestHealthEndpointStateValidation:

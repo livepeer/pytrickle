@@ -16,9 +16,10 @@ class MockFrameProcessor(FrameProcessor):
     
     def __init__(self, **kwargs):
         self.test_params = {}
+        self.stream_start_params = None
         super().__init__(**kwargs)
     
-    def load_model(self, **kwargs):
+    async def load_model(self, **kwargs):
         """Test model loader."""
         pass
     
@@ -30,10 +31,14 @@ class MockFrameProcessor(FrameProcessor):
         """Test audio processor."""
         return [frame]
     
-    def update_params(self, params: Dict[str, Any]):
+    async def update_params(self, params: Dict[str, Any]):
         """Test parameter updater."""
         if params:
             self.test_params.update(params)
+    
+    async def on_stream_start(self, params: Dict[str, Any]):
+        """Capture stream start parameters for testing."""
+        self.stream_start_params = params
 
 
 def create_mock_client():
@@ -42,7 +47,7 @@ def create_mock_client():
     mock_client.running = False
     
     # Simple start that returns immediately to avoid hanging
-    async def mock_start_immediate(request_id="default"):
+    async def mock_start_immediate(request_id="default", params=None):
         mock_client.running = True
         return
     
@@ -79,8 +84,7 @@ def create_test_server_for_endpoints(
     
     # Import example functions for a real processor
     try:
-        from examples.process_video_example import load_model, process_video, update_params
-        
+        from pytrickle.examples.process_video_example import load_model, process_video, update_params
         processor = _InternalFrameProcessor(
             video_processor=process_video,
             audio_processor=None,

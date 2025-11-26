@@ -10,9 +10,9 @@ import aiohttp
 import logging
 from typing import Optional, List
 
-from . import ErrorCallback
+from .base import ErrorCallback
 from .base import TrickleComponent
-
+import time
 logger = logging.getLogger(__name__)
 
 # Default timeouts (seconds)
@@ -25,14 +25,13 @@ RETRY_DELAY_SECONDS = 0.05
 class TricklePublisher(TrickleComponent):
     """Trickle publisher for sending data to a URL."""
     
-    def __init__(self, url: str, mime_type: str = "video/mp4", error_callback: Optional[ErrorCallback] = None):
-        super().__init__(error_callback)
+    def __init__(self, url: str, mime_type: str = "video/mp4", error_callback: Optional[ErrorCallback] = None, component_name: Optional[str] = "publisher"):
+        super().__init__(error_callback, component_name)
         self.url = url
         self.mime_type = mime_type
         self.idx = 0
         self.next_writer: Optional[asyncio.Queue] = None
         self.lock = asyncio.Lock()
-        self._background_tasks: List[asyncio.Task] = []  # Track background tasks
         self.session: Optional[aiohttp.ClientSession] = None
         self.connect_timeout_seconds = CONNECT_TIMEOUT_SECONDS
         self.keepalive_timeout_seconds = KEEPALIVE_TIMEOUT_SECONDS
@@ -85,7 +84,7 @@ class TricklePublisher(TrickleComponent):
         try:
             # Create a queue for streaming data incrementally
             queue = asyncio.Queue()
-            asyncio.create_task(self._run_post(url, queue))
+            self._track_background_task(asyncio.create_task(self._run_post(url, queue)))
             return queue
         except Exception as e:
             logger.error(f"Failed to complete POST for {url}: {e}")
@@ -97,19 +96,25 @@ class TricklePublisher(TrickleComponent):
         try:
             if not self.session or self._should_stop():
                 return
-                
+            start = time.time()
             resp = await self.session.post(
                 url,
                 headers={'Connection': 'close', 'Content-Type': self.mime_type},
                 data=self._stream_data(queue)
             )
             
+            logger.debug(f"Trickle POST complete for {url}, took: {time.time() - start:.2f}s, status: {resp.status}")
             if resp.status != 200:
                 body = await resp.text()
                 logger.error(f"Trickle POST failed {url}, status code: {resp.status}, msg: {body}")
                 # Don't trigger error callback if we're shutting down
                 if not self._should_stop():
                     await self._notify_error("post_failed", Exception(f"POST failed with status {resp.status}: {body}"))
+            #release the connection
+            await resp.release()
+        except aiohttp.ClientConnectionResetError as e:
+            # Connection reset is usually due to server shutdown - treat as expected
+            logger.debug(f"Connection reset for {url} (expected during shutdown): {e}")
         except asyncio.CancelledError:
             # Handle cancellation gracefully during shutdown
             logger.debug(f"POST request cancelled for {url} during shutdown")
@@ -177,11 +182,7 @@ class TricklePublisher(TrickleComponent):
 
             # Only create background task if not shutting down
             if not self._should_stop():
-                # Set up the next POST in the background and track the task
-                preconnect_task = asyncio.create_task(self._preconnect_next_segment())
-                self._background_tasks.append(preconnect_task)
-                # Add callback to remove completed tasks from the list
-                preconnect_task.add_done_callback(lambda t: self._background_tasks.remove(t) if t in self._background_tasks else None)
+                self._track_background_task(asyncio.create_task(self._preconnect_next_segment()))
 
         return SegmentWriter(writer)
 
@@ -259,4 +260,4 @@ class SegmentWriter:
 
     async def __aexit__(self, exc_type, exc_value, traceback):
         """Exit context manager and close the connection."""
-        await self.close() 
+        await self.close()

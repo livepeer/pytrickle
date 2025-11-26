@@ -12,7 +12,7 @@ import logging
 from abc import abstractmethod
 from typing import Optional, Dict, Any
 
-from . import ErrorCallback
+from .base import ErrorCallback
 from .frame_processor import FrameProcessor
 from .client import TrickleClient
 from .protocol import TrickleProtocol
@@ -83,7 +83,7 @@ class TrickleStreamHandler(StreamHandler):
         self._task: Optional[asyncio.Task] = None
         self._control_task: Optional[asyncio.Task] = None
         self._monitoring_task: Optional[asyncio.Task] = None
-        
+
         # Error handling
         self._error_callback = error_callback
         self._critical_error_occurred = False
@@ -141,10 +141,7 @@ class TrickleStreamHandler(StreamHandler):
         # Call external error callback if provided
         if self._error_callback:
             try:
-                if asyncio.iscoroutinefunction(self._error_callback):
-                    await self._error_callback(error_type, exception)
-                else:
-                    self._error_callback(error_type, exception)
+                await self._error_callback(error_type, exception)
             except Exception as e:
                 logger.error(f"Error in error callback: {e}")
     
@@ -332,7 +329,7 @@ class TrickleStreamHandler(StreamHandler):
                 self._monitoring_task = asyncio.create_task(self._monitoring_loop())
             except Exception as e:
                 logger.warning(f"Failed to start monitoring task: {e}")
-            
+
             logger.info("TrickleStreamHandler started successfully")
             return True
             
@@ -358,7 +355,7 @@ class TrickleStreamHandler(StreamHandler):
                 await self._cancel_task_with_timeout(self._task, "Main task")
                 await self._cancel_task_with_timeout(self._control_task, "Control task")
                 await self._cancel_task_with_timeout(self._monitoring_task, "Monitoring task")
-                
+
                 # Close control subscriber
                 if self.control_subscriber:
                     try:

@@ -4,7 +4,6 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pytrickle"
-version = "0.1.1"
 description = "High-performance Python package for real-time video streaming over trickle protocol"
 readme = "README.md"
 license = {text = "MIT"}
@@ -30,23 +29,26 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 requires-python = ">=3.8"
-dynamic = ["dependencies", "optional-dependencies"]
+dynamic = ["dependencies", "optional-dependencies", "version"]
 
 [project.urls]
 Homepage = "https://github.com/livepeer/pytrickle"
 Repository = "https://github.com/livepeer/pytrickle"
 Issues = "https://github.com/livepeer/pytrickle/issues"
 
+[project.scripts]
+pytrickle = "pytrickle.cli:main"
+
 [tool.setuptools]
 include-package-data = true
+packages = ["pytrickle", "pytrickle.examples"]
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["pytrickle*", "examples*"]
-exclude = ["tests*"]
+[tool.setuptools.package-dir]
+"pytrickle.examples" = "examples"
 
 [tool.setuptools.package-data]
 pytrickle = ["*.py"]
+"pytrickle.examples" = ["*.py", "*.txt", "Dockerfile.*"]
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}
@@ -122,3 +124,8 @@ module = [
     "pynvml.*",
 ]
 ignore_missing_imports = true
+
+[tool.setuptools_scm]
+# Enable setuptools-scm for automatic version management from Git tags
+write_to = "pytrickle/_version.py"
+fallback_version = "0.0.0"

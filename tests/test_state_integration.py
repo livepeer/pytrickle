@@ -7,13 +7,16 @@ Validates that state changes work correctly for monitoring and health reporting.
 
 import pytest
 import pytest_asyncio
-import asyncio
 from aiohttp.test_utils import TestServer, TestClient
-from unittest.mock import patch, MagicMock
-
 from pytrickle.server import StreamServer
 from pytrickle.state import StreamState, PipelineState
 from pytrickle.test_utils import MockFrameProcessor, create_mock_client
+from pytrickle.examples.process_video_example import load_model, process_video, update_params
+            
+def get_stream_route(server, endpoint):
+    """Get the full route path for a streaming endpoint."""
+    prefix = server.route_prefix.rstrip('/')
+    return f"{prefix}/stream/{endpoint}"
 
 
 @pytest_asyncio.fixture
@@ -183,38 +186,41 @@ class TestFrameProcessorStateIntegration:
         processor = MockFrameProcessor()
         state = StreamState()
         
-        # Initially no state attached
-        assert not hasattr(processor, 'state') or processor.state is None
+        # Initially has no state attached
+        assert hasattr(processor, 'state')
+        assert processor.state is None
         
-        # Attach state
+        # Attach new state
         processor.attach_state(state)
         assert processor.state is state
 
-    def test_frame_processor_model_loading_success(self):
+    @pytest.mark.asyncio
+    async def test_frame_processor_model_loading_success(self):
         """Test frame processor model loading with state updates."""
         processor = MockFrameProcessor()
         state = StreamState()
         processor.attach_state(state)
         
         # Model loading should work without errors
-        processor.load_model()
+        await processor.load_model()
         # MockFrameProcessor doesn't change state, but real ones would
 
-    def test_frame_processor_model_loading_failure(self):
+    @pytest.mark.asyncio
+    async def test_frame_processor_model_loading_failure(self):
         """Test frame processor handles model loading failures."""
         processor = MockFrameProcessor()
         state = StreamState()
         processor.attach_state(state)
         
         # Mock a failing load_model
-        def failing_load_model(**kwargs):
+        async def failing_load_model(**kwargs):
             raise Exception("Model loading failed")
         
         processor.load_model = failing_load_model
         
         # Should handle the exception gracefully
         try:
-            processor.load_model()
+            await processor.load_model()
             assert False, "Expected exception"
         except Exception as e:
             assert "Model loading failed" in str(e)
@@ -223,7 +229,6 @@ class TestFrameProcessorStateIntegration:
     async def test_internal_frame_processor_integration(self):
         """Test _InternalFrameProcessor integration with state."""
         from pytrickle.stream_processor import _InternalFrameProcessor
-        from examples.process_video_example import load_model, process_video, update_params
         
         processor = _InternalFrameProcessor(
             video_processor=process_video,
@@ -236,10 +241,10 @@ class TestFrameProcessorStateIntegration:
         processor.attach_state(state)
         
         # Test model loading
-        processor.load_model()
+        await processor.load_model()
         
         # Test parameter updates
-        processor.update_params({"intensity": 0.8})
+        await processor.update_params({"intensity": 0.8})
 
 
 class TestServerStateIntegration:
@@ -261,9 +266,7 @@ class TestServerStateIntegration:
     async def test_server_health_endpoint_state_integration(self, server_with_state):
         """Test health endpoint reflects server state."""
         server, processor = server_with_state
-        
-        from aiohttp.test_utils import TestServer, TestClient
-        
+
         app = server.get_app()
         test_server_instance = TestServer(app)
         
@@ -297,8 +300,6 @@ class TestServerStateIntegration:
         """Test that server properly validates and updates state during stream operations."""
         server, processor = server_with_state
         
-        from aiohttp.test_utils import TestServer, TestClient
-        
         app = server.get_app()
         test_server_instance = TestServer(app)
         
@@ -306,7 +307,7 @@ class TestServerStateIntegration:
             client = TestClient(test_server_instance)
             async with client:
                 # Initial state validation
-                resp = await client.get("/api/stream/status")
+                resp = await client.get(get_stream_route(server, "status"))
                 assert resp.status == 200
                 data = await resp.json()
                 assert data["client_active"] is False
@@ -321,7 +322,7 @@ class TestServerStateIntegration:
                 server.current_client = mock_client
                 
                 # Validate state changes are reflected
-                resp = await client.get("/api/stream/status")
+                resp = await client.get(get_stream_route(server, "status"))
                 assert resp.status == 200
                 data = await resp.json()
                 assert data["client_active"] is True
@@ -332,7 +333,7 @@ class TestServerStateIntegration:
                 server.state.set_active_client(False)
                 server.state.update_active_streams(0)
                 
-                resp = await client.get("/api/stream/status")
+                resp = await client.get(get_stream_route(server, "status"))
                 assert resp.status == 200
                 data = await resp.json()
                 assert data["client_active"] is False
@@ -407,7 +408,18 @@ class TestStateIntegrationWithStreamProcessor:
     async def test_stream_processor_state_integration(self):
         """Test StreamProcessor integration with state."""
         from pytrickle.stream_processor import _InternalFrameProcessor
-        from examples.process_video_example import load_model, process_video, update_params
+        
+        # Try to use example functions, fall back to simple test functions
+        try:
+            from pytrickle.examples.process_video_example import load_model, process_video, update_params
+        except ImportError:
+            # Define simple test functions if examples aren't available
+            async def process_video(frame):
+                return frame
+            async def load_model(**kwargs):
+                pass
+            async def update_params(params):
+                pass
         
         processor = _InternalFrameProcessor(
             video_processor=process_video,
@@ -423,11 +435,11 @@ class TestStateIntegrationWithStreamProcessor:
         assert processor.state is state
         
         # Test model loading
-        processor.load_model()
+        await processor.load_model()
         
         # Test parameter updates
         test_params = {"intensity": 0.7, "effect": "test"}
-        processor.update_params(test_params)
+        await processor.update_params(test_params)
         
         # Verify processor handled params (internal behavior may vary)
         # The important thing is no exceptions were raised
