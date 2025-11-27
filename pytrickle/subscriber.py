@@ -78,7 +78,8 @@ class TrickleSubscriber(TrickleComponent):
 
                 if resp.status == 470:
                     # Channel exists but no data at this index, so reset
-                    idx = resp.headers.get('Lp-Trickle-Latest') or '-1'
+                    #idx = resp.headers.get('Lp-Trickle-Latest') or '-1'
+                    idx = -1
                     url = f"{self.base_url}/{idx}"
                     logger.info(f"Trickle sub resetting index to leading edge {url}")
                     resp.release()
