@@ -85,7 +85,7 @@ class TrickleSubscriber(TrickleComponent):
                     resp.release()
                     # Continue immediately after small timeout for control url
                     if "control" in self.base_url:
-                        await asyncio.sleep(0.2)
+                        await asyncio.sleep(1*attempt)
                     continue
 
                 body = await resp.text()
