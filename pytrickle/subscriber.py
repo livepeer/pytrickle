@@ -82,7 +82,19 @@ class TrickleSubscriber(TrickleComponent):
                     url = f"{self.base_url}/{idx}"
                     logger.info(f"Trickle sub resetting index to leading edge {url}")
                     resp.release()
-                    # Continue immediately
+                    # Continue immediately after small timeout for control url
+                    if "control" in self.base_url:
+                        await asyncio.sleep(1*attempt)
+                        if attempt > 1:
+                            if idx != -1:
+                                idx = str(int(idx) + 1)
+                            resp2 = await self.session.get(f"{self.base_url}/{idx}", headers={'Connection': 'close'})
+                            if resp2.status == 200:
+                                resp.release()
+                                return resp2
+                            else:
+                                resp2.release()
+                        await asyncio.sleep(1 * attempt)
                     continue
 
                 body = await resp.text()
