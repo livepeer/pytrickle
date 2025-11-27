@@ -83,7 +83,9 @@ class TrickleSubscriber(TrickleComponent):
                     url = f"{self.base_url}/{idx}"
                     logger.info(f"Trickle sub resetting index to leading edge {url}")
                     resp.release()
-                    # Continue immediately
+                    # Continue immediately after small timeout for control url
+                    if "control" in self.base_url:
+                        await asyncio.sleep(0.2)
                     continue
 
                 body = await resp.text()
