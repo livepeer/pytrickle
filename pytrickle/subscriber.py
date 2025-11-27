@@ -87,7 +87,7 @@ class TrickleSubscriber(TrickleComponent):
                         await asyncio.sleep(1*attempt)
                         if attempt > 1:
                             if idx != -1:
-                                idx = idx + 1
+                                idx = str(int(idx) + 1)
                             resp2 = await self.session.get(f"{self.base_url}/{idx}", headers={'Connection': 'close'})
                             if resp2.status == 200:
                                 resp.release()
