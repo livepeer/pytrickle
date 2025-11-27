@@ -78,14 +78,23 @@ class TrickleSubscriber(TrickleComponent):
 
                 if resp.status == 470:
                     # Channel exists but no data at this index, so reset
-                    #idx = resp.headers.get('Lp-Trickle-Latest') or '-1'
-                    idx = -1
+                    idx = resp.headers.get('Lp-Trickle-Latest') or '-1'
                     url = f"{self.base_url}/{idx}"
                     logger.info(f"Trickle sub resetting index to leading edge {url}")
                     resp.release()
                     # Continue immediately after small timeout for control url
                     if "control" in self.base_url:
                         await asyncio.sleep(1*attempt)
+                        if attempt > 1:
+                            if idx != -1:
+                                idx = idx + 1
+                            resp2 = await self.session.get(f"{self.base_url}/{idx}", headers={'Connection': 'close'})
+                            if resp2.status == 200:
+                                resp.release()
+                                return resp2
+                            else:
+                                resp2.release()
+                        await asyncio.sleep(1 * attempt)
                     continue
 
                 body = await resp.text()
