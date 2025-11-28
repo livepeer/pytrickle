@@ -291,7 +291,13 @@ class TrickleClient:
                     continue
 
                 frame = frame_or_result
-                processed_frame = await self.frame_processor.process_video_async(frame)
+                
+                # Check if we should skip processing and show overlay immediately
+                # This is an optimization to avoid blocking the processor during manual loading states
+                if self.loading_controller.should_skip_processing():
+                    processed_frame = None
+                else:
+                    processed_frame = await self.frame_processor.process_video_async(frame)
 
                 output_frame = self.loading_controller.update_and_apply(frame, processed_frame)
                 
