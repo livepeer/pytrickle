@@ -256,6 +256,21 @@ class StreamProcessor:
     def run(self):
         """Run the stream processor server (blocking)."""
         asyncio.run(self.run_forever())
+    
+    def set_loading_overlay(self, active: bool) -> bool:
+        """
+        Manually enable or disable the loading overlay for the current client.
+        
+        When enabled, the client will render overlay frames locally and skip
+        sending frames to the processor, preventing blockage during warmup/loading.
+        
+        Returns:
+            True if the command was sent to an active client, False otherwise.
+        """
+        if self.server and self.server.current_client:
+            self.server.current_client.loading_controller.set_manual_loading(active)
+            return True
+        return False
 
     @staticmethod
     def _validate_signature_shape(name_label: str, fn: Callable[..., Any]) -> None:
