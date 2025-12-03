@@ -427,6 +427,8 @@ class StreamServer:
             width = params_dict.get("width", 512)
             height = params_dict.get("height", 512)
             max_framerate = params_dict.get("max_framerate", None)
+            # Auto-detect output resolution is enabled by default unless explicitly disabled
+            detect_out_resolution = params_dict.get("detect_out_resolution", True)
             
             # Create protocol
             protocol = TrickleProtocol(
@@ -440,6 +442,7 @@ class StreamServer:
                 max_framerate=max_framerate,
                 publisher_timeout=self.publisher_timeout,
                 subscriber_timeout=self.subscriber_timeout,
+                detect_out_resolution=detect_out_resolution,
             )
             
             # Create client

@@ -41,6 +41,7 @@ class TrickleProtocol(TrickleComponent):
         publisher_timeout: Optional[float] = None,
         subscriber_timeout: Optional[float] = None,
         error_callback: Optional[ErrorCallback] = None,
+        detect_out_resolution: bool = True,
     ):
         super().__init__(error_callback, component_name="protocol")
         self.subscribe_url = subscribe_url
@@ -54,6 +55,7 @@ class TrickleProtocol(TrickleComponent):
         self.heartbeat_interval = heartbeat_interval
         self.publisher_timeout = publisher_timeout
         self.subscriber_timeout = subscriber_timeout
+        self.detect_out_resolution = detect_out_resolution
         
         # Tasks and components
         self.subscribe_task: Optional[asyncio.Task] = None
@@ -173,6 +175,7 @@ class TrickleProtocol(TrickleComponent):
                     metadata_cache.get, 
                     self.emit_monitoring_event,
                     self.publisher_timeout,
+                    self.detect_out_resolution,
                 )
             )
         
