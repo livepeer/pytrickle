@@ -221,6 +221,11 @@ def encode_av(
             if not output_video_stream:
                 # received video but no video output configured, so drop
                 continue
+            
+            # Store the initialized stream dimensions for validation
+            stream_width = output_video_stream.codec_context.width
+            stream_height = output_video_stream.codec_context.height
+            
             avframe.log_timestamps["frame_end"] = time.time()
             _log_frame_timestamps("Video", avframe.frame)
 
@@ -241,6 +246,11 @@ def encode_av(
                 
                 # Explicitly specify RGB mode - decoder produces RGB, encoder expects RGB
                 image = Image.fromarray(image_np, mode='RGB')
+                
+                # Resize if frame dimensions don't match initialized stream
+                if image.width != stream_width or image.height != stream_height:
+                    logger.debug(f"Resizing frame from {image.width}x{image.height} to {stream_width}x{stream_height}")
+                    image = image.resize((stream_width, stream_height), Image.LANCZOS)
                 
                 frame = av.video.frame.VideoFrame.from_image(image)
             except Exception as e:
