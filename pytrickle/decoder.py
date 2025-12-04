@@ -10,7 +10,7 @@ from av.video.reformatter import VideoReformatter
 from av.container import InputContainer
 import time
 import logging
-from typing import Optional, cast, Callable
+from typing import Optional, cast, Callable, Union
 import numpy as np
 import torch
 
@@ -20,7 +20,14 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_FRAMERATE = 24
 
-def decode_av(pipe_input, frame_callback: Callable, put_metadata: Callable, target_width: Optional[int] = DEFAULT_WIDTH, target_height: Optional[int] = DEFAULT_HEIGHT, max_framerate: Optional[int] = DEFAULT_MAX_FRAMERATE):
+def decode_av(
+    pipe_input, 
+    frame_callback: Callable, 
+    put_metadata: Callable, 
+    target_width: Optional[int] = DEFAULT_WIDTH, 
+    target_height: Optional[int] = DEFAULT_HEIGHT, 
+    max_framerate: Union[int, Callable[[], int], None] = DEFAULT_MAX_FRAMERATE,
+):
     """
     Reads from a pipe (or file-like object) and decodes video/audio frames.
 
@@ -29,7 +36,7 @@ def decode_av(pipe_input, frame_callback: Callable, put_metadata: Callable, targ
     :param put_metadata: A function that accepts audio/video metadata
     :param target_width: Target width for output frames (default: DEFAULT_WIDTH)
     :param target_height: Target height for output frames (default: DEFAULT_HEIGHT)
-    :param max_framerate: Maximum frame rate (FPS) for output video (default: DEFAULT_MAX_FRAMERATE)
+    :param max_framerate: Maximum frame rate (FPS) or callable returning FPS (default: DEFAULT_MAX_FRAMERATE)
     """
     container = cast(InputContainer, av.open(pipe_input, 'r'))
 
@@ -82,11 +89,23 @@ def decode_av(pipe_input, frame_callback: Callable, put_metadata: Callable, targ
     put_metadata(metadata)
 
     reformatter = VideoReformatter()
-    # Ensure max_framerate is not None
+    
+    # Helper to get current framerate
     if max_framerate is None:
-        max_framerate = DEFAULT_MAX_FRAMERATE
-    logger.info(f"Decoder configured with max frame rate: {max_framerate} FPS")
-    frame_interval = 1.0 / max_framerate
+        get_framerate = lambda: DEFAULT_MAX_FRAMERATE
+    elif callable(max_framerate):
+        get_framerate = max_framerate
+    else:
+        # Capture literal value
+        val = max_framerate
+        get_framerate = lambda: val
+        
+    current_framerate = get_framerate()
+    if current_framerate is None:
+        current_framerate = DEFAULT_MAX_FRAMERATE
+
+    logger.info(f"Decoder configured with max frame rate: {current_framerate} FPS")
+    frame_interval = 1.0 / current_framerate if current_framerate > 0 else 0.033
     next_pts_time = 0.0
     
     try:
@@ -107,6 +126,17 @@ def decode_av(pipe_input, frame_callback: Callable, put_metadata: Callable, targ
                     continue
 
             elif video_stream and packet.stream == video_stream:
+                # Check for runtime framerate updates
+                new_framerate = get_framerate()
+                if new_framerate is not None and new_framerate != current_framerate:
+                    current_framerate = new_framerate
+                    logger.info(f"Decoder frame rate updated to: {current_framerate} FPS")
+                    if current_framerate > 0:
+                        frame_interval = 1.0 / current_framerate
+                    else:
+                        # Avoid division by zero
+                        frame_interval = 0.033  # Default to ~30fps
+
                 # Decode video frames
                 for frame in packet.decode():
                     frame = cast(av.VideoFrame, frame)

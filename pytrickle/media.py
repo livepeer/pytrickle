@@ -10,7 +10,7 @@ import time
 import asyncio
 import logging
 import threading
-from typing import Callable, Optional
+from typing import Callable, Optional, Union
 
 from .subscriber import TrickleSubscriber  
 from .publisher import TricklePublisher
@@ -33,7 +33,7 @@ async def run_subscribe(
     monitoring_callback: Optional[Callable] = None,
     target_width: Optional[int] = DEFAULT_WIDTH,
     target_height: Optional[int] = DEFAULT_HEIGHT,
-    max_framerate: Optional[int] = DEFAULT_MAX_FRAMERATE,
+    max_framerate: Union[int, Callable[[], int], None] = DEFAULT_MAX_FRAMERATE,
     subscriber_timeout: Optional[float] = None,
 ):
     """
@@ -46,7 +46,8 @@ async def run_subscribe(
         monitoring_callback: Optional callback for monitoring events
         target_width: Target width for decoded frames
         target_height: Target height for decoded frames
-        max_framerate: Maximum framerate for decoded frames
+        max_framerate: Maximum framerate or callable returning framerate for decoded frames
+        subscriber_timeout: Optional timeout for subscriber connection
     """
     # Ensure default values are applied if None
     if target_width is None:
@@ -135,7 +136,7 @@ async def _decode_in(
     write_fd, 
     target_width: int, 
     target_height: int,
-    max_framerate: int = 24
+    max_framerate: Union[int, Callable[[], int], None] = DEFAULT_MAX_FRAMERATE,
 ):
     """Decode video stream from pipe."""
     # Ensure default values are applied if None

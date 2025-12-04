@@ -135,27 +135,6 @@ class TestStreamParamsUpdateRequest:
         # Test None
         assert StreamParamsUpdateRequest.validate_params(None) is None
     
-    def test_max_framerate_rejected_in_updates(self):
-        """Test that max_framerate cannot be updated during runtime."""
-        # Test that max_framerate is rejected in runtime updates
-        invalid_params = {"max_framerate": 60}
-        with pytest.raises(ValueError, match="max_framerate cannot be updated during runtime"):
-            StreamParamsUpdateRequest.model_validate(invalid_params)
-        
-        # Test that other parameters still work
-        valid_params = {"intensity": 0.8, "effect": "enhanced"}
-        request = StreamParamsUpdateRequest.model_validate(valid_params)
-        assert request.model_dump()["intensity"] == 0.8
-        
-        # Test mix of valid and invalid parameters
-        mixed_params = {"intensity": 0.9, "max_framerate": 45}
-        with pytest.raises(ValueError, match="max_framerate cannot be updated during runtime"):
-            StreamParamsUpdateRequest.model_validate(mixed_params)
-        
-        # Test max_framerate rejected with string value in updates
-        string_update = {"max_framerate": "30"}
-        with pytest.raises(ValueError, match="max_framerate cannot be updated during runtime"):
-            StreamParamsUpdateRequest.model_validate(string_update)
     
     def test_framerate_conversion_method(self):
         """Test the _convert_framerate method directly."""
