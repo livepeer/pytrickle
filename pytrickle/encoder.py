@@ -235,6 +235,8 @@ def encode_av(
                 
                 # Ensure array is contiguous for PIL
                 if not image_np.flags['C_CONTIGUOUS']:
+                    logger.debug("Frame tensor is not C-contiguous, copying to contiguous array. "
+                                "Consider calling .contiguous() on tensor before output for better performance.")
                     image_np = np.ascontiguousarray(image_np)
                 
                 # Handle grayscale images - convert to RGB
@@ -249,7 +251,7 @@ def encode_av(
                 
                 # Resize if frame dimensions don't match initialized stream
                 if image.width != stream_width or image.height != stream_height:
-                    logger.debug(f"Resizing frame from {image.width}x{image.height} to {stream_width}x{stream_height}")
+                    logger.warning(f"Resizing frame from {image.width}x{image.height} to {stream_width}x{stream_height}")
                     image = image.resize((stream_width, stream_height), Image.LANCZOS)
                 
                 frame = av.video.frame.VideoFrame.from_image(image)
