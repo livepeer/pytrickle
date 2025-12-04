@@ -65,6 +65,8 @@ class StreamParamsUpdateRequest(BaseModel):
         v = cls._convert_dimensions(v)
         # Convert and validate framerate if present  
         v = cls._convert_framerate(v)
+        # Convert and validate detect_out_resolution if present
+        v = cls._convert_detect_out_resolution(v)
         return v
     
     @classmethod
@@ -104,6 +106,37 @@ class StreamParamsUpdateRequest(BaseModel):
             if value > 60:
                 raise ValueError("max_framerate cannot exceed 60 FPS")
             result["max_framerate"] = value
+        
+        return result
+    
+    @classmethod
+    def _convert_detect_out_resolution(cls, params_dict: dict) -> dict:
+        """Convert and validate detect_out_resolution parameter.
+        
+        When True (default), the encoder will detect output resolution from the first
+        processed frame's tensor shape. This enables Super Resolution workflows where
+        the frame processor outputs upscaled frames without needing to specify output
+        dimensions explicitly.
+        
+        When False, the encoder uses the input dimensions (width/height) for output.
+        """
+        result = params_dict.copy()
+        if "detect_out_resolution" in result:
+            value = result["detect_out_resolution"]
+            # Accept boolean or boolean-like string values
+            if isinstance(value, bool):
+                result["detect_out_resolution"] = value
+            elif isinstance(value, str):
+                if value.lower() in ("true", "1", "yes"):
+                    result["detect_out_resolution"] = True
+                elif value.lower() in ("false", "0", "no"):
+                    result["detect_out_resolution"] = False
+                else:
+                    raise ValueError("detect_out_resolution must be a boolean value")
+            elif isinstance(value, int):
+                result["detect_out_resolution"] = bool(value)
+            else:
+                raise ValueError("detect_out_resolution must be a boolean value")
         
         return result
     

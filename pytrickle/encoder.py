@@ -11,6 +11,7 @@ import datetime
 import logging
 import os
 import math
+import numpy as np
 from typing import Optional, Callable
 from fractions import Fraction
 from collections import deque
@@ -36,7 +37,8 @@ def encode_av(
     output_callback: Callable,
     get_metadata: Callable,
     video_codec: Optional[str] = 'libx264',
-    audio_codec: Optional[str] = 'libfdk_aac'
+    audio_codec: Optional[str] = 'libfdk_aac',
+    detect_out_resolution: bool = True
 ):
     """
     Encode video/audio frames to output stream.
@@ -47,6 +49,9 @@ def encode_av(
         get_metadata: Function to get stream metadata
         video_codec: Video codec to use for encoding
         audio_codec: Audio codec to use for encoding
+        detect_out_resolution: If True, detect output resolution from first frame's tensor shape.
+                                        If False, use target_width/target_height from decoder metadata.
+                                        Default is True to support Super Resolution workflows.
     """
     logger.info("Starting encoder")
 
@@ -96,35 +101,54 @@ def encode_av(
     # Create corresponding output streams if input streams exist
     output_video_stream = None
     output_audio_stream = None
-
+    video_stream_initialized = False
+    audio_stream_initialized = False
+    
+    # Store config for lazy initialization when detect_out_resolution is enabled
+    video_stream_config = None
+    audio_stream_config = None
+    
     if video_meta and video_codec:
-        # Add a new stream to the output using the desired video codec
-        target_width = video_meta.get('target_width', DEFAULT_WIDTH)
-        target_height = video_meta.get('target_height', DEFAULT_HEIGHT)
-        logger.info(f"Encoding video to {target_width}x{target_height} using codec {video_codec}")
-        video_opts = {'video_size': f'{target_width}x{target_height}', 'bf': '0'}
-        if video_codec == 'libx264':
-            video_opts = video_opts | {'preset': 'superfast', 'tune': 'zerolatency', 'forced-idr': '1'}
-        output_video_stream = output_container.add_stream(video_codec, options=video_opts)
-        output_video_stream.time_base = OUT_TIME_BASE
+        # Get fallback dimensions from decoder metadata
+        fallback_width = video_meta.get('target_width', DEFAULT_WIDTH)
+        fallback_height = video_meta.get('target_height', DEFAULT_HEIGHT)
+        video_stream_config = {
+            'codec': video_codec,
+            'fallback_width': fallback_width,
+            'fallback_height': fallback_height,
+        }
         
-        # Ensure the codec context also has the time base
-        if output_video_stream.codec_context.time_base is None:
-            output_video_stream.codec_context.time_base = OUT_TIME_BASE
+        if not detect_out_resolution:
+            # Initialize immediately with decoder dimensions
+            logger.info(f"Encoding video to {fallback_width}x{fallback_height} using codec {video_codec}")
+            video_opts = {'video_size': f'{fallback_width}x{fallback_height}', 'bf': '0'}
+            if video_codec == 'libx264':
+                video_opts = video_opts | {'preset': 'superfast', 'tune': 'zerolatency', 'forced-idr': '1'}
+            output_video_stream = output_container.add_stream(video_codec, options=video_opts)
+            output_video_stream.time_base = OUT_TIME_BASE
+            if output_video_stream.codec_context.time_base is None:
+                output_video_stream.codec_context.time_base = OUT_TIME_BASE
+            video_stream_initialized = True
+        else:
+            logger.debug("Video stream initialization deferred for auto-detect")
 
     if audio_meta and audio_codec:
-        # Add a new stream to the output using the desired audio codec
-        output_audio_stream = output_container.add_stream(audio_codec)
-        output_audio_stream.time_base = OUT_TIME_BASE
-        output_audio_stream.sample_rate = 48000
-        output_audio_stream.layout = 'mono'
+        audio_stream_config = {
+            'codec': audio_codec,
+        }
         
-        # Ensure the codec context also has the time base
-        if output_audio_stream.codec_context.time_base is None:
-            output_audio_stream.codec_context.time_base = OUT_TIME_BASE
-            
-        # Optional: set other encoding parameters, e.g.:
-        # output_audio_stream.bit_rate = 128_000
+        # Only initialize audio immediately if video is also initialized (or no video)
+        # This prevents container state corruption from adding streams after muxing starts
+        if video_stream_initialized or not video_stream_config:
+            output_audio_stream = output_container.add_stream(audio_codec)
+            output_audio_stream.time_base = OUT_TIME_BASE
+            output_audio_stream.sample_rate = 48000
+            output_audio_stream.layout = 'mono'
+            if output_audio_stream.codec_context.time_base is None:
+                output_audio_stream.codec_context.time_base = OUT_TIME_BASE
+            audio_stream_initialized = True
+        else:
+            logger.debug("Audio stream initialization deferred, waiting for video")
 
     # Now read packets from the input, decode, then re-encode, and mux.
     start = datetime.datetime.now()
@@ -141,18 +165,99 @@ def encode_av(
             break
 
         if isinstance(avframe, VideoOutput):
-            if not output_video_stream:
-                # received video but no video output, so drop
+            tensor = avframe.tensor.squeeze(0)
+            
+            # Validate tensor shape: expect [H, W, C]
+            if tensor.dim() != 3:
+                logger.debug(f"Skipping frame with unexpected tensor dimensions: {tensor.dim()}D")
                 continue
+            
+            tensor_height, tensor_width, tensor_channels = tensor.shape
+            
+            if tensor_channels not in (1, 3, 4):
+                logger.debug(f"Skipping frame with unexpected channel count: {tensor_channels}")
+                continue
+            
+            # Lazy initialization of video stream on first frame
+            if not video_stream_initialized and video_stream_config:
+                fallback_width = video_stream_config['fallback_width']
+                fallback_height = video_stream_config['fallback_height']
+                codec = video_stream_config['codec']
+                
+                # Use tensor dimensions for output
+                output_width, output_height = tensor_width, tensor_height
+                
+                if output_width != fallback_width or output_height != fallback_height:
+                    logger.info(f"Auto-detected output resolution {output_width}x{output_height} (input: {fallback_width}x{fallback_height})")
+                
+                logger.info(f"Encoding video to {output_width}x{output_height} using codec {codec}")
+                
+                try:
+                    video_opts = {'video_size': f'{output_width}x{output_height}', 'bf': '0'}
+                    if codec == 'libx264':
+                        video_opts = video_opts | {'preset': 'superfast', 'tune': 'zerolatency', 'forced-idr': '1'}
+                    output_video_stream = output_container.add_stream(codec, options=video_opts)
+                    output_video_stream.time_base = OUT_TIME_BASE
+                    if output_video_stream.codec_context.time_base is None:
+                        output_video_stream.codec_context.time_base = OUT_TIME_BASE
+                    video_stream_initialized = True
+                    
+                    # Initialize audio stream if it was deferred (must be done together)
+                    if audio_stream_config and not audio_stream_initialized:
+                        audio_codec_name = audio_stream_config['codec']
+                        output_audio_stream = output_container.add_stream(audio_codec_name)
+                        output_audio_stream.time_base = OUT_TIME_BASE
+                        output_audio_stream.sample_rate = 48000
+                        output_audio_stream.layout = 'mono'
+                        if output_audio_stream.codec_context.time_base is None:
+                            output_audio_stream.codec_context.time_base = OUT_TIME_BASE
+                        audio_stream_initialized = True
+                        
+                except Exception as e:
+                    logger.error(f"Failed to initialize video stream: {e}")
+                    video_stream_config = None
+                    continue
+            
+            if not output_video_stream:
+                # received video but no video output configured, so drop
+                continue
+            
+            # Store the initialized stream dimensions for validation
+            stream_width = output_video_stream.codec_context.width
+            stream_height = output_video_stream.codec_context.height
+            
             avframe.log_timestamps["frame_end"] = time.time()
             _log_frame_timestamps("Video", avframe.frame)
 
-            tensor = avframe.tensor.squeeze(0)
-            image_np = (tensor * 255).byte().cpu().numpy()
-            # Explicitly specify RGB mode - decoder produces RGB, encoder expects RGB
-            image = Image.fromarray(image_np, mode='RGB')
-
-            frame = av.video.frame.VideoFrame.from_image(image)
+            try:
+                # Convert tensor to numpy array
+                image_np = (tensor * 255).byte().cpu().numpy()
+                
+                # Ensure array is contiguous for PIL
+                if not image_np.flags['C_CONTIGUOUS']:
+                    logger.debug("Frame tensor is not C-contiguous, copying to contiguous array. "
+                                "Consider calling .contiguous() on tensor before output for better performance.")
+                    image_np = np.ascontiguousarray(image_np)
+                
+                # Handle grayscale images - convert to RGB
+                if tensor_channels == 1:
+                    image_np = np.repeat(image_np, 3, axis=2)
+                elif tensor_channels == 4:
+                    # RGBA -> RGB (drop alpha)
+                    image_np = image_np[:, :, :3]
+                
+                # Explicitly specify RGB mode - decoder produces RGB, encoder expects RGB
+                image = Image.fromarray(image_np, mode='RGB')
+                
+                # Resize if frame dimensions don't match initialized stream
+                if image.width != stream_width or image.height != stream_height:
+                    logger.warning(f"Resizing frame from {image.width}x{image.height} to {stream_width}x{stream_height}")
+                    image = image.resize((stream_width, stream_height), Image.LANCZOS)
+                
+                frame = av.video.frame.VideoFrame.from_image(image)
+            except Exception as e:
+                logger.error(f"Error converting tensor to video frame: {e}, tensor shape: {tensor.shape}, dtype: {tensor.dtype}")
+                continue
             
             # Ensure the codec context has a time base
             if output_video_stream.codec_context.time_base is None:
@@ -184,16 +289,31 @@ def encode_av(
                 last_kf = current
                 if first_video_ts is None:
                     first_video_ts = current
-            encoded_packets = output_video_stream.encode(frame)
-            for ep in encoded_packets:
-                output_container.mux(ep)
-            logger.debug(f"encoded video packets={len(encoded_packets)} pts={frame.pts} time_base={frame.time_base} ts={float(current)}")
+            
+            try:
+                encoded_packets = output_video_stream.encode(frame)
+                for ep in encoded_packets:
+                    output_container.mux(ep)
+                logger.debug(f"encoded video packets={len(encoded_packets)} pts={frame.pts} time_base={frame.time_base} ts={float(current)}")
+            except Exception as e:
+                logger.error(f"Error encoding video frame: {e}, frame size: {frame.width}x{frame.height}")
+                continue
             continue
 
         if isinstance(avframe, AudioOutput):
+            # If audio stream not yet initialized but we have config, buffer the frames
             if not output_audio_stream:
-                # received audio but no audio output, so drop
+                if audio_stream_config:
+                    # Buffer audio frames until video stream initializes the audio stream
+                    if len(avframe.frames) > 0:
+                        for af in avframe.frames:
+                            audio_buffer.append(af)
+                        while len(audio_buffer) > AUDIO_BUFFER_LEN:
+                            audio_buffer.popleft()
+                            dropped_audio += 1
+                # No audio stream available yet or no audio config, skip processing
                 continue
+                
             if output_video_stream and first_video_ts is None:
                 # Buffer up audio until we receive video, up to a point
                 # because video could be extremely delayed and we don't
