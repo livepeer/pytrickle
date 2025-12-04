@@ -190,6 +190,7 @@ async def run_publish(
     get_metadata: Callable,
     monitoring_callback: Optional[Callable] = None,
     publisher_timeout: Optional[float] = None,
+    detect_out_resolution: bool = True,
 ):
     """
     Run publishing loop to encode and publish video streams.
@@ -199,6 +200,10 @@ async def run_publish(
         frame_generator: Generator function that yields output frames
         get_metadata: Function to get stream metadata
         monitoring_callback: Optional callback for monitoring events
+        publisher_timeout: Optional timeout for publisher connection
+        detect_out_resolution: If True, detect output resolution from first frame's tensor shape.
+                                        If False, use target_width/target_height from decoder metadata.
+                                        Default is True to support Super Resolution workflows.
     """
     first_segment = True
     publisher = None
@@ -266,7 +271,7 @@ async def run_publish(
         encode_thread = threading.Thread(
             target=_encode_in, 
             args=(live_pipes, live_tasks_lock, frame_generator, sync_callback, get_metadata),
-            kwargs={"audio_codec": "libopus"}
+            kwargs={"audio_codec": "libopus", "detect_out_resolution": detect_out_resolution}
         )
         encode_thread.start()
         logger.debug("run_publish: encoder thread started")
