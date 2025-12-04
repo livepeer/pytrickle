@@ -287,6 +287,8 @@ class OverlayController:
         This happens when manual loading is active. In this case, the client
         should generate an overlay frame immediately without calling the processor.
         """
+        if self.overlay_config and self.overlay_config.is_passthrough_mode():
+            return False
         return self._is_manual_loading
 
     def _update_loading_state(self, received_frame_from_processor: bool) -> None:
