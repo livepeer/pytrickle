@@ -251,6 +251,7 @@ class TestStreamingEndpoints:
         mock_client = create_mock_client()
         mock_protocol = MagicMock()
         mock_protocol.emit_monitoring_event = AsyncMock()
+        mock_protocol.update_params = AsyncMock()
         mock_client.protocol = mock_protocol
         server.current_client = mock_client
         
