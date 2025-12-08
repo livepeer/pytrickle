@@ -23,7 +23,7 @@ import cv2
 import numpy as np
 import torch
 
-from pytrickle import StreamProcessor, VideoFrame
+from pytrickle import StreamProcessor, VideoFrame, runtime_args
 from pytrickle.decorators import (
     model_loader,
     on_stream_start,
@@ -263,10 +263,12 @@ async def update_params(params: dict) -> None:
 async def main() -> None:
     """Main entry point - creates and runs the stream processor."""
     handlers = GreenProcessorHandlers()
+    port = runtime_args.resolve_port()
+
     processor = StreamProcessor.from_handlers(
         handlers,
         name="green-processor",
-        port=8000,
+        port=port,
         frame_skip_config=FrameSkipConfig(),  # Optional frame skipping
     )
     
@@ -274,7 +276,7 @@ async def main() -> None:
     handlers.processor = processor
     
     logger.info("OpenCV will apply: horizontal flip + green hue")
-    logger.info("Update params: POST http://localhost:8000/control")
+    logger.info("Update params: POST http://localhost:%d/control", port)
     
     await processor.run_forever()
 
