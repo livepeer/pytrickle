@@ -156,7 +156,7 @@ class TrickleProtocol(TrickleComponent):
                     self.emit_monitoring_event, 
                     self.width or DEFAULT_WIDTH, 
                     self.height or DEFAULT_HEIGHT,
-                    self.max_framerate or DEFAULT_MAX_FRAMERATE,
+                    lambda: self.max_framerate or DEFAULT_MAX_FRAMERATE,
                     self.subscriber_timeout,
                 )
             )
@@ -208,6 +208,17 @@ class TrickleProtocol(TrickleComponent):
         self._monitor_task = asyncio.create_task(self._monitor_subscription_end())
         
         self._update_state(ComponentState.RUNNING)
+
+    async def update_params(self, params: dict):
+        """Update protocol parameters during runtime."""
+        if "max_framerate" in params:
+            try:
+                fps = int(params["max_framerate"])
+                if fps > 0:
+                    self.max_framerate = fps
+                    logger.info(f"Updated protocol max_framerate to {fps}")
+            except (ValueError, TypeError):
+                logger.warning(f"Invalid max_framerate value: {params['max_framerate']}")
 
     async def stop(self):
         """Stop the trickle protocol."""

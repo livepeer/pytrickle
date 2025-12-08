@@ -418,6 +418,9 @@ class TrickleClient:
 
     async def _handle_control_message(self, control_data: dict):
         """Handle a control message."""
+        # Update protocol parameters if present
+        await self.protocol.update_params(control_data)
+        
         if self.control_handler:
             try:
                 if asyncio.iscoroutinefunction(self.control_handler):
