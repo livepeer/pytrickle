@@ -222,6 +222,10 @@ class StreamServer:
                 logger.debug(f"Manual loading set to: {show_loading_bool} (from {show_loading})")
             
             async with self._param_update_lock:
+                # Update protocol if needed
+                if self.current_client and self.current_client.protocol:
+                    await self.current_client.protocol.update_params(params_payload)
+
                 await self.frame_processor.update_params(params_payload)
                 
                 logger.info(f"Parameters updated: {params}")
