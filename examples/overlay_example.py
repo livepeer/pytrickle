@@ -28,7 +28,7 @@ from typing import Optional, Dict, Any
 
 from pytrickle.frames import AudioFrame, VideoFrame
 from pytrickle.frame_skipper import FrameSkipConfig
-from pytrickle.frame_overlay import OverlayConfig, OverlayController, OverlayMode
+from pytrickle.frame_overlay import OverlayConfig, OverlayMode
 from pytrickle.stream_processor import StreamProcessor
 
 logging.basicConfig(level=logging.INFO)
@@ -134,25 +134,17 @@ class ModelLoadingOverlayProcessor(StreamProcessor):
             self._activate_manual_overlay(processing_delay)
 
     def _activate_manual_overlay(self, duration: float):
-        controller = self._current_loading_controller()
-        if controller:
-            controller.set_manual_loading(True)
+        if self.set_loading_overlay(True):
             asyncio.create_task(self._disable_overlay_after(duration))
 
     async def _disable_overlay_after(self, duration: float):
         """Disable manual overlay after the delay completes."""
         try:
             await asyncio.sleep(duration)
-            controller = self._current_loading_controller()
-            if controller:
-                controller.set_manual_loading(False)
+            self.set_loading_overlay(False)
             logger.info("Processing delay complete - overlay disabled")
         except asyncio.CancelledError:
             logger.debug("Processing delay logging cancelled")
-
-    def _current_loading_controller(self) -> Optional["OverlayController"]:
-        client = getattr(self.server, "current_client", None)
-        return getattr(client, "loading_controller", None)
 
 
 # Create and run StreamProcessor
