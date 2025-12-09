@@ -43,9 +43,9 @@ class ModelLoadingOverlayProcessor(StreamProcessor):
         model_load_delay: float = 10.0,
         startup_block_seconds: float = 15.0,
     ):
-        self.model_load_delay = model_load_delay
         self.model_loaded = False
-        self.pending_startup_block = startup_block_seconds
+        self.model_load_delay: float = model_load_delay
+        self.startup_block_seconds: float = startup_block_seconds
         self._model_load_start_time: Optional[float] = None
 
         super().__init__(
@@ -87,11 +87,12 @@ class ModelLoadingOverlayProcessor(StreamProcessor):
         if not self.model_loaded:
             logger.warning("⚠️  Model not loaded yet - frames will pass through until ready")
 
-        if self.pending_startup_block > 0:
-            block = self.pending_startup_block
-            self.pending_startup_block = 0.0
-            self._activate_manual_overlay(block)
-            logger.info("Startup block scheduled for %.1fs", block)
+        if self.startup_block_seconds > 0:
+            if self.set_loading_overlay(True):
+                asyncio.create_task(self._disable_overlay_after(self.startup_block_seconds))
+                logger.info("Startup block scheduled for %.1fs", self.startup_block_seconds)
+            else:
+                logger.warning("Could not enable loading overlay at stream start (client not ready)")
 
     async def on_stream_stop(self):
         """Called when stream stops."""
@@ -122,20 +123,19 @@ class ModelLoadingOverlayProcessor(StreamProcessor):
         logger.info(f"Custom parameters updated: {params}")
 
         if "simulate_startup_block" in params:
-            self.pending_startup_block = max(0.0, float(params["simulate_startup_block"]))
-            if self.pending_startup_block > 0:
-                logger.info("Next stream will withhold frames for %.1fs", self.pending_startup_block)
+            self.startup_block_seconds = max(0.0, float(params["simulate_startup_block"]))
+            if self.startup_block_seconds > 0:
+                logger.info("Next stream will withhold frames for %.1fs", self.startup_block_seconds)
             else:
                 logger.info("Startup block cleared for next stream")
 
         processing_delay = float(params.get("processing_delay", 0.0))
         if processing_delay > 0:
             logger.info("Simulating processing delay for %.1fs", processing_delay)
-            self._activate_manual_overlay(processing_delay)
-
-    def _activate_manual_overlay(self, duration: float):
-        if self.set_loading_overlay(True):
-            asyncio.create_task(self._disable_overlay_after(duration))
+            if self.set_loading_overlay(True):
+                asyncio.create_task(self._disable_overlay_after(processing_delay))
+            else:
+                logger.warning("Could not enable loading overlay for processing delay (client not ready)")
 
     async def _disable_overlay_after(self, duration: float):
         """Disable manual overlay after the delay completes."""
