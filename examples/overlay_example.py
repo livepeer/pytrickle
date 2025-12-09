@@ -5,12 +5,12 @@ Model Loading and Overlay Example
 Demonstrates:
 1. Non-blocking model loading with configurable delay
 2. Server health state transitions (LOADING -> IDLE)
-3. Automatic loading overlay during processing delays
+3. Manual loading overlay activation during processing delays
 4. Real-time parameter updates
 
 The server starts immediately and is available for /health checks while
-the model loads in the background. The loading overlay automatically appears
-when frames are withheld during processing delays.
+the model loads in the background. The loading overlay is manually activated
+during processing delays, pausing frame processing to save resources.
 
 To test:
 1. Run: python examples/overlay_example.py
@@ -28,124 +28,132 @@ from typing import Optional, Dict, Any
 
 from pytrickle.frames import AudioFrame, VideoFrame
 from pytrickle.frame_skipper import FrameSkipConfig
-from pytrickle.frame_overlay import OverlayConfig, OverlayMode
-from pytrickle.stream_processor import StreamProcessor, VideoProcessingResult
+from pytrickle.frame_overlay import OverlayConfig, OverlayController, OverlayMode
+from pytrickle.stream_processor import StreamProcessor
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Model loading configuration
-MODEL_LOAD_DELAY_SECONDS = 3.0  # Configurable model load delay
-model_loaded = False
-model_load_start_time = None
+class ModelLoadingOverlayProcessor(StreamProcessor):
+    """Encapsulate the overlay example in a reusable StreamProcessor subclass."""
 
-# Reference to the running StreamProcessor (set in __main__)
-processor: Optional[StreamProcessor] = None
+    def __init__(
+        self,
+        *,
+        model_load_delay: float = 10.0,
+        startup_block_seconds: float = 15.0,
+    ):
+        self.model_load_delay = model_load_delay
+        self.model_loaded = False
+        self.pending_startup_block = startup_block_seconds
+        self._model_load_start_time: Optional[float] = None
 
-# Delay coordination
-STARTUP_BLOCK_SECONDS = 15.0
-blocked_until: float = 0.0
-pending_startup_block: float = STARTUP_BLOCK_SECONDS
+        super().__init__(
+            video_processor=self.process_video,
+            audio_processor=self.process_audio,
+            model_loader=self.load_model,
+            param_updater=self.update_params,
+            on_stream_start=self.on_stream_start,
+            on_stream_stop=self.on_stream_stop,
+            name="model-loading-demo",
+            port=8000,
+            frame_skip_config=FrameSkipConfig(),
+            overlay_config=OverlayConfig(
+                mode=OverlayMode.PROGRESSBAR,
+                message="Loading...",
+                enabled=True,
+                auto_timeout_seconds=1.0,
+            ),
+            route_prefix="/",
+        )
 
+    async def load_model(self, **kwargs):
+        """Simulate non-blocking model loading."""
+        self._model_load_start_time = time.time()
+        logger.info("🔄 Model loading started...")
 
-async def load_model(**kwargs):
-    """
-    Simulate a model loading process with configurable delay.
-    
-    This demonstrates non-blocking model loading. The server is available
-    for health checks immediately, while model loading happens in background.
-    Health endpoint transitions from LOADING to IDLE once complete.
-    
-    In a real application, you would load your model here, e.g.:
-    - model = torch.load('my_model.pth')
-    - tokenizer = AutoTokenizer.from_pretrained('model_name')
-    """
-    global model_loaded, model_load_start_time
-    
-    model_load_start_time = time.time()
-    logger.info("🔄 Model loading started...")
-    
-    # Get configurable delay from kwargs or use default
-    load_delay = kwargs.get('load_delay', MODEL_LOAD_DELAY_SECONDS)
-    
-    if load_delay > 0:
-        logger.info(f"Simulating model load for {load_delay:.1f}s...")
-        await asyncio.sleep(load_delay)
-    
-    # In a real application, load your model here
-    # e.g., self.model = torch.load('my_model.pth')
-    
-    model_loaded = True
-    load_duration = time.time() - model_load_start_time
-    logger.info(f"✅ Model loading complete in {load_duration:.2f}s")
+        load_delay = kwargs.get("load_delay", self.model_load_delay)
+        if load_delay > 0:
+            logger.info(f"Simulating model load for {load_delay:.1f}s...")
+            await asyncio.sleep(load_delay)
 
-async def on_stream_start(params: Dict[str, Any]):
-    """Called when a stream starts."""
-    global pending_startup_block, blocked_until
+        self.model_loaded = True
+        load_duration = time.time() - (self._model_load_start_time or time.time())
+        logger.info(f"✅ Model loading complete in {load_duration:.2f}s")
 
-    logger.info("🎬 Stream started")
-    if not model_loaded:
-        logger.warning("⚠️  Model not loaded yet - frames will pass through until ready")
+    async def on_stream_start(self, params: Dict[str, Any]):
+        """Called when a stream starts."""
+        logger.info("🎬 Stream started")
+        if not self.model_loaded:
+            logger.warning("⚠️  Model not loaded yet - frames will pass through until ready")
 
-    if pending_startup_block > 0:
-        block = pending_startup_block
-        pending_startup_block = 0.0
-        blocked_until = max(blocked_until, time.time() + block)
-        logger.info("Startup block scheduled for %.1fs", block)
+        if self.pending_startup_block > 0:
+            block = self.pending_startup_block
+            self.pending_startup_block = 0.0
+            self._activate_manual_overlay(block)
+            logger.info("Startup block scheduled for %.1fs", block)
 
-async def on_stream_stop():
-    """Called when stream stops."""
-    logger.info("🛑 Stream stopped")
+    async def on_stream_stop(self):
+        """Called when stream stops."""
+        logger.info("🛑 Stream stopped")
 
-async def process_video(frame: VideoFrame):
-    """Return WITHHELD while blocked to trigger the automatic overlay."""
-    global blocked_until
+    async def process_video(self, frame: VideoFrame):
+        """
+        Process video frames.
 
-    if time.time() < blocked_until:
-        return VideoProcessingResult.WITHHELD
+        When manual loading overlay is active (`set_manual_loading(True)`),
+        the client skips calling this method, so the processor can simply echo
+        the frame.
+        """
+        return frame
 
-    return frame
+    async def process_audio(self, frame: AudioFrame) -> list[AudioFrame]:
+        """Pass-through audio processing."""
+        return [frame]
 
-async def process_audio(frame: AudioFrame) -> list[AudioFrame]:
-    """Pass-through audio processing."""
-    return [frame]
+    async def update_params(self, params: dict):
+        """
+        Handle parameter updates.
 
-async def update_params(params: dict):
-    """
-    Handle parameter updates.
+        Parameters:
+        - processing_delay: seconds to hold video output for the active stream
+        - simulate_startup_block: seconds to hold output for the next stream start
+        """
+        logger.info(f"Custom parameters updated: {params}")
 
-    Parameters:
-    - processing_delay: seconds to hold video output for the active stream
-    - simulate_startup_block: seconds to hold output for the next stream start
-    """
-    global pending_startup_block, blocked_until
+        if "simulate_startup_block" in params:
+            self.pending_startup_block = max(0.0, float(params["simulate_startup_block"]))
+            if self.pending_startup_block > 0:
+                logger.info("Next stream will withhold frames for %.1fs", self.pending_startup_block)
+            else:
+                logger.info("Startup block cleared for next stream")
 
-    logger.info(f"Custom parameters updated: {params}")
+        processing_delay = float(params.get("processing_delay", 0.0))
+        if processing_delay > 0:
+            logger.info("Simulating processing delay for %.1fs", processing_delay)
+            self._activate_manual_overlay(processing_delay)
 
-    if "simulate_startup_block" in params:
-        pending_startup_block = max(0.0, float(params["simulate_startup_block"]))
-        if pending_startup_block > 0:
-            logger.info("Next stream will withhold frames for %.1fs", pending_startup_block)
-        else:
-            logger.info("Startup block cleared for next stream")
+    def _activate_manual_overlay(self, duration: float):
+        controller = self._current_loading_controller()
+        if controller:
+            controller.set_manual_loading(True)
+            asyncio.create_task(self._disable_overlay_after(duration))
 
-    processing_delay = float(params.get("processing_delay", 0.0))
-    if processing_delay > 0:
-        blocked_until = max(blocked_until, time.time() + processing_delay)
-        logger.info("Simulating processing delay for %.1fs", processing_delay)
-        asyncio.create_task(_log_processing_delay_completion(processing_delay))
+    async def _disable_overlay_after(self, duration: float):
+        """Disable manual overlay after the delay completes."""
+        try:
+            await asyncio.sleep(duration)
+            controller = self._current_loading_controller()
+            if controller:
+                controller.set_manual_loading(False)
+            logger.info("Processing delay complete - overlay disabled")
+        except asyncio.CancelledError:
+            logger.debug("Processing delay logging cancelled")
 
-# Background helpers
-async def _log_processing_delay_completion(duration: float):
-    """Log when the simulated processing delay completes."""
-    try:
-        await asyncio.sleep(duration)
-        logger.info("Processing delay complete")
-    except asyncio.CancelledError:
-        logger.debug("Processing delay logging cancelled")
+    def _current_loading_controller(self) -> Optional["OverlayController"]:
+        client = getattr(self.server, "current_client", None)
+        return getattr(client, "loading_controller", None)
 
-
-    # Additional custom parameters can be handled here.
 
 # Create and run StreamProcessor
 if __name__ == "__main__":
@@ -153,8 +161,9 @@ if __name__ == "__main__":
     logger.info("Model Loading & Loading Overlay Example")
     logger.info("=" * 60)
     logger.info("")
+    processor = ModelLoadingOverlayProcessor()
     logger.info("Server: http://localhost:8000")
-    logger.info(f"Model loading delay: {MODEL_LOAD_DELAY_SECONDS}s")
+    logger.info(f"Model loading delay: {processor.model_load_delay}s")
     logger.info("")
     logger.info("Test endpoints:")
     logger.info("  curl http://localhost:8000/health")
@@ -162,23 +171,4 @@ if __name__ == "__main__":
     logger.info('    -H "Content-Type: application/json" \\')
     logger.info('    -d \'{"processing_delay": 15}\'')
     logger.info("")
-    
-    processor = StreamProcessor(
-        video_processor=process_video,
-        audio_processor=process_audio,
-        model_loader=load_model,
-        param_updater=update_params,
-        on_stream_start=on_stream_start,
-        on_stream_stop=on_stream_stop,
-        name="model-loading-demo",
-        port=8000,
-        frame_skip_config=FrameSkipConfig(),
-        overlay_config=OverlayConfig(
-            mode=OverlayMode.PROGRESSBAR,
-            message="Loading...",
-            enabled=True,
-            auto_timeout_seconds=1.0,
-        ),
-        route_prefix="/"
-    )
     processor.run()
