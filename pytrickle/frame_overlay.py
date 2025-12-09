@@ -280,6 +280,17 @@ class OverlayController:
         if not active:
             self._frame_counter = 0
 
+    def should_skip_processing(self) -> bool:
+        """
+        Return True if processing should be skipped entirely.
+        
+        This happens when manual loading is active. In this case, the client
+        should generate an overlay frame immediately without calling the processor.
+        """
+        if self.overlay_config and self.overlay_config.is_passthrough_mode():
+            return False
+        return self._is_manual_loading
+
     def _update_loading_state(self, received_frame_from_processor: bool) -> None:
         """Update loading state based on whether the processor returned a frame."""
         if not self.overlay_config or not self.overlay_config.enabled:
