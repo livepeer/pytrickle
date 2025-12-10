@@ -215,12 +215,8 @@ class StreamState:
             status = "LOADING"
             
         return {
-            "status": status,  # Primary health status
-            "state": status,   # Backward compatibility 
-            "error_message": None,  # Keep compatibility with previous health payload
+            "status": status,
             "pipeline_ready": self.pipeline_ready,
             "active_streams": self.active_streams,
             "startup_complete": self.startup_complete,
-            "pipeline_state": self._state.name,  # Internal state name for debugging
-            "additional_info": {},
         }
