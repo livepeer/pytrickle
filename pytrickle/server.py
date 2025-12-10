@@ -422,7 +422,7 @@ class StreamServer:
             
             logger.info(f"Starting stream: {params.subscribe_url} -> {params.publish_url}")
             
-            # Stop existing client if running
+            # Check if a stream is already active
             if self.current_client and self.current_client.running:
                 return web.json_response({
                         "status": "error",
