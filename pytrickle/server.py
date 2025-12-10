@@ -414,7 +414,7 @@ class StreamServer:
                     return web.json_response({
                         "status": "error",
                         "message": "Pipeline is still initializing. Please wait for IDLE status.",
-                        "current_state": "LOADING"
+                        "current_state": self.state.get_pipeline_state()
                     }, status=503)  # 503 Service Unavailable
             
             # Parse and validate request first
@@ -424,7 +424,11 @@ class StreamServer:
             
             # Stop existing client if running
             if self.current_client and self.current_client.running:
-                await self.current_client.stop()
+                return web.json_response({
+                        "status": "error",
+                        "message": "Pipeline is still in use",
+                        "current_state": self.state.get_pipeline_state()
+                    }, status=503)  # 503 Service Unavailable
             
             # Extract dimensions from params
             params_dict = params.params or {}
@@ -476,7 +480,8 @@ class StreamServer:
             return web.json_response({
                 "status": "success",
                 "message": "Stream started successfully",
-                "request_id": params.gateway_request_id
+                "request_id": params.gateway_request_id,
+                "current_state": self.state.get_pipeline_state()
             })
             
         except Exception as e:
@@ -505,7 +510,8 @@ class StreamServer:
 
             return web.json_response({
                 "status": "error",
-                "message": f"Error starting stream: {str(e)}"
+                "message": f"Error starting stream: {str(e)}",
+                "current_state": self.state.get_pipeline_state()
             }, status=400)
     
     async def _handle_stop_stream(self, request: web.Request) -> web.Response:
