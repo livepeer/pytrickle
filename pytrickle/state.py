@@ -70,9 +70,24 @@ class StreamState:
         """Compatibility: True when the pipeline is warmed/ready."""
         return self._state in (PipelineState.IDLE, PipelineState.OK)
 
+    def _update_state_from_activity(self) -> None:
+        """Update internal state based on current activity levels.
+        
+        Transitions between OK and IDLE states based on whether there are
+        active streams or clients. Only transitions if not in ERROR state.
+        """
+        if not self.error_event.is_set():
+            if self.active_streams > 0 or self.active_client:
+                if self._state != PipelineState.OK:
+                    self.set_state(PipelineState.OK)
+            elif self.startup_complete and self.pipeline_ready:
+                if self._state != PipelineState.IDLE:
+                    self.set_state(PipelineState.IDLE)
+
     def set_active_client(self, active: bool):
         """Track whether there's an active streaming client."""
         self.active_client = active
+        self._update_state_from_activity()
 
     def update_component_health(self, component_name: str, health_data: dict):
         """Update component health and log errors without persisting them.
@@ -154,6 +169,7 @@ class StreamState:
     def update_active_streams(self, count: int) -> None:
         """Update number of active streams for health/status reporting."""
         self.active_streams = max(0, int(count))
+        self._update_state_from_activity()
 
     def is_error(self) -> bool:
         return self.error_event.is_set()
