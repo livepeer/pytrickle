@@ -361,7 +361,10 @@ class TrickleProtocol(TrickleComponent):
                     self.fps_meter.record_egress_video_frame()
                 elif isinstance(frame, AudioOutput):
                     self.fps_meter.record_egress_audio_frame()
-                    
+                
+                if self.publish_task is None:
+                    continue
+                
                 await asyncio.to_thread(enqueue_frame, frame)
         except Exception as e:
             logger.error(f"Error in egress loop: {e}")
