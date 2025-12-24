@@ -4,6 +4,7 @@ import logging
 from enum import Enum
 from typing import Optional, Callable, Dict, Any, List, Union, Awaitable
 
+from . import runtime_args
 from .registry import HandlerRegistry
 from .frames import VideoFrame, AudioFrame
 from .frame_processor import FrameProcessor
@@ -116,7 +117,7 @@ class StreamProcessor:
             on_stream_stop: Optional async function called when stream stops
             send_data_interval: Interval for sending data
             name: Processor name
-            port: Server port
+            port: Server port (may be overridden by runtime CLI/env overrides)
             frame_skip_config: Optional frame skipping configuration (None = no frame skipping)
             overlay_config: Optional loading configuration (None = no loading configuration)
             validate_signature: Whether to validate the signature of the processors (default: True)
@@ -147,9 +148,11 @@ class StreamProcessor:
         self.param_updater = param_updater
         self.on_stream_start = on_stream_start
         self.on_stream_stop = on_stream_stop
+        resolved_port = runtime_args.resolve_port(port)
+
         self.send_data_interval = send_data_interval
         self.name = name
-        self.port = port
+        self.port = resolved_port
         self.frame_skip_config = frame_skip_config
         self.overlay_config = overlay_config
         self.server_kwargs = server_kwargs
@@ -169,7 +172,7 @@ class StreamProcessor:
         # Create and start server
         self.server = StreamServer(
             frame_processor=self._frame_processor,
-            port=port,
+            port=resolved_port,
             frame_skip_config=frame_skip_config,
             overlay_config=overlay_config,
             **server_kwargs
