@@ -362,9 +362,9 @@ class TrickleProtocol(TrickleComponent):
                 elif isinstance(frame, AudioOutput):
                     self.fps_meter.record_egress_audio_frame()
                 
-                # If no publish task is configured, skip enqueuing to avoid
-                # retaining frames unnecessarily in the publish queue.
-                if not self.publish_task:
+                # Skip enqueuing to publish_queue when no publisher is configured
+                # to prevent memory accumulation in the queue.
+                if self.publish_task is None:
                     logger.debug("Skipping enqueuing frame to publish queue (no publisher configured)")
                     continue
                     
