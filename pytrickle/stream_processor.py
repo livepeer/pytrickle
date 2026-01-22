@@ -198,6 +198,15 @@ class StreamProcessor:
             logger.error(f"Error sending data: {e}")
             return False
 
+    async def send_monitoring_event(self, event: dict, event_type: str = "custom_monitoring_event"):
+        """Send a monitoring event to the server."""
+        if self.server.current_client is None:
+            logger.warning("No active client connection, cannot send monitoring event")
+            return False
+        
+        # Check if client is in error state or stopping
+        await self.server.current_client.protocol.emit_monitoring_event(event, event_type)
+        
     async def send_input_frame(self, frame: Union[VideoFrame, AudioFrame]):
         """Send a video or audio frame to the input processing pipeline."""
         if self.server.current_client is None:
