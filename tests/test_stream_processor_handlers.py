@@ -1,4 +1,5 @@
 from typing import Any, Dict, Optional
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import torch
@@ -133,3 +134,59 @@ async def test_internal_processor_audio_wrong_type_passthrough():
     assert out.timestamp == frame.timestamp
     assert out.rate == frame.rate
     assert out.samples.shape == frame.samples.shape
+
+
+@pytest.mark.asyncio
+async def test_send_monitoring_event_with_no_client():
+    """Test send_monitoring_event returns False when no client is connected."""
+    inst = MyHandlers()
+    sp = StreamProcessor.from_handlers(inst)
+    
+    # Ensure current_client is None
+    sp.server.current_client = None
+    
+    result = await sp.send_monitoring_event({"test": "data"})
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_send_monitoring_event_with_client():
+    """Test send_monitoring_event calls protocol.emit_monitoring_event when client exists."""
+    inst = MyHandlers()
+    sp = StreamProcessor.from_handlers(inst)
+    
+    # Mock the current client and protocol
+    mock_client = MagicMock()
+    mock_protocol = MagicMock()
+    mock_protocol.emit_monitoring_event = AsyncMock()
+    mock_client.protocol = mock_protocol
+    sp.server.current_client = mock_client
+    
+    event = {"type": "test_event", "data": "test_data"}
+    event_type = "custom_monitoring_event"
+    
+    await sp.send_monitoring_event(event, event_type)
+    
+    # Verify emit_monitoring_event was called with correct arguments
+    mock_protocol.emit_monitoring_event.assert_called_once_with(event, event_type)
+
+
+@pytest.mark.asyncio
+async def test_send_monitoring_event_with_client_default_event_type():
+    """Test send_monitoring_event uses default event_type when not specified."""
+    inst = MyHandlers()
+    sp = StreamProcessor.from_handlers(inst)
+    
+    # Mock the current client and protocol
+    mock_client = MagicMock()
+    mock_protocol = MagicMock()
+    mock_protocol.emit_monitoring_event = AsyncMock()
+    mock_client.protocol = mock_protocol
+    sp.server.current_client = mock_client
+    
+    event = {"type": "test_event"}
+    
+    await sp.send_monitoring_event(event)
+    
+    # Verify emit_monitoring_event was called with default event_type
+    mock_protocol.emit_monitoring_event.assert_called_once_with(event, "custom_monitoring_event")
