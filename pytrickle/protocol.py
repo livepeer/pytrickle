@@ -439,6 +439,7 @@ class TrickleProtocol(TrickleComponent):
                 data = json.loads(params)
                 if data == keepalive_message:
                     # Ignore periodic keepalive messages
+                    logger.info("Received control keepalive message")
                     continue
 
                 logger.info("Received control message with params: %s", data)
