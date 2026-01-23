@@ -73,6 +73,15 @@ class StreamState:
     def set_active_client(self, active: bool):
         """Track whether there's an active streaming client."""
         self.active_client = active
+        
+        # Transition internal state based on activity (only if not in ERROR state)
+        if not self.error_event.is_set():
+            if self.active_streams > 0 or self.active_client:
+                if self._state != PipelineState.OK:
+                    self.set_state(PipelineState.OK)
+            elif self.startup_complete and self.pipeline_ready:
+                if self._state != PipelineState.IDLE:
+                    self.set_state(PipelineState.IDLE)
 
     def update_component_health(self, component_name: str, health_data: dict):
         """Update component health and log errors without persisting them.
@@ -154,6 +163,15 @@ class StreamState:
     def update_active_streams(self, count: int) -> None:
         """Update number of active streams for health/status reporting."""
         self.active_streams = max(0, int(count))
+        
+        # Transition internal state based on activity (only if not in ERROR state)
+        if not self.error_event.is_set():
+            if self.active_streams > 0 or self.active_client:
+                if self._state != PipelineState.OK:
+                    self.set_state(PipelineState.OK)
+            elif self.startup_complete and self.pipeline_ready:
+                if self._state != PipelineState.IDLE:
+                    self.set_state(PipelineState.IDLE)
 
     def is_error(self) -> bool:
         return self.error_event.is_set()
@@ -199,12 +217,8 @@ class StreamState:
             status = "LOADING"
             
         return {
-            "status": status,  # Primary health status
-            "state": status,   # Backward compatibility 
-            "error_message": None,  # Keep compatibility with previous health payload
+            "status": status,
             "pipeline_ready": self.pipeline_ready,
             "active_streams": self.active_streams,
             "startup_complete": self.startup_complete,
-            "pipeline_state": self._state.name,  # Internal state name for debugging
-            "additional_info": {},
         }
