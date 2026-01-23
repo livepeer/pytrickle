@@ -18,7 +18,7 @@ from typing import List, Dict, Any
 import numpy as np
 import torch
 
-from pytrickle import StreamProcessor, VideoFrame, AudioFrame
+from pytrickle import StreamProcessor, VideoFrame, AudioFrame, runtime_args
 from pytrickle.decorators import (
     audio_handler,
     model_loader,
@@ -173,14 +173,15 @@ class GrayscaleChipmunkHandlers:
 
 async def main() -> None:
     handlers = GrayscaleChipmunkHandlers()
+    port = runtime_args.resolve_port()
     processor = StreamProcessor.from_handlers(
         handlers,
         name="grayscale-chipmunk-demo",
-        port=8000,
+        port=port,
     )
     
     # Explicitly call load_model to initialize the handlers
-    logger.info("Initializing handlers...")
+    logger.info("Initializing handlers on port %d...", port)
     await processor._frame_processor.load_model()
     
     await processor.run_forever()
