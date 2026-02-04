@@ -158,6 +158,7 @@ class TrickleProtocol(TrickleComponent):
                     self.height or DEFAULT_HEIGHT,
                     lambda: self.max_framerate or DEFAULT_MAX_FRAMERATE,
                     self.subscriber_timeout,
+                    self._notify_error,
                 )
             )
         else:
@@ -176,6 +177,7 @@ class TrickleProtocol(TrickleComponent):
                     self.emit_monitoring_event,
                     self.publisher_timeout,
                     self.detect_out_resolution,
+                    self._notify_error,
                 )
             )
         
@@ -328,7 +330,7 @@ class TrickleProtocol(TrickleComponent):
             except queue.Empty:
                 return None
 
-        while not done.is_set() and not self.shutdown_event.is_set():
+        while not done.is_set() and not self.shutdown_event.is_set() and not self.error_event.is_set():
             frame = await asyncio.to_thread(dequeue_frame)
             if frame is None:
                 continue
