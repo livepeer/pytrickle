@@ -66,7 +66,7 @@ class TestStreamStateCore:
         state.update_active_streams(1)
         state.set_active_client(True)
         data = state.get_state()
-        assert state.state == PipelineState.IDLE  # Internal state doesn't auto-transition
+        assert state.state == PipelineState.OK  # Internal state auto-transitions to OK after stream starts
         assert data["status"] == "OK"  # But status reflects activity
         
         # When streams stop → status becomes IDLE

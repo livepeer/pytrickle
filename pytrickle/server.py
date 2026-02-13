@@ -832,7 +832,7 @@ class StreamServer:
     def get_health_summary(self) -> str:
         """Get a simple health status string."""
         state = self.state.get_pipeline_state()
-        return state.get('state', 'unknown')
+        return state.get('status', 'unknown')
 
     async def run_forever(self):
         """Run the server forever."""
