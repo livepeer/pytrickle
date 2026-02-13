@@ -11,6 +11,10 @@
             "program": "${workspaceFolder}/examples/process_video_example.py",
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}/examples",
+            "args": [
+                "--port",
+                "8005"
+            ],
             "env": {
                 "ORCH_URL": "https://localhost:9995",
                 "ORCH_SECRET": "orch-secret",
