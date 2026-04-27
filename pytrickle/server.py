@@ -112,7 +112,6 @@ class StreamServer:
         self.ssl = ssl
         self.ssl_certfile = ssl_certfile
         self.ssl_keyfile = ssl_keyfile
-        self._ssl_context: Optional[ssl.SSLContext] = None
         
         if isinstance(self.frame_processor, FrameProcessor):
             try:
