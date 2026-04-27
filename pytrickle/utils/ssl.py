@@ -42,6 +42,11 @@ def setup_ssl_context(
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.minimum_version = ssl.TLSVersion.TLSv1_2
 
+    if bool(certfile) != bool(keyfile):
+        raise ValueError(
+            "Both 'certfile' and 'keyfile' must be provided together, or neither."
+        )
+
     if certfile and keyfile:
         if not os.path.isfile(certfile):
             raise FileNotFoundError(f"SSL certificate file not found: {certfile}")
@@ -82,22 +87,23 @@ def generate_self_signed_cert() -> Tuple[str, str]:
         Tuple of ``(cert_file_path, key_file_path)``.
     """
     if shutil.which("openssl"):
-        return _generate_self_signed_cert_openssl()
+        try:
+            return _generate_self_signed_cert_openssl()
+        except RuntimeError:
+            logger.debug(
+                "openssl CLI failed; falling back to cryptography library",
+                exc_info=True,
+            )
 
     # Fallback to cryptography library if available
     try:
-        from cryptography import x509
-        from cryptography.x509.oid import NameOID
-        from cryptography.hazmat.primitives import hashes, serialization
-        from cryptography.hazmat.primitives.asymmetric import rsa
+        return _generate_self_signed_cert_cryptography()
     except ImportError:
         raise RuntimeError(
             "SSL is enabled but neither 'openssl' CLI nor 'cryptography' "
             "library is available. Install cryptography "
             "(pip install cryptography) or ensure openssl is on PATH."
         )
-
-    return _generate_self_signed_cert_cryptography()
 
 
 def _generate_self_signed_cert_openssl() -> Tuple[str, str]:

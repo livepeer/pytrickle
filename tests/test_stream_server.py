@@ -761,9 +761,43 @@ class TestSSLConfiguration:
         with pytest.raises(FileNotFoundError, match="key file not found"):
             server._setup_ssl()
 
+    def test_ssl_only_certfile_raises_value_error(self, tmp_path):
+        """Test that providing only certfile (without keyfile) raises ValueError."""
+        cert_file = tmp_path / "cert.pem"
+        cert_file.write_text("dummy")
+
+        processor = MockFrameProcessor()
+        server = StreamServer(
+            frame_processor=processor,
+            port=0,
+            ssl=True,
+            ssl_certfile=str(cert_file),
+        )
+
+        with pytest.raises(ValueError, match="Both 'certfile' and 'keyfile'"):
+            server._setup_ssl()
+
+    def test_ssl_only_keyfile_raises_value_error(self, tmp_path):
+        """Test that providing only keyfile (without certfile) raises ValueError."""
+        key_file = tmp_path / "key.pem"
+        key_file.write_text("dummy")
+
+        processor = MockFrameProcessor()
+        server = StreamServer(
+            frame_processor=processor,
+            port=0,
+            ssl=True,
+            ssl_keyfile=str(key_file),
+        )
+
+        with pytest.raises(ValueError, match="Both 'certfile' and 'keyfile'"):
+            server._setup_ssl()
+
     @pytest.mark.asyncio
     async def test_ssl_server_starts_and_accepts_connections(self):
         """Test that the server can start with SSL and accept HTTPS connections."""
+        import aiohttp
+
         processor = MockFrameProcessor()
         server = StreamServer(
             frame_processor=processor,
@@ -776,11 +810,21 @@ class TestSSLConfiguration:
 
         runner = await server.start_server()
         try:
-            # The server should be running on an HTTPS port
             assert runner is not None
-            # Verify SSL context was created
-            ctx = server._setup_ssl()
-            assert ctx is not None
+            assert server.port != 0, "Server should have an assigned port"
+
+            # Make an actual HTTPS request; disable cert verification for the
+            # self-signed certificate used in tests.
+            ssl_ctx = ssl.create_default_context()
+            ssl_ctx.check_hostname = False
+            ssl_ctx.verify_mode = ssl.CERT_NONE
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"https://127.0.0.1:{server.port}/health",
+                    ssl=ssl_ctx,
+                ) as resp:
+                    assert resp.status == 200
         finally:
             await server.stop()
             await runner.cleanup()

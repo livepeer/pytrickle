@@ -810,7 +810,12 @@ class StreamServer:
         ssl_context = self._setup_ssl()
         site = web.TCPSite(runner, self.host, self.port, ssl_context=ssl_context)
         await site.start()
-        
+
+        # Update self.port to the actual bound port (important for port=0).
+        addresses = runner.addresses
+        if addresses:
+            self.port = addresses[0][1]
+
         self._start_pipeline_initialization()
 
         scheme = "https" if ssl_context else "http"
