@@ -7,7 +7,6 @@ Focuses on testing state changes and API contracts.
 
 import os
 import ssl
-import subprocess
 
 import pytest
 import pytest_asyncio
@@ -19,7 +18,7 @@ from pytrickle.server import StreamServer
 from pytrickle.test_utils import MockFrameProcessor, create_mock_client
 from pytrickle.client import TrickleClient
 from pytrickle.protocol import TrickleProtocol
-from pytrickle.utils import ssl as ssl_utils
+from pytrickle.utils.ssl import _generate_self_signed_cert_cryptography
 
 def get_stream_route(server, endpoint):
     """Get the full route path for a streaming endpoint."""
@@ -705,36 +704,31 @@ class TestSSLConfiguration:
         assert ctx is not None
         assert isinstance(ctx, ssl.SSLContext)
 
-    def test_ssl_enabled_with_provided_certs(self, tmp_path):
+    def test_ssl_enabled_with_provided_certs(self):
         """Test that SSL loads provided certificate files."""
-        # Create dummy cert/key files
-        cert_file = tmp_path / "cert.pem"
-        key_file = tmp_path / "key.pem"
+        # Generate cert/key using the same cryptography-based path as production
+        # to keep the test portable (no openssl CLI dependency).
+        cert_path, key_path = _generate_self_signed_cert_cryptography()
 
-        # Generate a real self-signed cert using openssl for the test
-        import subprocess
-        subprocess.run(
-            [
-                "openssl", "req", "-x509", "-newkey", "rsa:2048",
-                "-keyout", str(key_file), "-out", str(cert_file),
-                "-days", "1", "-nodes", "-subj", "/CN=test",
-            ],
-            check=True,
-            capture_output=True,
-        )
+        try:
+            processor = MockFrameProcessor()
+            server = StreamServer(
+                frame_processor=processor,
+                port=0,
+                ssl=True,
+                ssl_certfile=cert_path,
+                ssl_keyfile=key_path,
+            )
 
-        processor = MockFrameProcessor()
-        server = StreamServer(
-            frame_processor=processor,
-            port=0,
-            ssl=True,
-            ssl_certfile=str(cert_file),
-            ssl_keyfile=str(key_file),
-        )
-
-        ctx = server._setup_ssl()
-        assert ctx is not None
-        assert isinstance(ctx, ssl.SSLContext)
+            ctx = server._setup_ssl()
+            assert ctx is not None
+            assert isinstance(ctx, ssl.SSLContext)
+        finally:
+            for p in (cert_path, key_path):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
 
     def test_ssl_missing_cert_file_raises(self, tmp_path):
         """Test that missing cert file raises FileNotFoundError."""
