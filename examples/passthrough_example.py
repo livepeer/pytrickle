@@ -137,6 +137,12 @@ async def main() -> None:
         handlers,
         name="passthrough-example",
         port=8000,
+        # To enable HTTPS with an auto-generated self-signed certificate:
+        # ssl=True,
+        # Or provide your own certificate files:
+        # ssl=True,
+        # ssl_certfile="/path/to/cert.pem",
+        # ssl_keyfile="/path/to/key.pem",
     )
     
     logger.info("Send video to: http://localhost:8000/stream")

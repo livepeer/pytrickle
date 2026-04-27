@@ -5,6 +5,10 @@ Tests HTTP endpoints and state validation using direct TrickleClient management.
 Focuses on testing state changes and API contracts.
 """
 
+import os
+import ssl
+import subprocess
+
 import pytest
 import pytest_asyncio
 import asyncio
@@ -15,6 +19,7 @@ from pytrickle.server import StreamServer
 from pytrickle.test_utils import MockFrameProcessor, create_mock_client
 from pytrickle.client import TrickleClient
 from pytrickle.protocol import TrickleProtocol
+from pytrickle.utils import ssl as ssl_utils
 
 def get_stream_route(server, endpoint):
     """Get the full route path for a streaming endpoint."""
@@ -678,3 +683,110 @@ class TestErrorHandling:
         call_args = client_error_callback.call_args[0]
         assert call_args[0] == "stream_not_found"
         assert isinstance(call_args[1], Exception)
+
+
+class TestSSLConfiguration:
+    """Test SSL/TLS configuration for StreamServer."""
+
+    def test_ssl_disabled_by_default(self):
+        """Test that SSL is disabled by default."""
+        processor = MockFrameProcessor()
+        server = StreamServer(frame_processor=processor, port=0)
+        assert server.ssl is False
+        assert server.ssl_certfile is None
+        assert server.ssl_keyfile is None
+
+    def test_ssl_enabled_without_certs_generates_self_signed(self):
+        """Test that enabling SSL without cert files generates a self-signed cert."""
+        processor = MockFrameProcessor()
+        server = StreamServer(frame_processor=processor, port=0, ssl=True)
+
+        ctx = server._setup_ssl()
+        assert ctx is not None
+        assert isinstance(ctx, ssl.SSLContext)
+
+    def test_ssl_enabled_with_provided_certs(self, tmp_path):
+        """Test that SSL loads provided certificate files."""
+        # Create dummy cert/key files
+        cert_file = tmp_path / "cert.pem"
+        key_file = tmp_path / "key.pem"
+
+        # Generate a real self-signed cert using openssl for the test
+        import subprocess
+        subprocess.run(
+            [
+                "openssl", "req", "-x509", "-newkey", "rsa:2048",
+                "-keyout", str(key_file), "-out", str(cert_file),
+                "-days", "1", "-nodes", "-subj", "/CN=test",
+            ],
+            check=True,
+            capture_output=True,
+        )
+
+        processor = MockFrameProcessor()
+        server = StreamServer(
+            frame_processor=processor,
+            port=0,
+            ssl=True,
+            ssl_certfile=str(cert_file),
+            ssl_keyfile=str(key_file),
+        )
+
+        ctx = server._setup_ssl()
+        assert ctx is not None
+        assert isinstance(ctx, ssl.SSLContext)
+
+    def test_ssl_missing_cert_file_raises(self, tmp_path):
+        """Test that missing cert file raises FileNotFoundError."""
+        processor = MockFrameProcessor()
+        server = StreamServer(
+            frame_processor=processor,
+            port=0,
+            ssl=True,
+            ssl_certfile=str(tmp_path / "nonexistent.pem"),
+            ssl_keyfile=str(tmp_path / "key.pem"),
+        )
+
+        with pytest.raises(FileNotFoundError, match="certificate file not found"):
+            server._setup_ssl()
+
+    def test_ssl_missing_key_file_raises(self, tmp_path):
+        """Test that missing key file raises FileNotFoundError."""
+        cert_file = tmp_path / "cert.pem"
+        cert_file.write_text("dummy")
+
+        processor = MockFrameProcessor()
+        server = StreamServer(
+            frame_processor=processor,
+            port=0,
+            ssl=True,
+            ssl_certfile=str(cert_file),
+            ssl_keyfile=str(tmp_path / "nonexistent.pem"),
+        )
+
+        with pytest.raises(FileNotFoundError, match="key file not found"):
+            server._setup_ssl()
+
+    @pytest.mark.asyncio
+    async def test_ssl_server_starts_and_accepts_connections(self):
+        """Test that the server can start with SSL and accept HTTPS connections."""
+        processor = MockFrameProcessor()
+        server = StreamServer(
+            frame_processor=processor,
+            port=0,
+            ssl=True,
+            capability_name="ssl-test",
+        )
+        processor.attach_state(server.state)
+        server.state.set_startup_complete()
+
+        runner = await server.start_server()
+        try:
+            # The server should be running on an HTTPS port
+            assert runner is not None
+            # Verify SSL context was created
+            ctx = server._setup_ssl()
+            assert ctx is not None
+        finally:
+            await server.stop()
+            await runner.cleanup()

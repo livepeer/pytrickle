@@ -42,6 +42,9 @@ class StreamProcessor:
         frame_skip_config: Optional[FrameSkipConfig] = None,
         overlay_config: Optional[OverlayConfig] = None,
         validate_signature: bool = True,
+        ssl: bool = False,
+        ssl_certfile: Optional[str] = None,
+        ssl_keyfile: Optional[str] = None,
         **server_kwargs
     ):
         """Construct a StreamProcessor by discovering handlers on *handler_instance*."""
@@ -81,6 +84,9 @@ class StreamProcessor:
             frame_skip_config=frame_skip_config,
             overlay_config=overlay_config,
             validate_signature=validate_signature,
+            ssl=ssl,
+            ssl_certfile=ssl_certfile,
+            ssl_keyfile=ssl_keyfile,
             **server_kwargs
         )
 
