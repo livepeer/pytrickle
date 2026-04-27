@@ -5,6 +5,9 @@ Tests HTTP endpoints and state validation using direct TrickleClient management.
 Focuses on testing state changes and API contracts.
 """
 
+import os
+import ssl
+
 import pytest
 import pytest_asyncio
 import asyncio
@@ -15,6 +18,7 @@ from pytrickle.server import StreamServer
 from pytrickle.test_utils import MockFrameProcessor, create_mock_client
 from pytrickle.client import TrickleClient
 from pytrickle.protocol import TrickleProtocol
+from pytrickle.utils.ssl import _generate_self_signed_cert_cryptography
 
 def get_stream_route(server, endpoint):
     """Get the full route path for a streaming endpoint."""
@@ -678,3 +682,149 @@ class TestErrorHandling:
         call_args = client_error_callback.call_args[0]
         assert call_args[0] == "stream_not_found"
         assert isinstance(call_args[1], Exception)
+
+
+class TestSSLConfiguration:
+    """Test SSL/TLS configuration for StreamServer."""
+
+    def test_ssl_disabled_by_default(self):
+        """Test that SSL is disabled by default."""
+        processor = MockFrameProcessor()
+        server = StreamServer(frame_processor=processor, port=0)
+        assert server.ssl is False
+        assert server.ssl_certfile is None
+        assert server.ssl_keyfile is None
+
+    def test_ssl_enabled_without_certs_generates_self_signed(self):
+        """Test that enabling SSL without cert files generates a self-signed cert."""
+        processor = MockFrameProcessor()
+        server = StreamServer(frame_processor=processor, port=0, ssl=True)
+
+        ctx = server._setup_ssl()
+        assert ctx is not None
+        assert isinstance(ctx, ssl.SSLContext)
+
+    def test_ssl_enabled_with_provided_certs(self):
+        """Test that SSL loads provided certificate files."""
+        # Generate cert/key using the same cryptography-based path as production
+        # to keep the test portable (no openssl CLI dependency).
+        cert_path, key_path = _generate_self_signed_cert_cryptography()
+
+        try:
+            processor = MockFrameProcessor()
+            server = StreamServer(
+                frame_processor=processor,
+                port=0,
+                ssl=True,
+                ssl_certfile=cert_path,
+                ssl_keyfile=key_path,
+            )
+
+            ctx = server._setup_ssl()
+            assert ctx is not None
+            assert isinstance(ctx, ssl.SSLContext)
+        finally:
+            for p in (cert_path, key_path):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+
+    def test_ssl_missing_cert_file_raises(self, tmp_path):
+        """Test that missing cert file raises FileNotFoundError."""
+        processor = MockFrameProcessor()
+        server = StreamServer(
+            frame_processor=processor,
+            port=0,
+            ssl=True,
+            ssl_certfile=str(tmp_path / "nonexistent.pem"),
+            ssl_keyfile=str(tmp_path / "key.pem"),
+        )
+
+        with pytest.raises(FileNotFoundError, match="certificate file not found"):
+            server._setup_ssl()
+
+    def test_ssl_missing_key_file_raises(self, tmp_path):
+        """Test that missing key file raises FileNotFoundError."""
+        cert_file = tmp_path / "cert.pem"
+        cert_file.write_text("dummy")
+
+        processor = MockFrameProcessor()
+        server = StreamServer(
+            frame_processor=processor,
+            port=0,
+            ssl=True,
+            ssl_certfile=str(cert_file),
+            ssl_keyfile=str(tmp_path / "nonexistent.pem"),
+        )
+
+        with pytest.raises(FileNotFoundError, match="key file not found"):
+            server._setup_ssl()
+
+    def test_ssl_only_certfile_raises_value_error(self, tmp_path):
+        """Test that providing only certfile (without keyfile) raises ValueError."""
+        cert_file = tmp_path / "cert.pem"
+        cert_file.write_text("dummy")
+
+        processor = MockFrameProcessor()
+        server = StreamServer(
+            frame_processor=processor,
+            port=0,
+            ssl=True,
+            ssl_certfile=str(cert_file),
+        )
+
+        with pytest.raises(ValueError, match="Both 'certfile' and 'keyfile'"):
+            server._setup_ssl()
+
+    def test_ssl_only_keyfile_raises_value_error(self, tmp_path):
+        """Test that providing only keyfile (without certfile) raises ValueError."""
+        key_file = tmp_path / "key.pem"
+        key_file.write_text("dummy")
+
+        processor = MockFrameProcessor()
+        server = StreamServer(
+            frame_processor=processor,
+            port=0,
+            ssl=True,
+            ssl_keyfile=str(key_file),
+        )
+
+        with pytest.raises(ValueError, match="Both 'certfile' and 'keyfile'"):
+            server._setup_ssl()
+
+    @pytest.mark.asyncio
+    async def test_ssl_server_starts_and_accepts_connections(self):
+        """Test that the server can start with SSL and accept HTTPS connections."""
+        import aiohttp
+
+        processor = MockFrameProcessor()
+        server = StreamServer(
+            frame_processor=processor,
+            port=0,
+            ssl=True,
+            capability_name="ssl-test",
+        )
+        processor.attach_state(server.state)
+        server.state.set_startup_complete()
+
+        runner = await server.start_server()
+        try:
+            assert runner is not None
+            assert server.port != 0, "Server should have an assigned port"
+
+            # Make an actual HTTPS request; disable cert verification for the
+            # self-signed certificate used in tests.
+            ssl_ctx = ssl.create_default_context()
+            ssl_ctx.check_hostname = False
+            ssl_ctx.verify_mode = ssl.CERT_NONE
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"https://127.0.0.1:{server.port}/health",
+                    ssl=ssl_ctx,
+                ) as resp:
+                    assert resp.status == 200
+        finally:
+            await server.stop()
+            await runner.cleanup()

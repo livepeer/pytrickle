@@ -7,14 +7,16 @@ starting streams, updating parameters, and monitoring status.
 
 import asyncio
 import logging
-import time
-from typing import Optional, Dict, Any, Callable, Union, List
-from dataclasses import dataclass
 import os
+import ssl
+import time
 import uuid
+from dataclasses import dataclass
+from typing import Optional, Dict, Any, Callable, Union, List
 
 from aiohttp import web
 from .version import __version__
+from .utils.ssl import setup_ssl_context
 
 from .api import StreamParamsUpdateRequest, StreamStartRequest, Version, HardwareInformation, HardwareStats
 from .state import StreamState, PipelineState
@@ -67,6 +69,10 @@ class StreamServer:
         frame_skip_config: Optional[FrameSkipConfig] = None,
         # Loading overlay configuration
         overlay_config: Optional['OverlayConfig'] = None,
+        # SSL configuration
+        ssl: bool = False,
+        ssl_certfile: Optional[str] = None,
+        ssl_keyfile: Optional[str] = None,
 
     ):
         """Initialize StreamServer.
@@ -89,6 +95,9 @@ class StreamServer:
             on_shutdown: List of shutdown handlers
             app_kwargs: Additional kwargs for aiohttp.web.Application
             frame_skip_config: Optional frame skipping configuration (None = no frame skipping)
+            ssl: Enable HTTPS. When True with no cert/key files, a self-signed certificate is auto-generated.
+            ssl_certfile: Path to SSL certificate file (PEM format). Required if ssl=True and you want to use your own cert.
+            ssl_keyfile: Path to SSL private key file (PEM format). Required if ssl_certfile is provided.
         """
         self.frame_processor = frame_processor
         self.port = port
@@ -98,6 +107,11 @@ class StreamServer:
         self.enable_default_routes = enable_default_routes
         self.health_check_interval = health_check_interval
         self._startup_task: Optional[asyncio.Task] = None
+        
+        # SSL configuration
+        self.ssl = ssl
+        self.ssl_certfile = ssl_certfile
+        self.ssl_keyfile = ssl_keyfile
         
         if isinstance(self.frame_processor, FrameProcessor):
             try:
@@ -777,17 +791,35 @@ class StreamServer:
                 pass
             self._startup_task = None
     
+    def _setup_ssl(self) -> Optional[ssl.SSLContext]:
+        """Create and return an SSL context for the server.
+
+        Delegates to :func:`pytrickle.utils.ssl.setup_ssl_context`.
+        """
+        return setup_ssl_context(
+            enabled=self.ssl,
+            certfile=self.ssl_certfile,
+            keyfile=self.ssl_keyfile,
+        )
+
     async def start_server(self):
         """Start the HTTP server."""
         runner = web.AppRunner(self.app)
         await runner.setup()
-        
-        site = web.TCPSite(runner, self.host, self.port)
+
+        ssl_context = self._setup_ssl()
+        site = web.TCPSite(runner, self.host, self.port, ssl_context=ssl_context)
         await site.start()
-        
+
+        # Update self.port to the actual bound port (important for port=0).
+        addresses = runner.addresses
+        if addresses:
+            self.port = addresses[0][1]
+
         self._start_pipeline_initialization()
 
-        logger.info(f"Server started on {self.host}:{self.port}")
+        scheme = "https" if ssl_context else "http"
+        logger.info(f"Server started on {scheme}://{self.host}:{self.port}")
         return runner
 
     # Built-in State Management API
