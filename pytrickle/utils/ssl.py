@@ -51,17 +51,24 @@ def setup_ssl_context(
         logger.info("Loaded SSL certificate from %s", certfile)
     else:
         cert_path, key_path = generate_self_signed_cert()
+        cert_dir = os.path.dirname(cert_path)
+        key_dir = os.path.dirname(key_path)
         try:
             ctx.load_cert_chain(cert_path, key_path)
             logger.info("Using auto-generated self-signed SSL certificate")
         finally:
-            # Clean up temporary cert files
-            try:
-                os.remove(cert_path)
-                os.remove(key_path)
-            except OSError:
-                pass
+            # Clean up temporary cert files and the temporary directory
+            for path in (cert_path, key_path):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
 
+            if cert_dir and cert_dir == key_dir:
+                try:
+                    os.rmdir(cert_dir)
+                except OSError:
+                    pass
     return ctx
 
 
